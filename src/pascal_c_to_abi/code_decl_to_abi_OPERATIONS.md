@@ -1,91 +1,98 @@
-# code_decl_to_abi 操作级知识库 v3.0
+# code_decl_to_abi Operations Knowledge Base v3.0
 
-> **定位**：面向 AI 与人类工程师的**施工级**参考。**读完即可改代码、修 bug、加语言、写工具、接 MCP**。
-> **v3.0 相对 v2.0 的核心新增**：
-> - **三层入口**：CLI / GUI / MCP（v2.0 只覆盖 GUI）
-> - **命令行接口**：`code_decl_to_abi_cmdline.pas` 完整契约
-> - **MCP / Agent 接口**：`code_decl_to_abi_mcp_api_tool_provider_unit.pas` 的 21 个工具
-> - **README 系统**：每个生成器现在同时产出代码 + Markdown 知识库（用于喂智能体）
-> - **主程序入口升级**：`code_decl_to_abi.lpr` 现在带命令行分派
-> **制图约定**：全文使用 Mermaid。
-> **承诺**：所有描述均基于你提供的源码逐行核对。无法确定的内容在「材料未覆盖清单」中明示。
-
----
-
-## 目录
-
-- [第 1 章 阅读指南](#第-1-章-阅读指南)
-- [第 2 章 系统总览：三层入口](#第-2-章-系统总览三层入口)
-- [第 3 章 编译与构建约定](#第-3-章-编译与构建约定)
-- [第 4 章 核心数据契约：tfunc_decl / tfunc_param_decl](#第-4-章-核心数据契约)
-- [第 5 章 中间模型契约：TFunctionStructure / TParamStructure](#第-5-章-中间模型契约)
-- [第 6 章 解析器内部逻辑](#第-6-章-解析器内部逻辑)
-- [第 7 章 生成器内部逻辑](#第-7-章-生成器内部逻辑)
-- [第 8 章 README 系统（生成目标的知识库）](#第-8-章-readme-系统)
-- [第 9 章 命令行接口（CLI）](#第-9-章-命令行接口cli)
-- [第 10 章 MCP / Agent 接口（21 个工具）](#第-10-章-mcp--agent-接口)
-- [第 11 章 GUI 窗体操作手册](#第-11-章-gui-窗体操作手册)
-- [第 12 章 LingoFuse 集成细节](#第-12-章-lingofuse-集成细节)
-- [第 13 章 已知 bug 清单 + 修法](#第-13-章-已知-bug-清单--修法)
-- [第 14 章 新增目标语言的完整改动清单](#第-14-章-新增目标语言的完整改动清单)
-- [第 15 章 新增源语言的完整改动清单](#第-15-章-新增源语言的完整改动清单)
-- [第 16 章 调试与排错手册](#第-16-章-调试与排错手册)
-- [第 17 章 回归测试入口](#第-17-章-回归测试入口)
-- [第 18 章 材料未覆盖清单](#第-18-章-材料未覆盖清单)
-- [第 19 章 给 AI 的作业规则](#第-19-章-给-ai-的作业规则)
+> **Purpose**: A **construction-grade** reference for AI and human engineers. **After reading this, you can modify code, fix bugs, add languages, write tools, and integrate with MCP.**
+>
+> **What's new in v3.0 vs v2.0**:
+> - **Three entry points**: CLI / GUI / MCP (v2.0 only covered GUI)
+> - **Command-line interface**: full contract for `code_decl_to_abi_cmdline.pas`
+> - **MCP / Agent interface**: 21 tools exposed by `code_decl_to_abi_mcp_api_tool_provider_unit.pas`
+> - **README system**: each generator now emits both code and a Markdown knowledge base (for AI agents to consume)
+> - **Main program upgraded**: `code_decl_to_abi.lpr` now dispatches between CLI and GUI
+>
+> **Current status**: **3 target languages** (Pascal, Python, C++), each with **service-side** and **call-side** code generation, plus paired Markdown READMEs.
+>
+> **Roadmap**: The generator backend is designed to support **an unbounded number of target languages**. Adding a new language is a **mechanical 7-step process** (see Chapter 14). The system is intentionally open-ended: any language with a C-ABI-compatible FFI, a JSON library, and a runtime model that can speak LingoFuse's wire protocol is a candidate.
+>
+> **Diagram convention**: Mermaid is used throughout; no ASCII-art diagrams.
+>
+> **Promise**: Every statement is line-by-line verified against the source you provided. Anything I cannot determine is called out explicitly in the "Not Covered by the Material" chapter.
 
 ---
 
-## 第 1 章 阅读指南
+## Table of Contents
 
-### 1.1 这份文档能让你做什么
-
-| 任务 | 是否覆盖 | 在哪一章 |
-|------|:--------:|----------|
-| 编译整个项目 | ✅ | 第 3 章 |
-| 修改 `tfunc_decl` 字段 | ✅ | 第 4 章 |
-| 修改解析器行为 | ✅ | 第 6 章 |
-| 修改生成器输出 | ✅ | 第 7 章 |
-| **修改 / 新增 README** | ✅ | **第 8 章（新）** |
-| **修改 CLI 参数** | ✅ | **第 9 章（新）** |
-| **修改 / 新增 MCP 工具** | ✅ | **第 10 章（新）** |
-| 修改 GUI 控件 | ✅ | 第 11 章 |
-| 修改 LingoFuse 集成 | ✅ | 第 12 章 |
-| 修已知 bug | ✅ | 第 13 章 |
-| **新增目标语言** | ✅ | **第 14 章** |
-| **新增源语言** | ✅ | **第 15 章** |
-| 调试一个具体错误 | ✅ | 第 16 章 |
-| 跑回归测试 | ✅ | 第 17 章 |
-
-### 1.2 读完本文件的 AI 应该具备的能力
-
-1. 看到"给 C++ 生成器加一个新类型 `bool`"，能立刻定位到 3 处映射表并改。
-2. 看到"新增 Go 作为目标语言"，能按第 14 章的清单**逐一改动**。
-3. 看到"让 CLI 支持 `.rs` 后缀"，能按第 9 章改 `Detect_Target_Lang`。
-4. 看到"给 agent 加一个新工具"，能按第 10 章改 `code_decl_to_abi_mcp_api_tool_provider_unit.pas`。
-5. 看到"生成的 README 少了某一节"，能按第 8 章定位到具体的 `Emit*` 过程。
+- [Chapter 1  Reading Guide](#chapter-1-reading-guide)
+- [Chapter 2  System Overview: Three Entry Points](#chapter-2-system-overview-three-entry-points)
+- [Chapter 3  Build and Compilation Conventions](#chapter-3-build-and-compilation-conventions)
+- [Chapter 4  Core Data Contracts: tfunc_decl / tfunc_param_decl](#chapter-4-core-data-contracts)
+- [Chapter 5  Intermediate Model Contracts: TFunctionStructure / TParamStructure](#chapter-5-intermediate-model-contracts)
+- [Chapter 6  Parser Internals](#chapter-6-parser-internals)
+- [Chapter 7  Generator Internals](#chapter-7-generator-internals)
+- [Chapter 8  README System (a knowledge base for the generated target)](#chapter-8-readme-system)
+- [Chapter 9  Command-Line Interface (CLI)](#chapter-9-command-line-interface-cli)
+- [Chapter 10 MCP / Agent Interface (21 Tools)](#chapter-10-mcp--agent-interface)
+- [Chapter 11 GUI Form Operations Manual](#chapter-11-gui-form-operations-manual)
+- [Chapter 12 LingoFuse Integration Details](#chapter-12-lingofuse-integration-details)
+- [Chapter 13 Known Bug List + Fixes](#chapter-13-known-bug-list--fixes)
+- [Chapter 14 Full Change List for Adding a Target Language](#chapter-14-full-change-list-for-adding-a-target-language)
+- [Chapter 15 Full Change List for Adding a Source Language](#chapter-15-full-change-list-for-adding-a-source-language)
+- [Chapter 16 Debugging and Troubleshooting Manual](#chapter-16-debugging-and-troubleshooting-manual)
+- [Chapter 17 Regression Test Entry Points](#chapter-17-regression-test-entry-points)
+- [Chapter 18 Not Covered by the Material](#chapter-18-not-covered-by-the-material)
+- [Chapter 19 Operating Rules for AI](#chapter-19-operating-rules-for-ai)
 
 ---
 
-## 第 2 章 系统总览：三层入口
+## Chapter 1  Reading Guide
 
-### 2.1 三层入口
+### 1.1 What This Document Lets You Do
 
-`code_decl_to_abi` 有**三个独立的前端**，共享同一个生成器后端：
+| Task | Covered | Where |
+|------|:-------:|-------|
+| Build the whole project | ✅ | Chapter 3 |
+| Modify `tfunc_decl` fields | ✅ | Chapter 4 |
+| Modify parser behavior | ✅ | Chapter 6 |
+| Modify generator output | ✅ | Chapter 7 |
+| **Modify / add a README** | ✅ | **Chapter 8 (new)** |
+| **Modify CLI arguments** | ✅ | **Chapter 9 (new)** |
+| **Modify / add an MCP tool** | ✅ | **Chapter 10 (new)** |
+| Modify GUI controls | ✅ | Chapter 11 |
+| Modify LingoFuse integration | ✅ | Chapter 12 |
+| Fix a known bug | ✅ | Chapter 13 |
+| **Add a new target language** | ✅ | **Chapter 14** |
+| **Add a new source language** | ✅ | **Chapter 15** |
+| Debug a specific error | ✅ | Chapter 16 |
+| Run regression tests | ✅ | Chapter 17 |
+
+### 1.2 What an AI Should Be Able to Do After Reading This
+
+1. See "add a `bool` type to the C++ generator" and immediately locate the **3 mapping tables** to modify.
+2. See "add Go as a target language" and follow Chapter 14's checklist **item by item**.
+3. See "make the CLI accept `.rs`" and modify `Detect_Target_Lang` as described in Chapter 9.
+4. See "add a new tool for the agent" and modify `code_decl_to_abi_mcp_api_tool_provider_unit.pas` as described in Chapter 10.
+5. See "the generated README is missing a section" and locate the exact `Emit*` routine from Chapter 8.
+
+---
+
+## Chapter 2  System Overview: Three Entry Points
+
+### 2.1 The Three Frontends
+
+`code_decl_to_abi` has **three independent frontends** sharing one generator backend:
 
 ```mermaid
 flowchart TD
-    subgraph Front["三层入口（三选一）"]
+    subgraph Front["Three entry points (pick one)"]
         CLI["CLI<br/>code_decl_to_abi_cmdline.pas"]
         GUI["GUI<br/>code_decl_to_abi_frm.pas"]
         MCP["MCP<br/>code_decl_to_abi_mcp_api_tool_provider_unit.pas"]
     end
 
-    subgraph Mid["中间层"]
+    subgraph Mid["Middle layer"]
         Parser["tpascal_func_decl_tool<br/>+ TPascal_Func_Model"]
     end
 
-    subgraph Back["生成器后端（6 对 + C++ 额外 hpp/cpp）"]
+    subgraph Back["Generator backend (6 pairs + C++ extra hpp/cpp)"]
         B1["GenerateABIServicePascalCode / Readme"]
         B2["GenerateABICallPascalCode / Readme"]
         B3["GenerateABIServicePyCode / Readme"]
@@ -110,19 +117,19 @@ flowchart TD
     style Back fill:#e8ffe8,stroke:#444
 ```
 
-**关键事实**：
+**Key facts**:
 
-| 入口 | 谁调用 | 是否走 GUI | 是否走 LingoFuse | 是否产文件 |
-|------|--------|-----------|------------------|-----------|
-| CLI | 命令行用户 | ❌ | ❌ | ✅ |
-| GUI | 桌面用户 | ✅ | ✅（服务端 + 工具注册） | ✅ |
-| MCP | 智能体 | ✅（通过 `TCompute.Sync`） | ✅（作为工具提供者） | ✅ |
+| Entry | Who calls it | Goes through GUI? | Goes through LingoFuse? | Writes files? |
+|-------|--------------|:-----------------:|:-----------------------:|:-------------:|
+| CLI | Command-line users | ❌ | ❌ | ✅ |
+| GUI | Desktop users | ✅ | ✅ (service + tool registration) | ✅ |
+| MCP | AI agents | ✅ (via `TCompute.Sync`) | ✅ (as a tool provider) | ✅ |
 
-**MCP 走 GUI 的原因**：MCP 接口的 `internal_call_*` 内部用 `TCompute.Sync` 把操作派发到主线程，然后调用 `code_decl_to_abi_frm.pas` 里已经存在的按钮事件处理函数。**这样所有 GUI 逻辑不需要复制**。
+**Why MCP goes through GUI**: `internal_call_*` uses `TCompute.Sync` to dispatch to the main thread and calls the already-existing button event handlers in `code_decl_to_abi_frm.pas`. **This way, none of the GUI logic has to be duplicated.**
 
-### 2.2 主程序入口分派
+### 2.2 Main Program Entry Dispatch
 
-`code_decl_to_abi.lpr` 的启动顺序：
+Startup order in `code_decl_to_abi.lpr`:
 
 ```pascal
 begin
@@ -145,12 +152,12 @@ begin
 end;
 ```
 
-**逻辑**：
-1. `Process_CommandLine` 返回 True（无参数）→ 继续走 GUI。
-2. `Process_CommandLine` 返回 False（已处理 CLI）→ `exit`，把 `CommandLine_ExitCode` 作为退出码。
-3. `finally` 里 `LF_Shutdown()` 保证退出前释放 LingoFuse。
+**Logic**:
+1. `Process_CommandLine` returns True (no arguments) → continue to GUI.
+2. `Process_CommandLine` returns False (CLI handled) → `exit`, using `CommandLine_ExitCode` as the process exit code.
+3. `finally` calls `LF_Shutdown()` to release LingoFuse on every path.
 
-**`uses` 列表**（v3.0）：
+**`uses` list** (v3.0):
 
 ```pascal
 uses
@@ -169,24 +176,26 @@ uses
   code_decl_to_abi_cmdline;
 ```
 
+**Roadmap note**: The backend is **explicitly designed for unbounded extension**. Adding `rust_abi_service_generator_tool` and `rust_abi_call_generator_tool` (see Chapter 14) would just be two more lines in this `uses` clause; the same pattern applies to any future language.
+
 ---
 
-## 第 3 章 编译与构建约定
+## Chapter 3  Build and Compilation Conventions
 
-### 3.1 编译器要求
+### 3.1 Compiler Requirements
 
-| 项目 | 要求 | 依据 |
-|------|------|------|
-| 编译器 | FPC 3.2+ 或 Delphi 10.4+ | `{$DEFINE FPC_DELPHI_MODE}` |
-| 模式 | Delphi 模式（`{$mode delphi}`） | `code_decl_to_abi.lpr` |
-| 字符集 | UTF-8（`{$CODEPAGE UTF8}`） | 各单元头部 |
-| 平台 | Windows / Linux / macOS | 依赖 `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib` |
+| Item | Requirement | Basis |
+|------|-------------|-------|
+| Compiler | FPC 3.2+ or Delphi 10.4+ | `{$DEFINE FPC_DELPHI_MODE}` |
+| Mode | Delphi mode (`{$mode delphi}`) | `code_decl_to_abi.lpr` |
+| Charset | UTF-8 (`{$CODEPAGE UTF8}`) | Every unit header |
+| Platform | Windows / Linux / macOS | Depends on `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib` |
 
-### 3.2 路径约定（**极易踩坑**）
+### 3.2 Path Conventions (**Easy to Trip Over**)
 
-各单元的 `{$I}` 路径**不一致**，改代码时必须保持：
+Each unit's `{$I}` path is **inconsistent**; keep them as-is when editing:
 
-| 单元 | `{$I}` 路径 |
+| Unit | `{$I}` path |
 |------|-------------|
 | `Z.Pascal_Func_Model.pas` | `{$I ..\Z.Define.inc}` |
 | `pas_abi_service_generator_tool.pas` | `{$I ..\..\..\Z.Define.inc}` |
@@ -196,63 +205,63 @@ uses
 | `cpp_abi_service_generator_tool.pas` | `{$I ..\..\..\Z.Define.inc}` |
 | `cpp_abi_call_generator_tool.pas` | `{$I ..\..\..\Z.Define.inc}` |
 | `code_decl_to_abi_frm.pas` | `{$I ..\..\..\Z.Define.inc}` |
-| **`code_decl_to_abi_mcp_api_tool_provider_unit.pas`** | **`{$ifdef FPC} ... {$endif}` 无 `{$I}`** |
-| **`code_decl_to_abi_cmdline.pas`** | **无 `{$I}`（用 `uses` 引入 Z 单元）** |
+| **`code_decl_to_abi_mcp_api_tool_provider_unit.pas`** | **`{$ifdef FPC} ... {$endif}`, no `{$I}`** |
+| **`code_decl_to_abi_cmdline.pas`** | **No `{$I}` (uses `uses` to pull in Z units)** |
 
-**新增单元时**：如果单元直接使用 `Z.Define.inc` 的宏，**复制三层上级路径**；否则用 `uses`。
+**When adding a new unit**: if it directly uses macros from `Z.Define.inc`, **copy the three-level-up path**; otherwise use `uses` to pull in Z units.
 
-### 3.3 编译命令
+### 3.3 Build Command
 
 ```bash
 lazbuild -B code_decl_to_abi.lpi
 ```
 
-### 3.4 运行时依赖
+### 3.4 Runtime Dependencies
 
-| 依赖 | 位置 | 缺失后果 |
-|------|------|----------|
-| `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib` | exe 同目录或系统 PATH | `LF_*` 调用失败 |
-| `pascal_code_abi_rule.md` | exe 同目录 | `Open_pascal_rule_Button` 无效果 |
-| `C_code_abi_rule.md` | exe 同目录 | `Open_c_rule_Button` 无效果 |
+| Dependency | Location | Consequence if missing |
+|------------|----------|------------------------|
+| `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib` | exe directory or system PATH | All `LF_*` calls fail |
+| `pascal_code_abi_rule.md` | exe directory | `Open_pascal_rule_Button` does nothing |
+| `C_code_abi_rule.md` | exe directory | `Open_c_rule_Button` does nothing |
 
-### 3.5 新增单元时必须同步改动的 3 处
+### 3.5 Three Places You Must Register a New Unit
 
-新增一个生成器单元（如 `rust_abi_service_generator_tool.pas`）时：
+When adding a new generator unit (e.g. `rust_abi_service_generator_tool.pas`):
 
-1. **`code_decl_to_abi.lpr` 的 uses**：加入新单元名（保证 `initialization` 段执行）。
-2. **`code_decl_to_abi_frm.pas` 的 `implementation uses`**：加入新单元名（才能调用其函数）。
-3. **`code_decl_to_abi_mcp_api_tool_provider_unit.pas`**：如果新单元要暴露给 MCP，需要在 `RegisterAPIs` / `RegisterTools` / `internal_call_*` 里加分支。
+1. **`code_decl_to_abi.lpr` uses** — so its `initialization` section runs.
+2. **`code_decl_to_abi_frm.pas` `implementation uses`** — so its functions can be called.
+3. **`code_decl_to_abi_mcp_api_tool_provider_unit.pas`** — if the new unit should be exposed via MCP, add branches in `RegisterAPIs` / `RegisterTools` / `internal_call_*`.
 
 ---
 
-## 第 4 章 核心数据契约
+## Chapter 4  Core Data Contracts
 
-> 同 v2.0，本章完整保留。**新增单元不影响这些结构**。
+> Same as v2.0. **New units do not affect these structures.**
 
-### 4.1 `tfunc_param_decl`（参数记录）
+### 4.1 `tfunc_param_decl` (parameter record)
 
 ```pascal
 tfunc_param_decl = record
   param_mod: TP_String;      // '' / 'const' / 'var' / 'out' / 'in'
-  param_name: TP_String;     // 参数名
-  param_typ: TP_String;      // 类型
-  param_value: TP_String;    // 默认值
-  param_array: TP_String;    // 数组后缀：'' / '[]' / '[N]'
+  param_name: TP_String;     // parameter name
+  param_typ: TP_String;      // type
+  param_value: TP_String;    // default value
+  param_array: TP_String;    // array suffix: '' / '[]' / '[N]'
   procedure reset;
 end;
 ```
 
-**字段契约**：
+**Field contracts**:
 
-| 字段 | 语义 | 约束 | 下游影响 |
-|------|------|------|----------|
-| `param_mod` | 修饰符 | 只有 5 种取值 | `LoadFromParser` 拒绝 `var` / `out` |
-| `param_name` | 参数名 | **不能为空** | 空名 → 整条声明被跳过 |
-| `param_typ` | 类型 | 必须被 `Normalize_ABI_Type` 识别 | 否则整条声明被跳过 |
-| `param_value` | 默认值 | Pascal 独有 | `decl_to_pascal` 会渲染 |
-| `param_array` | 数组后缀 | C 独有 | `decl_to_pascal` 渲染为 `array of <type>` |
+| Field | Meaning | Constraint | Downstream effect |
+|-------|---------|-----------|-------------------|
+| `param_mod` | Modifier | Only 5 legal values | `LoadFromParser` rejects `var` / `out` |
+| `param_name` | Parameter name | **Must not be empty** | Empty name → whole declaration is dropped |
+| `param_typ` | Type | Must be recognized by `Normalize_ABI_Type` | Otherwise the whole declaration is dropped |
+| `param_value` | Default value | Pascal-only | Rendered by `decl_to_pascal` |
+| `param_array` | Array suffix | C-only | Rendered as `array of <type>` by `decl_to_pascal` |
 
-### 4.2 `tfunc_decl`（声明记录）
+### 4.2 `tfunc_decl` (declaration record)
 
 ```pascal
 tfunc_decl = record
@@ -266,15 +275,15 @@ tfunc_decl = record
 end;
 ```
 
-**关键陷阱**：
+**Key pitfalls**:
 
-| 陷阱 | 后果 |
-|------|------|
-| `IsProc` 默认 False | 忘设 True → 整条声明被跳过 |
-| `NestLevel` 默认 0 | 类内忘 +1 → 被误认为顶层 |
-| `Index` 默认 -1 | 添加时手动赋值 `i` |
+| Pitfall | Consequence |
+|---------|-------------|
+| `IsProc` defaults to False | Forget to set True → whole declaration is dropped |
+| `NestLevel` defaults to 0 | Forget to increment inside a class → mistaken for top-level |
+| `Index` defaults to -1 | Assign `i` manually when adding |
 
-### 4.3 `TFuncDeclList`（声明列表）
+### 4.3 `TFuncDeclList` (declaration list)
 
 ```pascal
 TFuncDeclList = class(TBigList<pfunc_decl>)
@@ -293,16 +302,16 @@ begin
 end;
 ```
 
-### 4.4 `tpascal_func_decl_tool`（解析工具）
+### 4.4 `tpascal_func_decl_tool` (parser tool)
 
-**关键事实**：
-- `Parser` 由工具拥有，析构时自动释放。
-- `FuncList` 只存储 `IsProc=True` 的条目。
-- `ParseSuccess`：Pascal 需要 `unit` + `interface` + `implementation` + `end.`；C 需要 `FuncCount > 0`。
+**Key facts**:
+- `Parser` is owned by the tool and freed automatically on destruction.
+- `FuncList` only stores entries with `IsProc=True`.
+- `ParseSuccess`: for Pascal, needs `unit` + `interface` + `implementation` + `end.`; for C, needs `FuncCount > 0`.
 
 ---
 
-## 第 5 章 中间模型契约
+## Chapter 5  Intermediate Model Contracts
 
 ### 5.1 `TParamStructure` / `TFunctionStructure`
 
@@ -323,76 +332,76 @@ TFunctionStructure = record
 end;
 ```
 
-### 5.2 `Normalize_ABI_Type` 映射表
+### 5.2 `Normalize_ABI_Type` Mapping Table
 
-**`tnf_ABI` 模式**：保留原始类型名的小写形式。
+**`tnf_ABI` mode**: preserve the lowercase form of the original type name.
 
-| 输入类型（小写） | 归一化结果 | 族 |
-|------------------|-----------|---|
-| `integer` / `int64` / `cardinal` / `longint` / `dword` | 同名 | 整数 |
-| `word` / `smallint` / `byte` / `uint64` / `longword` | 同名 | 整数 |
-| `double` / `single` / `extended` / `real` | 同名 | 浮点 |
-| `tpascalstring` / `tupascalstring` / `tp_string` / `string` / `ansistring` / `unicodestring` | 同名 | 字符串 |
-| `pchar` / `pansichar` / `pwidechar` | 同名 | 字符串 |
-| **其他** | `''` | 不支持 |
+| Input type (lowercase) | Normalized result | Family |
+|------------------------|-------------------|--------|
+| `integer` / `int64` / `cardinal` / `longint` / `dword` | same name | integer |
+| `word` / `smallint` / `byte` / `uint64` / `longword` | same name | integer |
+| `double` / `single` / `extended` / `real` | same name | float |
+| `tpascalstring` / `tupascalstring` / `tp_string` / `string` / `ansistring` / `unicodestring` | same name | string |
+| `pchar` / `pansichar` / `pwidechar` | same name | string |
+| **anything else** | `''` | unsupported |
 
-**`tnf_Json` 模式**：坍缩为 `'int64'` / `'double'` / `'string'`。
+**`tnf_Json` mode**: collapse to `'int64'` / `'double'` / `'string'`.
 
-### 5.3 `LoadFromParser` 的 6 个过滤条件
+### 5.3 The 6 Filters in `LoadFromParser`
 
 ```pascal
-// 过滤 1: IsProc = False
+// Filter 1: IsProc = False
 if not decl^.IsProc then Continue;
-// 过滤 2: NestLevel <> 0
+// Filter 2: NestLevel <> 0
 if decl^.NestLevel <> 0 then Continue;
-// 过滤 3: 空参数名
+// Filter 3: empty parameter name
 if paramDecl.param_name = '' then begin ok := False; Break; end;
-// 过滤 4: var/out 参数
+// Filter 4: var/out parameter
 if paramDecl.param_mod.Same('var', 'out') then begin ok := False; Break; end;
-// 过滤 5: 参数类型不支持
+// Filter 5: unsupported parameter type
 if normTyp = '' then begin ok := False; Break; end;
-// 过滤 6: 返回类型不支持（仅 function）
+// Filter 6: unsupported return type (function only)
 if f.ReturnType = '' then Continue;
 ```
 
-**任一触发都会静默跳过整条声明**。
+**Any triggered filter silently drops the whole declaration.**
 
 ---
 
-## 第 6 章 解析器内部逻辑
+## Chapter 6  Parser Internals
 
-### 6.1 `Fill_Pascal` 主循环
+### 6.1 `Fill_Pascal` Main Loop
 
 ```mermaid
 flowchart TD
-    A["Fill_Pascal 启动"] --> B["重置 FuncList / UsesList / UnitName"]
-    B --> C["主循环：遍历 Parser.Tokens"]
-    C --> D{"Token 类型？"}
-    D -- "unit" --> E["提取 UnitName"]
-    D -- "interface" --> F["标记 csIntf"]
-    D -- "implementation" --> G["标记 csImp"]
+    A["Fill_Pascal start"] --> B["Reset FuncList / UsesList / UnitName"]
+    B --> C["Main loop: walk Parser.Tokens"]
+    C --> D{"Token type?"}
+    D -- "unit" --> E["Extract UnitName"]
+    D -- "interface" --> F["Mark csIntf"]
+    D -- "implementation" --> G["Mark csImp"]
     D -- "uses" --> H["ProcessUsesClause"]
     D -- "function/procedure" --> I["ProcessProcDeclaration"]
     D -- "class/interface/record" --> J["NestLevel++"]
     D -- "end" --> K["NestLevel--"]
-    D -- "end." --> L["标记 csEndUnit"]
-    C --> M{"遍历结束？"}
-    M -- "否" --> D
-    M -- "是" --> N["ParseSuccess := UnitName<>'' and 全部 section 齐"]
+    D -- "end." --> L["Mark csEndUnit"]
+    C --> M{"Loop finished?"}
+    M -- "No" --> D
+    M -- "Yes" --> N["ParseSuccess := UnitName<>'' and all sections present"]
 ```
 
-### 6.2 `Fill_C` 主循环
+### 6.2 `Fill_C` Main Loop
 
-**关键步骤**（见 v2.0 详述）：
-1. 提取 `UnitName`（从 `.h` 文件名或 include guard）。
-2. 主循环跳过空白/注释/预处理指令。
-3. `{` 块：`ShouldSkipBlock` 决定跳过或透明。
-4. `;` 触发 `ProcessStatement`。
-5. `ProcessStatement` 拒绝：`=` 初始化、函数指针参数、无 `()`。
+**Key steps** (see v2.0 for details):
+1. Extract `UnitName` (from the `.h` filename or include guard).
+2. Main loop skips whitespace/comments/preprocessor directives.
+3. `{` blocks: `ShouldSkipBlock` decides skip vs pass-through.
+4. `;` triggers `ProcessStatement`.
+5. `ProcessStatement` rejects: `=` initialization, function-pointer parameters, no `()`.
 
-### 6.3 `Translate_C_Typ_To_Pascal` 完整映射表
+### 6.3 `Translate_C_Typ_To_Pascal` Full Mapping Table
 
-| C 类型 | Pascal 类型 |
+| C type | Pascal type |
 |--------|-------------|
 | `signed char` / `int8_t` | `ShortInt` |
 | `short` / `int16_t` | `SmallInt` |
@@ -410,30 +419,30 @@ flowchart TD
 | `double` | `Double` |
 | `long double` | `Extended` |
 | `char *` / `const char *` / `char const *` | `string` |
-| **其他含 `*`** | `Pointer` |
-| `void`（返回类型） | `''`（空） |
-| **其他** | 原样保留 |
+| **anything else with `*`** | `Pointer` |
+| `void` (as return type) | `''` (empty) |
+| **anything else** | preserved as-is |
 
 ---
 
-## 第 7 章 生成器内部逻辑
+## Chapter 7  Generator Internals
 
-### 7.1 生成器共同骨架
+### 7.1 Common Generator Skeleton
 
-每个生成器都有：
+Every generator has:
 
 ```pascal
 function CollectSupportedFunctions(Model: TPascal_Func_Model): TArryFunctionStructure;
 ```
 
-**3 个过滤条件**：参数类型不支持、返回类型不支持、空名。
+**3 filter conditions**: unsupported parameter type, unsupported return type, empty name.
 
-**每个生成器支持的 ABI 类型集合完全一致**（见第 4 章）。
+**The set of supported ABI types is identical across all generators** (see Chapter 4).
 
-### 7.2 6 对生成器 + C++ 额外的 hpp/cpp
+### 7.2 6 Pairs of Generators + C++ Extra hpp/cpp
 
-| 生成器 | 导出函数 | 产出 |
-|--------|----------|------|
+| Generator | Exported functions | Output |
+|-----------|--------------------|--------|
 | `pas_abi_service_generator_tool` | `GenerateABIServicePascalCode` | `.pas` |
 | | `GenerateABIServicePascalReadme` | `.md` |
 | `pas_abi_call_generator_tool` | `GenerateABICallPascalCode` | `.pas` |
@@ -449,9 +458,11 @@ function CollectSupportedFunctions(Model: TPascal_Func_Model): TArryFunctionStru
 | | `GenerateABICallCppCode` | `.cpp` |
 | | `GenerateABICallCppReadme` | `.md` |
 
-**一共 14 个导出函数**（6 代码 + 6 README + C++ 额外的 2 个 hpp/cpp 拆分的代码函数）。
+**14 exported functions in total** (6 code + 6 README + 2 extra C++ hpp/cpp code functions).
 
-### 7.3 类型映射表（以 C++ 为例）
+**Roadmap note**: A future target language would fit into the same slot. For a language whose bindings are a single file, the two functions `GenerateABIService<Lang>Code` and `GenerateABICall<Lang>Code` suffice. For a language whose bindings split into header + implementation (like C++), you would additionally provide two separate code functions and one README function per side. **The system is unbounded; each new language is a mechanical addition.**
+
+### 7.3 Type Mapping Table (C++ example)
 
 ```pascal
 function ABI_Type_To_Cpp_Decl(const T: TP_String): TP_String;
@@ -465,63 +476,63 @@ begin
   else if T.Same('uint64') then Result := 'uint64_t'
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'double'
   else if T.Same('single') then Result := 'float'
-  else if 字符串族 then Result := 'std::string'
+  else if stringFamily then Result := 'std::string'
   else Result := '';
 end;
 ```
 
-### 7.4 线协议（**所有生成器必须遵守**）
+### 7.4 Wire Protocol (**All Generators Must Follow**)
 
 ```mermaid
 flowchart LR
-    A["请求 = [field1][field2]...[fieldN]"] --> B["响应 = [status:uint8_t][payload]"]
-    B --> C["status = 0x00<br/>payload = 序列化结果"]
-    B --> D["status = 0xFF<br/>payload = UTF-8 错误消息"]
+    A["Request = [field1][field2]...[fieldN]"] --> B["Response = [status:uint8_t][payload]"]
+    B --> C["status = 0x00<br/>payload = serialized result"]
+    B --> D["status = 0xFF<br/>payload = UTF-8 error message"]
 ```
 
-| 类型 | 编码 |
-|------|------|
-| 整数 | 小端序 |
-| 字符串 | UTF-8 + NUL 终止符 |
-| 浮点 | IEEE 754 |
+| Type | Encoding |
+|------|----------|
+| Integer | little-endian |
+| String | UTF-8 + NUL terminator |
+| Float | IEEE 754 |
 
 ---
 
-## 第 8 章 README 系统
+## Chapter 8  README System
 
-### 8.1 为什么要有 README
+### 8.1 Why a README
 
-**v3.0 新增**：每个生成器现在同时产出**代码 + Markdown README**。README 的定位是**给智能体看的"生成目标的知识库"**——当 agent 拿到一份生成的代码（如 `my_unit_abi_service.py`）时，可以直接读取配对的 `my_unit_abi_service_python.md`，快速理解：
+**New in v3.0**: every generator now emits **both code and a Markdown README**. The README's purpose is a **knowledge base for the generated target that AI agents can read** — when an agent receives generated code (e.g. `my_unit_abi_service.py`), it can read the paired `my_unit_abi_service_python.md` to quickly understand:
 
-- 这份代码怎么用
-- 怎么部署
-- 怎么测试
-- 有哪些坑
+- How to use this code
+- How to deploy it
+- How to test it
+- What pitfalls exist
 
-**核心理念**：**代码是给编译器读的，README 是给智能体读的**。两者从同一个 `TPascal_Func_Model` 生成，保证**永不脱节**。
+**Core idea**: **Code is for the compiler; the README is for the agent.** Both are generated from the same `TPascal_Func_Model`, guaranteeing **they never drift apart**.
 
-### 8.2 README 的 12 节标准结构
+### 8.2 The 12-Section Standard Structure
 
-**所有 6 个 README 生成函数共享同一结构**：
+**All 6 README-generator functions share the same structure**:
 
-| 节号 | 标题 | 内容 |
-|------|------|------|
-| §1 | Overview | 这份代码是什么、设计原则、3 步快速开始 |
-| §2 | Application Scope | 什么时候用 / 不用、与其他 RPC 对比 |
-| §3 | Compatibility | 编译器版本、平台、运行时依赖、线程模型 |
-| §4 | Wire Protocol | 请求 / 响应格式、编码规则、调用序列 |
-| §5 | Runtime Architecture | 启动顺序、调用序列、超时、目标 App 名 |
-| §6 | Type Mapping | 支持的类型、不支持的类型、字节序、NUL 终止符 |
-| §7 | Deployment | 目录结构、构建命令、启动顺序、关闭顺序 |
-| §8 | Testing | 完整可复制的测试程序 |
-| §9 | API Reference | 汇总表 + 每个 API 的详细说明 |
-| §10 | Troubleshooting | 症状 / 原因 / 修法表 |
-| §11 | Self-Assessment Checklist | 读完后应该能回答的问题 |
-| §12 | Reference Resources | 相关工具链索引 |
+| Section | Title | Content |
+|---------|-------|---------|
+| §1 | Overview | What this code is, design principles, 3-step quickstart |
+| §2 | Application Scope | When to use / not use, comparison with other RPCs |
+| §3 | Compatibility | Compiler version, platform, runtime deps, threading model |
+| §4 | Wire Protocol | Request/response format, encoding rules, call sequence |
+| §5 | Runtime Architecture | Startup order, call sequence, timeouts, target app name |
+| §6 | Type Mapping | Supported types, unsupported types, endianness, NUL terminator |
+| §7 | Deployment | Directory layout, build commands, startup order, shutdown order |
+| §8 | Testing | A fully copy-pasteable test program |
+| §9 | API Reference | Summary table + per-API details |
+| §10 | Troubleshooting | Symptom / cause / fix table |
+| §11 | Self-Assessment Checklist | Questions a reader should be able to answer |
+| §12 | Reference Resources | Related toolchain index |
 
-### 8.3 README 生成器骨架
+### 8.3 README Generator Skeleton
 
-每个 README 生成器是一个**大函数**，内部用局部过程组装 12 节：
+Each README generator is a **single big function** that assembles the 12 sections with local procedures:
 
 ```pascal
 function GenerateABIServicePascalReadme(Model: TPascal_Func_Model): TPascalStringList;
@@ -571,38 +582,38 @@ begin
 end;
 ```
 
-### 8.4 `§9 API Reference` 是核心
+### 8.4 `§9 API Reference` Is the Core
 
-`EmitApiReference` 会遍历 `SupportedFuncs`，为每个 API 生成：
-- 汇总表一行
-- `#### Description` 段
-- `#### Parameters` 表
-- `#### Request layout` 块
-- `#### Success response layout` 块
-- `#### Error response` 段
-- `#### Call example` 代码块
+`EmitApiReference` walks `SupportedFuncs` and produces, per API:
+- A summary table row
+- `#### Description` paragraph
+- `#### Parameters` table
+- `#### Request layout` block
+- `#### Success response layout` block
+- `#### Error response` paragraph
+- `#### Call example` code block
 
-**关键依赖**：`GetFullDescription(Func.Comment)` 提取注释的第一行。注释在源码里必须**紧邻声明**（中间无空行），否则提取不到。
+**Key dependency**: `GetFullDescription(Func.Comment)` extracts the first line of the comment. In the source, the comment **must be immediately adjacent to the declaration** (no blank line between them); otherwise it will not be picked up.
 
-### 8.5 `§10 Troubleshooting` 的固定表
+### 8.5 The Fixed `§10 Troubleshooting` Table
 
-每个 README 的 troubleshooting 表**至少包含**：
+Every README's troubleshooting table contains at least:
 
-| 症状 | 原因 | 修法 |
-|------|------|------|
-| `LF_PrepareDone` returns 0 | 目标服务未启动 | 先启服务 |
-| `EABIRemoteError: nil (timeout)` | App 名不匹配 | 检查目标 App 名 |
-| `EABIRemoteError: "input truncated"` | 参数数量不对 | 检查客户端写入 |
-| `EABIRemoteError: <garbled>` | 编码不匹配 | 检查类型表 |
-| 返回值数字不对 | 字节序不匹配 | 检查字节序 |
-| 回调永不触发 | stub 未实现 | 搜索 `TODO` |
-| UI 崩溃 | worker 线程碰 UI | 用 sync 变体 |
-| MSVC 警告非 ASCII | 缺 `/utf-8` | 加 `/utf-8` |
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `LF_PrepareDone` returns 0 | Target service not started | Start the service first |
+| `EABIRemoteError: nil (timeout)` | App name mismatch | Check target app name |
+| `EABIRemoteError: "input truncated"` | Parameter count wrong | Check client-side writes |
+| `EABIRemoteError: <garbled>` | Encoding mismatch | Check type table |
+| Return value incorrect | Endianness mismatch | Check byte order |
+| Callback never fires | Stub not implemented | Search for `TODO` |
+| UI crashes | Worker thread touched UI | Use the sync variants |
+| MSVC warns about non-ASCII | Missing `/utf-8` | Add `/utf-8` |
 
-### 8.6 README 命名约定
+### 8.6 README Naming Convention
 
-| 目标 | 代码文件 | README 文件 |
-|------|---------|-------------|
+| Target | Code file | README file |
+|--------|-----------|-------------|
 | Pascal Service | `<Unit>_abi_service_unit.pas` | `<Unit>_abi_service_pascal.md` |
 | Pascal Call | `<Unit>_abi_call_unit.pas` | `<Unit>_abi_call_pascal.md` |
 | Python Service | `<Unit>_abi_service.py` | `<Unit>_abi_service_python.md` |
@@ -610,33 +621,33 @@ end;
 | C++ Service | `<Unit>_abi_service.hpp` + `.cpp` | `<Unit>_abi_service_cpp.md` |
 | C++ Call | `<Unit>_abi_call.hpp` + `.cpp` | `<Unit>_abi_call_cpp.md` |
 
-**CLI 下的 README 命名规则**（见第 9 章）：`<输出文件基名>_readme.md`。
+**CLI README naming rule** (see Chapter 9): `<output basename>_readme.md`.
 
-### 8.7 修改 README 的改动清单
+### 8.7 Change List for Modifying a README
 
-**加一节**：
-1. 在 `GenerateABI*Readme` 里定义新的 `procedure EmitXxx; begin ... end;`
-2. 在 `try...finally` 里按顺序调用。
+**Add a section**:
+1. Define a new `procedure EmitXxx; begin ... end;` inside the `GenerateABI*Readme` function.
+2. Call it in the `try...finally` block, in the desired order.
 
-**改某节的文案**：
-1. 找到对应的 `EmitXxx` 过程。
-2. 修改 `L.Add(...)` 的字符串。
+**Change a section's wording**:
+1. Find the corresponding `EmitXxx` procedure.
+2. Modify the strings passed to `L.Add(...)`.
 
-**让某节显示 API 相关数据**：
-- 用 `SupportedFuncs` 数组。
-- 用 `MakeApiName(Func.Name)` / `ABI_Type_To_<Lang>_Decl(Func.ReturnType)` 等已有辅助函数。
+**Make a section display API-specific data**:
+- Use the `SupportedFuncs` array.
+- Use existing helpers like `MakeApiName(Func.Name)` and `ABI_Type_To_<Lang>_Decl(Func.ReturnType)`.
 
 ---
 
-## 第 9 章 命令行接口（CLI）
+## Chapter 9  Command-Line Interface (CLI)
 
-### 9.1 CLI 是什么
+### 9.1 What the CLI Is
 
-`code_decl_to_abi_cmdline.pas` 是**无 GUI 的命令行入口**，允许脚本 / CI / 自动化流程直接调用生成器。
+`code_decl_to_abi_cmdline.pas` is the **GUI-free command-line entry point**, letting scripts / CI / automation invoke the generator directly.
 
-**CLI 与 GUI 共享同一后端**：CLI 内部调用 `GenerateABIServicePascalCode` 等函数，不经过 GUI 控件。
+**The CLI shares the same backend as the GUI**: internally it calls functions like `GenerateABIServicePascalCode` without going through GUI controls.
 
-### 9.2 主程序分派
+### 9.2 Main Program Dispatch
 
 ```pascal
 program code_decl_to_abi;
@@ -647,27 +658,27 @@ begin
       exitCode := CommandLine_ExitCode;
       exit;
     end;
-    // ... GUI 启动
+    // ... GUI startup
   finally
     LF_Shutdown();
   end;
 end;
 ```
 
-**契约**：
-- `Process_CommandLine` 返回 **True** → 无参数，继续 GUI。
-- 返回 **False** → 已处理命令行，`exit` 并设置退出码。
+**Contract**:
+- `Process_CommandLine` returns **True** → no arguments, continue to GUI.
+- Returns **False** → CLI was handled; `exit` and set the exit code.
 
-### 9.3 命令行参数
+### 9.3 CLI Arguments
 
-| 参数形式 | 行为 |
-|----------|------|
-| `code_decl_to_abi` | 启动 GUI |
-| `code_decl_to_abi --help` / `-h` / `-?` / `/?` | 打印帮助 |
-| `code_decl_to_abi <input> <output>` | 生成 **Service** 侧 |
-| `code_decl_to_abi --call <input> <output>` / `-c <input> <output>` | 生成 **Call** 侧 |
+| Argument form | Behavior |
+|---------------|----------|
+| `code_decl_to_abi` | Launch the GUI |
+| `code_decl_to_abi --help` / `-h` / `-?` / `/?` | Print help |
+| `code_decl_to_abi <input> <output>` | Generate **Service** side |
+| `code_decl_to_abi --call <input> <output>` / `-c <input> <output>` | Generate **Call** side |
 
-### 9.4 源语言检测（从输入扩展名）
+### 9.4 Source-Language Detection (from input extension)
 
 ```pascal
 function Detect_Source_Lang(const FileName: string): TSourceLang;
@@ -683,7 +694,7 @@ begin
 end;
 ```
 
-### 9.5 目标语言检测（从输出扩展名）
+### 9.5 Target-Language Detection (from output extension)
 
 ```pascal
 function Detect_Target_Lang(const FileName: string): TTargetLang;
@@ -701,34 +712,38 @@ begin
 end;
 ```
 
-### 9.6 目标语言 × 侧的矩阵
+**Roadmap note**: `TTargetLang` is the enum you extend when adding a new target language (see Chapter 14, step 4.1).
 
-| 目标语言 | Service 输出 | Call 输出 |
-|----------|-------------|-----------|
+### 9.6 Target Language × Side Matrix
+
+| Target language | Service output | Call output |
+|-----------------|----------------|-------------|
 | Pascal | `.pas` | `.pas` |
 | Python | `.py` | `.py` |
 | C++ | `.hpp` + `.cpp` | `.hpp` + `.cpp` |
 
-**C++ 特殊**：无论输出 `.hpp` 还是 `.cpp`，都会同时写两个文件（同名不同后缀）。
+**C++ special case**: whether you name the output `.hpp` or `.cpp`, both files are always written (same base name, different extensions).
 
-### 9.7 退出码
+**Roadmap note**: For a future target language whose bindings use a single file (like Rust, Go, or TypeScript), the two sides would each write one file. For a language that splits into header + implementation, follow the C++ pattern.
 
-| 码 | 常量 | 含义 |
-|:--:|------|------|
-| 0 | `EXIT_OK` | 转换成功 |
-| 1 | `EXIT_BAD_ARGS` | 参数缺失或无效 |
-| 2 | `EXIT_PARSE_FAILED` | 源码解析失败 |
-| 3 | `EXIT_GEN_FAILED` | 代码生成失败 |
-| 4 | `EXIT_IO_ERROR` | 文件 I/O 错误 |
+### 9.7 Exit Codes
 
-### 9.8 输出文件命名
+| Code | Constant | Meaning |
+|:----:|----------|---------|
+| 0 | `EXIT_OK` | Conversion succeeded |
+| 1 | `EXIT_BAD_ARGS` | Missing or invalid arguments |
+| 2 | `EXIT_PARSE_FAILED` | Source parsing failed |
+| 3 | `EXIT_GEN_FAILED` | Code generation failed |
+| 4 | `EXIT_IO_ERROR` | File I/O error |
 
-**CLI 由调用者指定输出文件名**（不像 GUI 用固定命名）。同时：
+### 9.8 Output File Naming
 
-- **C++ 自动补齐两个文件**：给定 `<path>/<base>.hpp`，则同时写 `<path>/<base>.cpp`。
-- **README 自动命名**：`<path>/<base>_readme.md`。
+**The CLI caller specifies the output file name** (unlike GUI, which uses fixed names). Additionally:
 
-**辅助函数**：
+- **C++ auto-completes two files**: given `<path>/<base>.hpp`, both `<path>/<base>.hpp` and `<path>/<base>.cpp` are written.
+- **README auto-naming**: `<path>/<base>_readme.md`.
+
+**Helper functions**:
 
 ```pascal
 function Companion_Readme_Path(const OutputFile: string): string;
@@ -752,73 +767,73 @@ begin
 end;
 ```
 
-### 9.9 使用范例
+### 9.9 Usage Examples
 
 ```bash
-# 帮助
+# Help
 code_decl_to_abi --help
 
 # Pascal → Pascal Service
 code_decl_to_abi calculator.pas calculator_service.pas
-# 产出：
+# Output:
 #   calculator_service.pas       (service unit)
 #   calculator_service_readme.md (README)
 
 # Pascal → Pascal Call
 code_decl_to_abi --call calculator.pas calculator_call.pas
-# 产出：
+# Output:
 #   calculator_call.pas
 #   calculator_call_readme.md
 
 # C header → Python Service
 code_decl_to_abi ComplexTestUnit.h calculator_service.py
-# 产出：
+# Output:
 #   calculator_service.py
 #   calculator_service_readme.md
 
-# C header → C++ Service（自动产出两个文件）
+# C header → C++ Service (two files are auto-produced)
 code_decl_to_abi ComplexTestUnit.h calculator_service.hpp
-# 产出：
+# Output:
 #   calculator_service.hpp
 #   calculator_service.cpp
 #   calculator_service_readme.md
 ```
 
-### 9.10 CLI 内部流程
+### 9.10 CLI Internal Flow
 
 ```mermaid
 flowchart TD
-    A["Process_CommandLine"] --> B{"ParamCount = 0？"}
-    B -- "是" --> Z["返回 True（走 GUI）"]
-    B -- "否" --> C["OnDoStatusHook := CmdLine_DoStatus_Hook"]
-    C --> D{"第一个参数？"}
-    D -- "--help" --> H["Print_Help，返回 False"]
-    D -- "--call" --> E["Mode := tmCall，ArgStart++"]
-    D -- "其他" --> F["ArgStart 不变"]
-    E --> G["取 <input> <output>"]
+    A["Process_CommandLine"] --> B{"ParamCount = 0?"}
+    B -- "Yes" --> Z["Return True (go GUI)"]
+    B -- "No" --> C["OnDoStatusHook := CmdLine_DoStatus_Hook"]
+    C --> D{"First argument?"}
+    D -- "--help" --> H["Print_Help, return False"]
+    D -- "--call" --> E["Mode := tmCall, ArgStart++"]
+    D -- "other" --> F["ArgStart unchanged"]
+    E --> G["Take <input> <output>"]
     F --> G
     G --> I["Execute_Conversion"]
-    I --> J{"检测语言"}
-    J -- "失败" --> K["返回 EXIT_BAD_ARGS"]
-    J -- "成功" --> L["Read_Text_File"]
-    L --> M{"读失败？"}
-    M -- "是" --> N["返回 EXIT_IO_ERROR"]
-    M -- "否" --> O["CreateFrom_Pascal_Code / _C_Code"]
-    O --> P{"ParseSuccess？"}
-    P -- "否" --> Q["返回 EXIT_PARSE_FAILED"]
-    P -- "是" --> R["LoadFromParser + SaveToJson"]
-    R --> S{"根据 TgtLang 分派"}
+    I --> J{"Language detection"}
+    J -- "Failure" --> K["Return EXIT_BAD_ARGS"]
+    J -- "Success" --> L["Read_Text_File"]
+    L --> M{"Read failed?"}
+    M -- "Yes" --> N["Return EXIT_IO_ERROR"]
+    M -- "No" --> O["CreateFrom_Pascal_Code / _C_Code"]
+    O --> P{"ParseSuccess?"}
+    P -- "No" --> Q["Return EXIT_PARSE_FAILED"]
+    P -- "Yes" --> R["LoadFromParser + SaveToJson"]
+    R --> S{"Dispatch on TgtLang"}
     S -- "tlPascal" --> T["Generate_Pascal"]
     S -- "tlPython" --> U["Generate_Python"]
     S -- "tlCpp" --> V["Generate_Cpp"]
-    T --> W["写文件 + README"]
+    T --> W["Write files + README"]
     U --> W
     V --> W
 ```
 
-### 9.11 CLI 的输出 hook
+### 9.11 CLI Output Hook
 
-CLI 使用**自定义的 DoStatus hook** 直接写 stdout，**绕过 Z.Status 的队列机制**（因为 CLI 没有主循环驱动队列）。
+The CLI uses a **custom DoStatus hook** that writes directly to stdout, **bypassing the Z.Status queue** (there is no main-loop driving the queue in CLI mode).
 
 ```pascal
 procedure CmdLine_DoStatus_Hook(Text_: SystemString; const ID: Integer);
@@ -827,25 +842,25 @@ begin
 end;
 ```
 
-**在 `Process_CommandLine` 开头**：
+**At the top of `Process_CommandLine`**:
 
 ```pascal
 OnDoStatusHook := @CmdLine_DoStatus_Hook;
 ```
 
-**关键**：`code_decl_to_abi.lpr` 用 `{$apptype console}` 编译，保证 console 输出可用。
+**Key**: `code_decl_to_abi.lpr` is compiled with `{$apptype console}` so that console output works.
 
 ---
 
-## 第 10 章 MCP / Agent 接口
+## Chapter 10  MCP / Agent Interface
 
-### 10.1 定位
+### 10.1 Positioning
 
-`code_decl_to_abi_mcp_api_tool_provider_unit.pas` 把整个生成器包装为 **21 个 LingoFuse Call API**，注册到 **agent beacon**（`agent_main_app`），供 MCP 客户端发现和调用。
+`code_decl_to_abi_mcp_api_tool_provider_unit.pas` wraps the entire generator as **21 LingoFuse Call APIs**, registered with the **agent beacon** (`agent_main_app`) for MCP clients to discover and invoke.
 
-**核心理念**：**模拟操作 GUI**。每个 `internal_call_*` 内部通过 `TCompute.Sync` 把操作派发到主线程，然后调用 `code_decl_to_abi_frm.pas` 里已经存在的按钮事件处理函数。
+**Core idea**: **Simulate GUI operations.** Each `internal_call_*` uses `TCompute.Sync` to dispatch to the main thread and calls the button event handlers already present in `code_decl_to_abi_frm.pas`.
 
-### 10.2 常量
+### 10.2 Constants
 
 ```pascal
 var
@@ -858,33 +873,33 @@ var
   DEBUG_LOG : boolean = True;
 ```
 
-### 10.3 三层工作流
+### 10.3 Three-Phase Workflow
 
-**所有工具严格遵循三段式**：
+**All tools strictly follow the three-phase pattern**:
 
 ```mermaid
 flowchart LR
-    S1["Step 1<br/>SetSourceCode"] --> S2["Step 2（选一或全部）<br/>ConvertToXxx"]
-    S2 --> S3["Step 3（读多个）<br/>GetLastXxx"]
+    S1["Step 1<br/>SetSourceCode"] --> S2["Step 2 (one or all)<br/>ConvertToXxx"]
+    S2 --> S3["Step 3 (read any)<br/>GetLastXxx"]
 ```
 
-**契约**：
-- **Step 1 是 SETUP**，不产出任何文件。
-- **Step 2 每个分支独立**：一次 SetSourceCode 可以触发任意多个 Convert。
-- **Step 3 是纯读取**，从缓存拿结果。
+**Contract**:
+- **Step 1 is SETUP**, produces no files.
+- **Step 2 branches are independent**: one SetSourceCode can trigger any number of Convert calls.
+- **Step 3 is pure read**, pulling from cache.
 
-### 10.4 21 个工具的完整清单
+### 10.4 Complete List of 21 Tools
 
-#### Step 1（1 个）
+#### Step 1 (1 tool)
 
-| # | 工具名 | 参数 | 返回 |
-|:-:|--------|------|------|
-| 1 | `CodeDeclToAbi_SetSourceCode` | `Source: string`、`Language: string` | `{"status":"ok"}` |
+| # | Tool | Parameters | Return |
+|:-:|------|------------|--------|
+| 1 | `CodeDeclToAbi_SetSourceCode` | `Source: string`, `Language: string` | `{"status":"ok"}` |
 
-#### Step 2（6 个）
+#### Step 2 (6 tools)
 
-| # | 工具名 | 返回 |
-|:-:|--------|------|
+| # | Tool | Return |
+|:-:|------|--------|
 | 2 | `CodeDeclToAbi_ConvertToPascalService` | `{"result":"<service_unit.pas>","readme":"<readme.md>"}` |
 | 3 | `CodeDeclToAbi_ConvertToPascalCall` | `{"result":"<call_unit.pas>","readme":"<readme.md>"}` |
 | 4 | `CodeDeclToAbi_ConvertToPythonService` | `{"result":"<service.py>","readme":"<readme.md>"}` |
@@ -892,34 +907,36 @@ flowchart LR
 | 6 | `CodeDeclToAbi_ConvertToCppService` | `{"result":"<service.hpp>","impl":"<service.cpp>","readme":"<readme.md>"}` |
 | 7 | `CodeDeclToAbi_ConvertToCppCall` | `{"result":"<call.hpp>","impl":"<call.cpp>","readme":"<readme.md>"}` |
 
-#### Step 3（14 个）
+#### Step 3 (14 tools)
 
-| # | 工具名 | 返回 |
-|:-:|--------|------|
-| 8 | `CodeDeclToAbi_GetLastPascalServiceCode` | 完整 service unit 文本 |
-| 9 | `CodeDeclToAbi_GetLastPascalServiceReadme` | README 文本 |
-| 10 | `CodeDeclToAbi_GetLastPascalCallCode` | 完整 call unit 文本 |
-| 11 | `CodeDeclToAbi_GetLastPascalCallReadme` | README 文本 |
-| 12 | `CodeDeclToAbi_GetLastPythonServiceCode` | 完整 Python module 文本 |
-| 13 | `CodeDeclToAbi_GetLastPythonServiceReadme` | README 文本 |
-| 14 | `CodeDeclToAbi_GetLastPythonCallCode` | 完整 Python module 文本 |
-| 15 | `CodeDeclToAbi_GetLastPythonCallReadme` | README 文本 |
-| 16 | `CodeDeclToAbi_GetLastCppServiceHeader` | `.hpp` 文本 |
-| 17 | `CodeDeclToAbi_GetLastCppServiceImpl` | `.cpp` 文本 |
-| 18 | `CodeDeclToAbi_GetLastCppServiceReadme` | README 文本 |
-| 19 | `CodeDeclToAbi_GetLastCppCallHeader` | `.hpp` 文本 |
-| 20 | `CodeDeclToAbi_GetLastCppCallImpl` | `.cpp` 文本 |
-| 21 | `CodeDeclToAbi_GetLastCppCallReadme` | README 文本 |
+| # | Tool | Return |
+|:-:|------|--------|
+| 8 | `CodeDeclToAbi_GetLastPascalServiceCode` | Full service unit text |
+| 9 | `CodeDeclToAbi_GetLastPascalServiceReadme` | README text |
+| 10 | `CodeDeclToAbi_GetLastPascalCallCode` | Full call unit text |
+| 11 | `CodeDeclToAbi_GetLastPascalCallReadme` | README text |
+| 12 | `CodeDeclToAbi_GetLastPythonServiceCode` | Full Python module text |
+| 13 | `CodeDeclToAbi_GetLastPythonServiceReadme` | README text |
+| 14 | `CodeDeclToAbi_GetLastPythonCallCode` | Full Python module text |
+| 15 | `CodeDeclToAbi_GetLastPythonCallReadme` | README text |
+| 16 | `CodeDeclToAbi_GetLastCppServiceHeader` | `.hpp` text |
+| 17 | `CodeDeclToAbi_GetLastCppServiceImpl` | `.cpp` text |
+| 18 | `CodeDeclToAbi_GetLastCppServiceReadme` | README text |
+| 19 | `CodeDeclToAbi_GetLastCppCallHeader` | `.hpp` text |
+| 20 | `CodeDeclToAbi_GetLastCppCallImpl` | `.cpp` text |
+| 21 | `CodeDeclToAbi_GetLastCppCallReadme` | README text |
 
-### 10.5 三个公开函数
+**Roadmap note**: Each new target language adds **exactly one Convert tool + two Reader tools** (or 1 Convert + 3 Readers for a two-file language like C++). The 21 count grows linearly and mechanically.
+
+### 10.5 Three Public Functions
 
 ```pascal
-function RegisterAPIs: TAppHnd___;       // 创建 App + 注册 21 个 Call API
-function RegisterTools: Boolean;         // 连接 beacon + 注册 21 个 tool schema
-function Execute_And_Reg_all: Boolean;   // 一键：RegisterAPIs + Prepare + RegisterTools
+function RegisterAPIs: TAppHnd___;       // Create App + register 21 Call APIs
+function RegisterTools: Boolean;         // Connect to beacon + register 21 tool schemas
+function Execute_And_Reg_all: Boolean;   // One-shot: RegisterAPIs + Prepare + RegisterTools
 ```
 
-**`Execute_And_Reg_all` 流程**：
+**`Execute_And_Reg_all` flow**:
 
 ```pascal
 App := RegisterAPIs();
@@ -938,21 +955,21 @@ else
   end;
 ```
 
-**关键**：
-- **App 名 = `MY_APP_NAME = 'code_decl_to_abi_mcp_api'`**（不是 `abi_tool_provider_intf`）。
-- **21 个 API 全部注册在同一个 App 上**。
-- **`LF_PrepareDone` 只在主线程未启动时调用**（避免二次调用返回 0）。
+**Key points**:
+- **App name = `MY_APP_NAME = 'code_decl_to_abi_mcp_api'`** (not `abi_tool_provider_intf`).
+- **All 21 APIs are registered on the same App**.
+- **`LF_PrepareDone` is called only when the main thread has not yet started** (to avoid a second call returning 0).
 
-### 10.6 `TCompute.Sync` 模式（**最关键的实现细节**）
+### 10.6 `TCompute.Sync` Pattern (**Most Critical Implementation Detail**)
 
-所有 `internal_call_*` 都用同样的模式：
+All `internal_call_*` use the same pattern:
 
 ```pascal
 function internal_call_CodeDeclToAbi_XXX_CodeDeclToAbi_XXX(...): string;
 {$IFDEF FPC}
   procedure Do_Sync___();
   begin
-    // 所有 UI 操作都在这里
+    // All UI operations happen here.
     Result := ...;
   end;
 {$ELSE FPC}
@@ -964,7 +981,7 @@ begin
 {$ELSE FPC}
   TCompute.Sync(procedure()
   begin
-    // 所有 UI 操作都在这里
+    // All UI operations happen here.
     temp_ := ...;
   end);
   Result := temp_;
@@ -972,23 +989,23 @@ begin
 end;
 ```
 
-**契约**：
-- **`Do_Sync___` 在主线程执行**（由 `TCompute.Sync` 派发）。
-- **`Result` 是闭包捕获的**（FPC 的 `is nested` 特性）。
-- **`temp_` 是 Delphi 侧的替代**（`reference to` 不支持 `Result` 捕获）。
+**Contract**:
+- **`Do_Sync___` runs on the main thread** (dispatched by `TCompute.Sync`).
+- **`Result` is captured by the closure** (FPC's `is nested` feature).
+- **`temp_` is the Delphi-side workaround** (`reference to` cannot capture `Result`).
 
-### 10.7 `Work_*` 辅助函数
+### 10.7 `Work_*` Helper Functions
 
-为避免重复，把公共逻辑抽到 `Work_*` 函数里（**这些函数在主线程执行**）：
+To avoid repetition, common logic is factored into `Work_*` functions (which **run on the main thread**):
 
 ```pascal
-// 应用语言到 ComboBox，触发 OnChange
+// Apply language to the ComboBox, triggering OnChange
 function Work_Apply_Language(const Language: string): Boolean;
 
-// 共享的"解析 → 模型 → 生成全部"管线
-function Work_Parse_And_Generate: string;   // 空串 = 成功
+// Shared "parse → model → generate all" pipeline
+function Work_Parse_And_Generate: string;   // empty string = success
 
-// 六个转换分支
+// Six conversion branches
 function Work_Convert_To_PascalService: string;
 function Work_Convert_To_PascalCall: string;
 function Work_Convert_To_PythonService: string;
@@ -996,12 +1013,12 @@ function Work_Convert_To_PythonCall: string;
 function Work_Convert_To_CppService: string;
 function Work_Convert_To_CppCall: string;
 
-// 十四个读取器
+// Fourteen readers
 function Work_Get_PascalServiceCode: string;
-// ... 其余同理
+// ... and so on
 ```
 
-### 10.8 `Work_Parse_And_Generate` 的缓存策略
+### 10.8 `Work_Parse_And_Generate` Caching Strategy
 
 ```pascal
 var
@@ -1019,7 +1036,7 @@ begin
   if Trim(SrcText) = '' then
     begin Result := 'No source code has been set...'; Exit; end;
 
-  // 缓存：源未变 + 模型 JSON 非空 → 跳过
+  // Cache: same source + non-empty model JSON → skip
   if (SrcText = G_Last_Generated_Source) and
      (code_decl_to_abi_form.Edit_ModelJson.Lines.Count > 0) then
     Exit;
@@ -1042,17 +1059,17 @@ begin
 end;
 ```
 
-**契约**：
-- **`SetSourceCode` 会清空 `G_Last_Generated_Source`**，保证下次转换重新解析。
-- **不缓存结果**，只缓存"是否已经生成过"。
-- **源变了 → 强制重新跑管线**。
+**Contract**:
+- **`SetSourceCode` clears `G_Last_Generated_Source`** so the next conversion re-parses.
+- **Results are not cached**, only the "already generated" flag.
+- **If the source changed, the pipeline is forced to re-run**.
 
-### 10.9 每个 Step 2 转换的"切页"行为
+### 10.9 "Tab Switch" Behavior in Each Step 2 Conversion
 
-**契约**：转换函数返回前会**切换 `Page_FinalSource` 到对应 TabSheet**（模仿用户点击）：
+**Contract**: before returning, the conversion function **switches `Page_FinalSource` to the corresponding TabSheet** (mimicking a user click):
 
-| 转换 | 切到 |
-|------|------|
+| Conversion | Switches to |
+|------------|-------------|
 | Pascal Service | `Tab_PasService` |
 | Pascal Call | `Tab_PasCall` |
 | Python Service | `Tab_PyService` |
@@ -1060,20 +1077,20 @@ end;
 | C++ Service | `Tab_CppService` |
 | C++ Call | `Tab_CppCall` |
 
-**为什么切页**：`GenerateSourceButtonClick` 生成完毕后把 `Page_Main.ActivePage := Tab_FinalSource`（切到"最终源码"标签），但**不切具体的子 TabSheet**。转换函数负责切子 TabSheet，让用户（或 agent）看到的界面与结果一致。
+**Why switch tabs**: `GenerateSourceButtonClick` ends by setting `Page_Main.ActivePage := Tab_FinalSource` (switching to the "final source" tab), but does **not** switch to a specific child TabSheet. The conversion function handles the child tab switch so the UI matches the result.
 
-### 10.10 工具注册时的 JSON Schema
+### 10.10 JSON Schema at Tool Registration
 
-每个 Step 2 工具注册时**没有参数**：
+Each Step 2 tool is registered **without parameters**:
 
 ```pascal
 ParamsObj := ToolDef.O['parameters'];
 ParamsObj.S['type'] := 'object';
 PropsObj := ParamsObj.O['properties'];
-// 不添加任何 property
+// No properties are added.
 ```
 
-Step 1 有 2 个参数：
+Step 1 has two parameters:
 
 ```pascal
 PropObj := PropsObj.O['Source'];
@@ -1085,32 +1102,34 @@ RequiredArr.Add('Source');
 RequiredArr.Add('Language');
 ```
 
-### 10.11 修改 MCP 接口的改动清单
+### 10.11 Change List for Modifying the MCP Interface
 
-**加一个新工具**：
-1. 在 `interface` 段声明 `internal_call_*`。
-2. 在 `implementation` 段实现（用 `TCompute.Sync` 模式）。
-3. 在 `RegisterAPIs` 里加 `LF_RegisterCallEx`。
-4. 在 `RegisterTools` 里加 `ToolDef` 组装 + `RegisterTool(ToolDef)`。
-5. 更新 `regCount = 21` 为新的总数。
+**Add a new tool**:
+1. Declare `internal_call_*` in the `interface` section.
+2. Implement it in `implementation` (using the `TCompute.Sync` pattern).
+3. Add a `LF_RegisterCallEx` in `RegisterAPIs`.
+4. Add `ToolDef` assembly + `RegisterTool(ToolDef)` in `RegisterTools`.
+5. Update `regCount = 21` to the new total.
 
-**改工具描述**：
-- 在 `RegisterTools` 里找到对应 `ToolDef.S['description']`。
-- **同步**修改 `RegisterAPIs` 里的 `LF_RegisterCallEx` 描述（虽然不必要，但保持一致）。
+**Change a tool description**:
+- Find the corresponding `ToolDef.S['description']` in `RegisterTools`.
+- **Synchronize** the `LF_RegisterCallEx` description in `RegisterAPIs` (not required, but keep them consistent).
 
-**改 `MY_APP_NAME`**：
-- 会破坏所有客户端的调用（因为客户端通过 App 名路由）。
-- **不要随便改**。
+**Change `MY_APP_NAME`**:
+- This breaks all clients (they route by app name).
+- **Do not change it lightly.**
+
+**Roadmap note**: The pattern is **language-agnostic**. Adding a new target language's MCP tool is precisely the mechanical "add 2 Convert tools + 4 Readers" step (see Chapter 14, step 7). The system is intentionally unbounded.
 
 ---
 
-## 第 11 章 GUI 窗体操作手册
+## Chapter 11  GUI Form Operations Manual
 
-> 同 v2.0。**新增：`GenerateSourceButtonClick` 现在还会写 README 文件，并给每个编辑器设置 `.Hint = 最后写入的文件路径`**。
+> Same as v2.0. **New**: `GenerateSourceButtonClick` now also writes README files, and sets `.Hint = last written file path` on each editor.
 
-### 11.1 关键事件处理逻辑
+### 11.1 Key Event-Handler Logic
 
-#### `GenerateSourceButtonClick`（v3.0 更新）
+#### `GenerateSourceButtonClick` (v3.0 update)
 
 ```pascal
 procedure Tcode_decl_to_abi_form.GenerateSourceButtonClick(Sender: TObject);
@@ -1145,9 +1164,9 @@ begin
   app_dir.Text := umlCombinePath(umlGetFilePath(ParamStr(0)), func_model.UnitName);
   umlCreateDirectory(app_dir.Text);
 
-  // 保存源文件
+  // Save source files
   if Edit_Source.Lines.Count > 0 then
-    SaveSynEditCode(Edit_Source, 'source.pas' 或 'source.h');  // 根据语言
+    SaveSynEditCode(Edit_Source, 'source.pas' or 'source.h');  // depending on language
   if Edit_SourceJson.Lines.Count > 0 then
     SaveSynEditCode(Edit_SourceJson, 'source.json');
   if Edit_ModelJson.Lines.Count > 0 then
@@ -1172,21 +1191,21 @@ begin
       disposeObjectAndNil(l);
     end;
 
-  // ... Pascal call、Python service/call、C++ service (cpp + hpp + readme)、C++ call 同理
+  // ... same for Pascal call, Python service/call, C++ service (cpp + hpp + readme), C++ call
 
   Page_Main.ActivePage := Tab_FinalSource;
   func_model.Free;
 end;
 ```
 
-**关键新增**：
-- **每个分支**都会：生成列表 → 写盘 → 赋值给 `TSynEdit` → 记录 `.Hint = 文件路径`。
-- **`.Hint` 是转换函数返回文件名的来源**（`internal_call_*` 直接读 `.Hint`）。
+**Key additions**:
+- **Every branch** does: generate list → write to disk → assign to `TSynEdit` → record `.Hint = file path`.
+- **`.Hint` is the source of the file path returned by the conversion function** (the `internal_call_*` reads `.Hint` directly).
 
-### 11.2 `.Hint` 的契约
+### 11.2 `.Hint` Contract
 
-| 控件 | `.Hint` 内容 |
-|------|-------------|
+| Control | `.Hint` content |
+|---------|-----------------|
 | `Edit_PasServiceSource` | `<app_dir>/<Unit>_abi_service_unit.pas` |
 | `Edit_PasServiceReadme` | `<app_dir>/<Unit>_abi_service_pascal.md` |
 | `Edit_PasCallSource` | `<app_dir>/<Unit>_abi_call_unit.pas` |
@@ -1202,18 +1221,18 @@ end;
 | `Edit_CppCallCpp` | `<app_dir>/<Unit>_abi_call.cpp` |
 | `Edit_CppCallReadme` | `<app_dir>/<Unit>_abi_call_cpp.md` |
 
-### 11.3 `app_dir` 的生成
+### 11.3 `app_dir` Generation
 
 ```pascal
 app_dir.Text := umlCombinePath(umlGetFilePath(ParamStr(0)), func_model.UnitName);
 umlCreateDirectory(app_dir.Text);
 ```
 
-**含义**：所有生成的文件写到 **exe 同目录下的 `<UnitName>/` 子目录**。
+**Meaning**: all generated files are written to the **`<UnitName>/` subdirectory next to the exe**.
 
-**示例**：如果 `UnitName = 'MyCalc'`，exe 在 `D:\tools\`，则文件写到 `D:\tools\MyCalc\`。
+**Example**: if `UnitName = 'MyCalc'` and the exe is at `D:\tools\`, files go to `D:\tools\MyCalc\`.
 
-### 11.4 `Tcode_decl_to_abi_form.Create` 的启动
+### 11.4 `Tcode_decl_to_abi_form.Create` Startup
 
 ```pascal
 constructor Tcode_decl_to_abi_form.Create(AOwner: TComponent);
@@ -1221,11 +1240,11 @@ begin
   inherited Create(AOwner);
   current_language := TSourceLanguage.slUnknown;
 
-  Cmb_LanguageSelector.ItemIndex := 2;   // 默认 C
+  Cmb_LanguageSelector.ItemIndex := 2;   // default C
   Sel_Lang_ComboBoxChange(Cmb_LanguageSelector);
   empty_unit_ButtonClick(Btn_LoadEmptyUnit);
 
-  TCompute.RunM_NP(Do_Init_Th);   // 后台启动 LingoFuse
+  TCompute.RunM_NP(Do_Init_Th);   // start LingoFuse in the background
 end;
 
 procedure Tcode_decl_to_abi_form.Do_Init_Th;
@@ -1235,93 +1254,93 @@ begin
 end;
 ```
 
-**注意**：`Do_Init_Th` **没有**调用 `pascal_agent_service_unit.init_pascal_agent_service` 和 `abi_tool_provider_intf_tool_provider_unit.Execute_And_Reg_all`（v2.0 有）。这两步现在**由外部主程序或另一个单元负责**。
+**Note**: `Do_Init_Th` **does not** call `pascal_agent_service_unit.init_pascal_agent_service` nor `abi_tool_provider_intf_tool_provider_unit.Execute_And_Reg_all` (v2.0 did). Those two steps are now **owned by the external main program or another unit**.
 
 ---
 
-## 第 12 章 LingoFuse 集成细节
+## Chapter 12  LingoFuse Integration Details
 
-> 同 v2.0，**补充**：`code_decl_to_abi_mcp_api_tool_provider_unit` 作为新的工具提供者。
+> Same as v2.0, with the addition of `code_decl_to_abi_mcp_api_tool_provider_unit` as a new tool provider.
 
-### 12.1 线协议
+### 12.1 Wire Protocol
 
 ```mermaid
 flowchart LR
-    A["请求 = [field1][field2]...[fieldN]"] --> B["响应 = [status:uint8_t][payload]"]
-    B --> C["0x00: 成功"]
-    B --> D["0xFF: 错误 + UTF-8 消息"]
+    A["Request = [field1][field2]...[fieldN]"] --> B["Response = [status:uint8_t][payload]"]
+    B --> C["0x00: success"]
+    B --> D["0xFF: error + UTF-8 message"]
 ```
 
-### 12.2 `lingofuse_import.pas` 提供的 C ABI
+### 12.2 C ABI Exposed by `lingofuse_import.pas`
 
-**核心数据函数**：`LF_CreateData` / `LF_FreeData` / `LF_GetBuffer` / `LF_WriteBuffer` / `LF_ReadBuffer` / `LF_GetPos` / `LF_SetPos` / `LF_GetSize` / `LF_SetSize`。
+**Core data functions**: `LF_CreateData` / `LF_FreeData` / `LF_GetBuffer` / `LF_WriteBuffer` / `LF_ReadBuffer` / `LF_GetPos` / `LF_SetPos` / `LF_GetSize` / `LF_SetSize`.
 
-**Pascal 封装**：`LF_WriteIntXxx` / `LF_ReadIntXxx` / `LF_WriteString` / `LF_ReadString`。
+**Pascal wrappers**: `LF_WriteIntXxx` / `LF_ReadIntXxx` / `LF_WriteString` / `LF_ReadString`.
 
-**应用句柄**：`LF_CreateApp` / `LF_FreeApp` / `LF_Generate_AppName` / `LF_Get_AppName` / `LF_BindApp`。
+**Application handle**: `LF_CreateApp` / `LF_FreeApp` / `LF_Generate_AppName` / `LF_Get_AppName` / `LF_BindApp`.
 
-**API 注册**：`LF_RegisterCall` / `LF_RegisterCallEx` / `LF_RegisterCall_M` / `LF_RegisterSyncCall_M` / `LF_RegisterNotify` / `LF_RegisterNotify_M`。
+**API registration**: `LF_RegisterCall` / `LF_RegisterCallEx` / `LF_RegisterCall_M` / `LF_RegisterSyncCall_M` / `LF_RegisterNotify` / `LF_RegisterNotify_M`.
 
-**调用**：`LF_LocalCall` / `LF_LocalNotify` / `LF_Call` / `LF_Notify` / `LF_Sequenced_Notify`。
+**Invocation**: `LF_LocalCall` / `LF_LocalNotify` / `LF_Call` / `LF_Notify` / `LF_Sequenced_Notify`.
 
-**准备**：`LF_ResetPrepare` / `LF_PrepareService` / `LF_PrepareClient` / `LF_PrepareDone` / `LF_ExitMainThread` / `LF_Shutdown`。
+**Preparation**: `LF_ResetPrepare` / `LF_PrepareService` / `LF_PrepareClient` / `LF_PrepareDone` / `LF_ExitMainThread` / `LF_Shutdown`.
 
-**选项**：`LF_SetOption` / `LF_GetStatusCount` / `LF_GetStatus` / `LF_PostStatus` / `LF_CheckMainThread` / `LF_CheckApp` / `LF_CheckApi` / `LF_Sync`。
+**Options**: `LF_SetOption` / `LF_GetStatusCount` / `LF_GetStatus` / `LF_PostStatus` / `LF_CheckMainThread` / `LF_CheckApp` / `LF_CheckApi` / `LF_Sync`.
 
-### 12.3 两个工具提供者的对比
+### 12.3 Comparison of the Two Tool Providers
 
-| 维度 | `abi_tool_provider_intf_tool_provider_unit` (v2.0) | `code_decl_to_abi_mcp_api_tool_provider_unit` (v3.0) |
-|------|---------------------------------------------------|------------------------------------------------------|
-| App 名 | `abi_tool_provider_intf` | `code_decl_to_abi_mcp_api` |
-| API 数 | 2（`abi_decl_to_json` + `abi_generate_to_text`） | **21**（1 setup + 6 convert + 14 read） |
-| 工作流 | 两步（解析 → 生成） | **三步**（Set → Convert → Read） |
-| 粒度 | 粗（一次调用 = 一次完整转换） | **细**（每个语言/侧独立） |
-| 是否走 GUI | ❌（直接调用后端） | ✅（通过 `TCompute.Sync` 模拟点按钮） |
-| README 支持 | ❌ | ✅（每个 Convert 都伴随 README） |
-| 用途 | 旧版，供简单场景 | **推荐**，供完整工作流 |
+| Dimension | `abi_tool_provider_intf_tool_provider_unit` (v2.0) | `code_decl_to_abi_mcp_api_tool_provider_unit` (v3.0) |
+|-----------|-----------------------------------------------------|--------------------------------------------------------|
+| App name | `abi_tool_provider_intf` | `code_decl_to_abi_mcp_api` |
+| API count | 2 (`abi_decl_to_json` + `abi_generate_to_text`) | **21** (1 setup + 6 convert + 14 read) |
+| Workflow | Two-phase (parse → generate) | **Three-phase** (Set → Convert → Read) |
+| Granularity | Coarse (one call = one full conversion) | **Fine** (per language and per side) |
+| Goes through GUI | ❌ (calls backend directly) | ✅ (via `TCompute.Sync` mimicking button clicks) |
+| README support | ❌ | ✅ (each Convert is paired with a README) |
+| Use case | Legacy, for simple scenarios | **Recommended**, for full workflow |
 
-**v3.0 项目应该同时注册两个提供者**，或只注册 `code_decl_to_abi_mcp_api`。**推荐后者**。
+**A v3.0 project should register both providers**, or register only `code_decl_to_abi_mcp_api`. **The latter is recommended.**
 
-### 12.4 21 个工具与 GUI 的映射
+### 12.4 Mapping of the 21 Tools to the GUI
 
-| MCP 工具 | 内部调用 |
-|----------|----------|
+| MCP tool | Internal call |
+|----------|---------------|
 | `SetSourceCode` | `code_decl_to_abi_form.Edit_Source.Text := ...` + `Sel_Lang_ComboBoxChange` |
-| `ConvertToPascalService` | `Work_Parse_And_Generate` + 切到 `Tab_PasService` |
-| `ConvertToPascalCall` | 同上 + `Tab_PasCall` |
-| `ConvertToPythonService` | 同上 + `Tab_PyService` |
-| `ConvertToPythonCall` | 同上 + `Tab_PyCall` |
-| `ConvertToCppService` | 同上 + `Tab_CppService` |
-| `ConvertToCppCall` | 同上 + `Tab_CppCall` |
-| `GetLast*` | 读对应 `TSynEdit.Text` |
+| `ConvertToPascalService` | `Work_Parse_And_Generate` + switch to `Tab_PasService` |
+| `ConvertToPascalCall` | Same + `Tab_PasCall` |
+| `ConvertToPythonService` | Same + `Tab_PyService` |
+| `ConvertToPythonCall` | Same + `Tab_PyCall` |
+| `ConvertToCppService` | Same + `Tab_CppService` |
+| `ConvertToCppCall` | Same + `Tab_CppCall` |
+| `GetLast*` | Read the corresponding `TSynEdit.Text` |
 
-**关键**：所有 MCP 调用最终都落到 GUI 上，**没有任何后端"旁路"**。
+**Key**: every MCP call ultimately lands on the GUI — there is **no backend bypass**.
 
 ---
 
-## 第 13 章 已知 bug 清单 + 修法
+## Chapter 13  Known Bug List + Fixes
 
-### Bug 1（v2.0 已存在）：`do_internal_call_abi_generate_to_text` 缺少 `cpp_service` / `cpp_call` 分支
+### Bug 1 (v2.0): `do_internal_call_abi_generate_to_text` missing `cpp_service` / `cpp_call` branches
 
-**位置**：`abi_tool_provider_intf_tool_provider_unit.pas`（**注意：这是旧单元，v3.0 已由 `code_decl_to_abi_mcp_api` 替代**）。
+**Location**: `abi_tool_provider_intf_tool_provider_unit.pas` (**note: this is the legacy unit; v3.0 replaced it with `code_decl_to_abi_mcp_api`**).
 
-**修法**：如果还在用旧单元，参考 v2.0 的修法。**v3.0 用户应直接迁移到新单元**。
+**Fix**: If you still use the legacy unit, refer to v2.0's fix. **v3.0 users should migrate to the new unit.**
 
-### Bug 2（v2.0 已存在）：C++ 两文件输出未实现（旧单元）
+### Bug 2 (v2.0): C++ two-file output not implemented (legacy unit)
 
-同 Bug 1，**v3.0 已在新单元中正确处理**。
+Same as Bug 1. **v3.0 handles this correctly in the new unit.**
 
-### Bug 3（v2.0 已存在）：`JsonToPascalButtonClick` 的 `Report` 生命周期
+### Bug 3 (v2.0): `JsonToPascalButtonClick` `Report` lifetime
 
-**位置**：`code_decl_to_abi_frm.pas`。
+**Location**: `code_decl_to_abi_frm.pas`.
 
-**修法**（v2.0 已给）：用 `try-finally` 保证释放。
+**Fix** (already given in v2.0): use `try-finally` to guarantee release.
 
-### Bug 4（新增）：`code_decl_to_abi_frm.Create` 未启动 LingoFuse 服务
+### Bug 4 (new): `code_decl_to_abi_frm.Create` does not start the LingoFuse service
 
-**位置**：`code_decl_to_abi_frm.pas` 的 `Do_Init_Th`。
+**Location**: `Do_Init_Th` in `code_decl_to_abi_frm.pas`.
 
-**现状**：
+**Current**:
 
 ```pascal
 procedure Tcode_decl_to_abi_form.Do_Init_Th;
@@ -1331,9 +1350,9 @@ begin
 end;
 ```
 
-**问题**：v2.0 的 `Do_Init_Th` 会调用 `pascal_agent_service_unit.init_pascal_agent_service` 和 `abi_tool_provider_intf_tool_provider_unit.Execute_And_Reg_all`。v3.0 的 `Do_Init_Th` **没有**这两步，因此**GUI 启动后 LingoFuse 服务不会自动跑**。
+**Problem**: v2.0's `Do_Init_Th` called `pascal_agent_service_unit.init_pascal_agent_service` and `abi_tool_provider_intf_tool_provider_unit.Execute_And_Reg_all`. v3.0's `Do_Init_Th` **does not** call either — so **LingoFuse will not auto-run after the GUI starts**.
 
-**修法**：在 `Do_Init_Th` 里加回：
+**Fix**: add them back in `Do_Init_Th`:
 
 ```pascal
 procedure Tcode_decl_to_abi_form.Do_Init_Th;
@@ -1344,21 +1363,21 @@ begin
 end;
 ```
 
-**注意**：需要在 `code_decl_to_abi_frm.pas` 的 `implementation uses` 里加入 `code_decl_to_abi_mcp_api_tool_provider_unit`。
+**Note**: add `code_decl_to_abi_mcp_api_tool_provider_unit` to `code_decl_to_abi_frm.pas`'s `implementation uses`.
 
-### Bug 5（新增）：`RegisterTools` 的 `regCount` 硬编码
+### Bug 5 (new): Hard-coded `regCount` in `RegisterTools`
 
-**位置**：`code_decl_to_abi_mcp_api_tool_provider_unit.pas`。
+**Location**: `code_decl_to_abi_mcp_api_tool_provider_unit.pas`.
 
-**现状**：
+**Current**:
 
 ```pascal
 Result := (regCount = 21);
 ```
 
-**问题**：新增工具时必须手动改这里，**容易遗漏**。
+**Problem**: When adding tools you must change this by hand — **easy to forget**.
 
-**修法**：改为常量：
+**Fix**: use a constant:
 
 ```pascal
 const
@@ -1367,11 +1386,11 @@ const
 Result := (regCount = C_TOOL_COUNT);
 ```
 
-### Bug 6（新增）：`RegisterTools` 的 `ParamsObj` 对无参工具仍创建
+### Bug 6 (new): `RegisterTools` still creates `ParamsObj` for zero-arg tools
 
-**位置**：`code_decl_to_abi_mcp_api_tool_provider_unit.pas`。
+**Location**: `code_decl_to_abi_mcp_api_tool_provider_unit.pas`.
 
-**现状**：对每个 Step 2 / Step 3 工具都执行：
+**Current**: for every Step 2 / Step 3 tool:
 
 ```pascal
 ParamsObj := ToolDef.O['parameters'];
@@ -1379,9 +1398,9 @@ ParamsObj.S['type'] := 'object';
 PropsObj := ParamsObj.O['properties'];
 ```
 
-**问题**：对无参工具，这会创建空的 `parameters: {"type":"object","properties":{}}`。某些 MCP 客户端不接受空 `properties`。
+**Problem**: For zero-arg tools, this creates an empty `parameters: {"type":"object","properties":{}}`. Some MCP clients do not accept empty `properties`.
 
-**修法**：无参工具可以省略 `parameters` 或加一个 `additionalProperties: false`：
+**Fix**: Either omit `parameters` for zero-arg tools, or add `additionalProperties: false`:
 
 ```pascal
 ParamsObj := ToolDef.O['parameters'];
@@ -1389,36 +1408,38 @@ ParamsObj.S['type'] := 'object';
 ParamsObj.S['additionalProperties'] := False;
 ```
 
-### Bug 7（v2.0 已存在）：`abi_generate_to_text` 工具描述的"分隔符格式"未实现
+### Bug 7 (v2.0): "separator format" for `abi_generate_to_text` not implemented
 
-**位置**：旧单元。**v3.0 已在新单元的 `ConvertToCppService` / `ConvertToCppCall` 里分别返回 `result` / `impl` / `readme` 三个字段**，不需要分隔符。
+**Location**: legacy unit. **v3.0's new unit returns `result` / `impl` / `readme` from `ConvertToCppService` / `ConvertToCppCall` separately**, so no separator is needed.
 
-### Bug 8（v2.0 已存在）：`Sel_Lang_ComboBoxChange` 的 `current_language` 未初始化
+### Bug 8 (v2.0): `Sel_Lang_ComboBoxChange`'s `current_language` not initialized
 
-见 v2.0 详述。
+See v2.0 for details.
 
 ---
 
-## 第 14 章 新增目标语言的完整改动清单
+## Chapter 14  Full Change List for Adding a Target Language
 
-> **以新增 Rust 为例**。假设目标是生成 `<unit>_abi_service.rs` 和 `<unit>_abi_call.rs`。
+> **Example: adding Rust.** Assume the goal is to emit `<unit>_abi_service.rs` and `<unit>_abi_call.rs`.
 
-### 14.1 改动清单总览（**v3.0 更新**）
+**Roadmap framing**: The generator backend is **designed to accept any number of target languages**. The steps below are the same for any language — only the type mapping table and the language-specific idioms change. Languages whose bindings split into header + implementation (like C++) or that need a companion test page (like JavaScript's HTML harness) extend the same pattern with more files.
 
-| # | 文件 | 操作 | 说明 |
-|:-:|------|------|------|
-| 1 | `rust_abi_service_generator_tool.pas` | **新建** | Rust 服务端生成器（含 Code + Readme） |
-| 2 | `rust_abi_call_generator_tool.pas` | **新建** | Rust 调用端生成器（含 Code + Readme） |
-| 3 | `code_decl_to_abi.lpr` | 修改 | uses 增加两个新单元 |
-| 4 | **`code_decl_to_abi_cmdline.pas`** | **修改** | `Detect_Target_Lang` 增加 `.rs`；`Execute_Conversion` 增加 Rust 分支；`Generate_Rust` 新函数 |
-| 5 | `code_decl_to_abi_frm.pas` | 修改 | uses + `GenerateSourceButtonClick` 增加 Rust 分支 + 窗体字段 |
-| 6 | `code_decl_to_abi_frm.lfm` | 修改 | 新增两个 TabSheet + 两个 TSynEdit |
-| 7 | **`code_decl_to_abi_mcp_api_tool_provider_unit.pas`** | **修改** | 增加 2 个 Convert + 4 个 Reader；`RegisterAPIs` / `RegisterTools` 更新；`regCount` 更新 |
-| 8 | `code_decl_to_abi.lpi` | 修改（可选） | 单元列表 |
+### 14.1 Change List Overview (**v3.0 update**)
 
-### 14.2 步骤 1：新建 `rust_abi_service_generator_tool.pas`
+| # | File | Action | Note |
+|:-:|------|--------|------|
+| 1 | `rust_abi_service_generator_tool.pas` | **New** | Rust service generator (Code + Readme) |
+| 2 | `rust_abi_call_generator_tool.pas` | **New** | Rust call generator (Code + Readme) |
+| 3 | `code_decl_to_abi.lpr` | Edit | Add the two new units to `uses` |
+| 4 | **`code_decl_to_abi_cmdline.pas`** | **Edit** | Add `.rs` to `Detect_Target_Lang`; add a Rust branch to `Execute_Conversion`; add `Generate_Rust` |
+| 5 | `code_decl_to_abi_frm.pas` | Edit | Add to `uses`; add a Rust branch to `GenerateSourceButtonClick`; add form fields |
+| 6 | `code_decl_to_abi_frm.lfm` | Edit | Add two TabSheets + two TSynEdits |
+| 7 | **`code_decl_to_abi_mcp_api_tool_provider_unit.pas`** | **Edit** | Add 2 Convert + 4 Readers; update `RegisterAPIs` / `RegisterTools`; update `regCount` |
+| 8 | `code_decl_to_abi.lpi` | Edit (optional) | Unit list |
 
-**完整骨架**（直接复制 `pas_abi_service_generator_tool.pas`，改关键部分）：
+### 14.2 Step 1: Create `rust_abi_service_generator_tool.pas`
+
+**Skeleton** (copy `pas_abi_service_generator_tool.pas` and change the key parts):
 
 ```pascal
 unit rust_abi_service_generator_tool;
@@ -1441,9 +1462,10 @@ const
 
 implementation
 
-// ... (复制 pas 版的 Log 辅助、CollectSupportedFunctions、StripCommentMarkers、GetFullDescription)
+// ... (copy the Log helpers, CollectSupportedFunctions, StripCommentMarkers,
+//      GetFullDescription from the pas version)
 
-// ⚠️ 关键改动 1：类型映射表
+// Key change 1: type mapping table
 function ABI_Type_To_Rust_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'i32'
@@ -1455,20 +1477,21 @@ begin
   else if T.Same('uint64') then Result := 'u64'
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'f64'
   else if T.Same('single') then Result := 'f32'
-  else if 字符串族 then Result := 'String'
+  else if stringFamily then Result := 'String'
   else Result := '';
 end;
 
-// GenerateABIServiceRustCode / GenerateABIServiceRustReadme 主体，模仿 pas 版结构
+// GenerateABIServiceRustCode / GenerateABIServiceRustReadme bodies,
+// modeled after the pas versions.
 
 end.
 ```
 
-### 14.3 步骤 2：新建 `rust_abi_call_generator_tool.pas`
+### 14.3 Step 2: Create `rust_abi_call_generator_tool.pas`
 
-模仿 `pas_abi_call_generator_tool.pas`。
+Model it after `pas_abi_call_generator_tool.pas`.
 
-### 14.4 步骤 3：修改 `code_decl_to_abi.lpr`
+### 14.4 Step 3: Edit `code_decl_to_abi.lpr`
 
 ```diff
   uses
@@ -1481,16 +1504,16 @@ end.
     code_decl_to_abi_cmdline;
 ```
 
-### 14.5 步骤 4：修改 `code_decl_to_abi_cmdline.pas`
+### 14.5 Step 4: Edit `code_decl_to_abi_cmdline.pas`
 
-#### 4.1 `TTargetLang` 增加 `tlRust`
+#### 4.1 Add `tlRust` to `TTargetLang`
 
 ```pascal
 type
   TTargetLang = (tlPascal, tlPython, tlCpp, tlRust, tlUnknown);
 ```
 
-#### 4.2 `Detect_Target_Lang` 增加 `.rs`
+#### 4.2 Add `.rs` to `Detect_Target_Lang`
 
 ```pascal
 function Detect_Target_Lang(const FileName: string): TTargetLang;
@@ -1512,7 +1535,7 @@ begin
 end;
 ```
 
-#### 4.3 `uses` 增加两个 Rust 单元
+#### 4.3 Add the two Rust units to `uses`
 
 ```diff
   uses
@@ -1530,7 +1553,7 @@ end;
 +   rust_abi_call_generator_tool;
 ```
 
-#### 4.4 新增 `Generate_Rust`
+#### 4.4 Add `Generate_Rust`
 
 ```pascal
 function Generate_Rust(const Model: TPascal_Func_Model;
@@ -1574,7 +1597,7 @@ begin
 end;
 ```
 
-#### 4.5 `Execute_Conversion` 的 `case` 增加 Rust 分支
+#### 4.5 Add a Rust branch to the `case` in `Execute_Conversion`
 
 ```diff
     case TgtLang of
@@ -1587,7 +1610,7 @@ end;
     end;
 ```
 
-#### 4.6 `Print_Help` 更新
+#### 4.6 Update `Print_Help`
 
 ```diff
   DoStatus('TARGET LANGUAGE (detected from the output file extension)');
@@ -1598,9 +1621,9 @@ end;
 + DoStatus('  .rs                           Rust ABI module');
 ```
 
-### 14.6 步骤 5：修改 `code_decl_to_abi_frm.pas`
+### 14.6 Step 5: Edit `code_decl_to_abi_frm.pas`
 
-#### 5.1 `interface uses` 增加 Rust
+#### 5.1 Add Rust to `interface uses`
 
 ```diff
     cpp_abi_call_generator_tool, cpp_abi_service_generator_tool,
@@ -1608,7 +1631,7 @@ end;
     Z.Pascal_Func_Model, Z.Pascal_Func_Tool;
 ```
 
-#### 5.2 窗体类新增字段
+#### 5.2 Add fields to the form class
 
 ```diff
   Tcode_decl_to_abi_form = class(TForm)
@@ -1624,7 +1647,7 @@ end;
     ...
 ```
 
-#### 5.3 `GenerateSourceButtonClick` 增加 Rust
+#### 5.3 Add Rust to `GenerateSourceButtonClick`
 
 ```diff
     l := GenerateABICallCppReadme(func_model);
@@ -1675,13 +1698,13 @@ end;
 +     end;
 ```
 
-### 14.7 步骤 6：修改 `code_decl_to_abi_frm.lfm`
+### 14.7 Step 6: Edit `code_decl_to_abi_frm.lfm`
 
-新增 4 个 TabSheet 和 4 个 TSynEdit。**控件名必须与 `.pas` 里声明的一致**。
+Add four TabSheets and four TSynEdits. **Control names must exactly match the `.pas` declarations.**
 
-### 14.8 步骤 7：修改 `code_decl_to_abi_mcp_api_tool_provider_unit.pas`
+### 14.8 Step 7: Edit `code_decl_to_abi_mcp_api_tool_provider_unit.pas`
 
-#### 7.1 `interface` 增加 6 个 `internal_call_*` 声明
+#### 7.1 Add six `internal_call_*` declarations to `interface`
 
 ```pascal
 function internal_call_CodeDeclToAbi_ConvertToRustService_CodeDeclToAbi_ConvertToRustService(): string;
@@ -1692,7 +1715,7 @@ function internal_call_CodeDeclToAbi_GetLastRustCallCode_CodeDeclToAbi_GetLastRu
 function internal_call_CodeDeclToAbi_GetLastRustCallReadme_CodeDeclToAbi_GetLastRustCallReadme(): string;
 ```
 
-#### 7.2 `implementation` 增加 `Work_*` 辅助函数
+#### 7.2 Add `Work_*` helpers to `implementation`
 
 ```pascal
 function Work_Convert_To_RustService: string;
@@ -1708,21 +1731,21 @@ begin
 end;
 
 function Work_Convert_To_RustCall: string;
-// ... 同理
+// ... same shape
 
 function Work_Get_RustServiceCode: string;
 begin
   if code_decl_to_abi_form = nil then Result := ''
   else Result := code_decl_to_abi_form.Edit_RustServiceSource.Text;
 end;
-// ... 其余读取器同理
+// ... same shape for the other readers
 ```
 
-#### 7.3 `implementation` 增加 6 个 `internal_call_*` 实现
+#### 7.3 Add six `internal_call_*` implementations to `implementation`
 
-用 `TCompute.Sync` 模式（模仿已有的）。
+Use the `TCompute.Sync` pattern (mimic existing ones).
 
-#### 7.4 `RegisterAPIs` 增加 6 个 `LF_RegisterCallEx`
+#### 7.4 Add six `LF_RegisterCallEx` calls to `RegisterAPIs`
 
 ```diff
   LF_RegisterCallEx(App, 'CodeDeclToAbi_GetLastCppCallReadme', 'Step 3/3', nil, @Callback_CodeDeclToAbi_GetLastCppCallReadme_CodeDeclToAbi_GetLastCppCallReadme);
@@ -1735,52 +1758,54 @@ end;
 + LF_RegisterCallEx(App, 'CodeDeclToAbi_GetLastRustCallReadme', 'Step 3/3', nil, @Callback_CodeDeclToAbi_GetLastRustCallReadme_CodeDeclToAbi_GetLastRustCallReadme);
 ```
 
-#### 7.5 `RegisterTools` 增加 6 个 `ToolDef` 组装
+#### 7.5 Add six `ToolDef` assemblies to `RegisterTools`
 
-模仿已有的 Step 2 / Step 3 工具。
+Mimic the existing Step 2 / Step 3 tools.
 
-#### 7.6 更新 `regCount` 断言
+#### 7.6 Update the `regCount` assertion
 
 ```diff
 - Result := (regCount = 21);
 + Result := (regCount = 27);
 ```
 
-### 14.9 验证清单
+### 14.9 Verification Checklist
 
-- [ ] `lazbuild -B code_decl_to_abi.lpi` 编译通过
-- [ ] `code_decl_to_abi --help` 显示 `.rs`
-- [ ] `code_decl_to_abi calc.pas calc_service.rs` 产出 `.rs` + `_readme.md`
-- [ ] GUI 的"最终源码"标签页出现 rust-service / rust-call
-- [ ] MCP 的 `CodeDeclToAbi_ConvertToRustService` 调用成功
-- [ ] `CodeDeclToAbi_GetLastRustServiceCode` 返回非空
-- [ ] 生成的 Rust 代码能 `cargo check`
+- [ ] `lazbuild -B code_decl_to_abi.lpi` compiles
+- [ ] `code_decl_to_abi --help` shows `.rs`
+- [ ] `code_decl_to_abi calc.pas calc_service.rs` produces `.rs` + `_readme.md`
+- [ ] GUI "Final Source" tab shows rust-service / rust-call
+- [ ] MCP `CodeDeclToAbi_ConvertToRustService` succeeds
+- [ ] `CodeDeclToAbi_GetLastRustServiceCode` returns non-empty
+- [ ] Generated Rust code passes `cargo check`
+
+**Roadmap reiteration**: The above is a **template**. Any future target language — Go, TypeScript, Java, Kotlin, Swift, Zig, Nim, Crystal, Julia, C#, F#, OCaml, Haskell, Elixir, Erlang, D, Ada, Fortran, COBOL, or a domain-specific DSL — follows the **exact same shape**: two generator units, one enum value, one branch in each frontend. **There is no architectural ceiling on the number of target languages.**
 
 ---
 
-## 第 15 章 新增源语言的完整改动清单
+## Chapter 15  Full Change List for Adding a Source Language
 
-> **以新增 Go 为例**。假设 Go 源码的函数声明要能解析为 `tfunc_decl`。
+> **Example: adding Go as a source language.** Assume Go function declarations must parse into `tfunc_decl`.
 
-### 15.1 改动清单总览
+### 15.1 Change List Overview
 
-| # | 文件 | 操作 |
-|:-:|------|------|
-| 1 | `Z.Parsing.pas` | 扩展 `TSourceLanguage` 枚举增加 `slGo` |
-| 2 | `Z.Pascal_Func_Tool.pas` | 增加 `CreateFrom_Go_Code` / `Fill_Go` |
-| 3 | `Z.Pascal_Func_Tool.Fill_Go.inc` | **新建** Go 解析器 |
-| 4 | `code_decl_to_abi_cmdline.pas` | `Detect_Source_Lang` 增加 `.go` |
-| 5 | `code_decl_to_abi_frm.pas` | `Sel_Lang_ComboBox` 增加 Go 选项；`source_2_json_nex_ButtonClick` 增加 Go 分支；`empty_unit_Button*` 增加 Go 模板 |
-| 6 | `code_decl_to_abi_mcp_api_tool_provider_unit.pas` | 更新 `SetSourceCode` 工具描述的 `Language` 取值 |
+| # | File | Action |
+|:-:|------|--------|
+| 1 | `Z.Parsing.pas` | Extend `TSourceLanguage` with `slGo` |
+| 2 | `Z.Pascal_Func_Tool.pas` | Add `CreateFrom_Go_Code` / `Fill_Go` |
+| 3 | `Z.Pascal_Func_Tool.Fill_Go.inc` | **New** Go parser |
+| 4 | `code_decl_to_abi_cmdline.pas` | Add `.go` to `Detect_Source_Lang` |
+| 5 | `code_decl_to_abi_frm.pas` | Add a Go item to `Sel_Lang_ComboBox`; add a Go branch to `source_2_json_nex_ButtonClick`; add a Go template to `empty_unit_Button*` |
+| 6 | `code_decl_to_abi_mcp_api_tool_provider_unit.pas` | Update the `Language` description of `SetSourceCode` |
 
-### 15.2 步骤 1：扩展 `TSourceLanguage`
+### 15.2 Step 1: Extend `TSourceLanguage`
 
 ```diff
 - TSourceLanguage = (slPascal, slC, slUnknown);
 + TSourceLanguage = (slPascal, slC, slGo, slUnknown);
 ```
 
-### 15.3 步骤 2：新增 `CreateFrom_Go_Code` / `Fill_Go`
+### 15.3 Step 2: Add `CreateFrom_Go_Code` / `Fill_Go`
 
 ```pascal
 class function tpascal_func_decl_tool.CreateFrom_Go_Code(
@@ -1794,21 +1819,21 @@ end;
 procedure tpascal_func_decl_tool.Fill_Go;
 ```
 
-### 15.4 步骤 3：新建 `Z.Pascal_Func_Tool.Fill_Go.inc`
+### 15.4 Step 3: Create `Z.Pascal_Func_Tool.Fill_Go.inc`
 
-**Go 函数原型识别规则**：
+**Go function prototype recognition rules**:
 
-| Go 语法 | 对应 `tfunc_decl` 字段 |
-|---------|----------------------|
-| `func Name(a int, b string) int` | `IsFunction=True`，`ResultDecl='int'` |
+| Go syntax | Corresponding `tfunc_decl` field |
+|-----------|----------------------------------|
+| `func Name(a int, b string) int` | `IsFunction=True`, `ResultDecl='int'` |
 | `func Name(a int)` | `IsFunction=False` |
-| `func (r *T) Name(...)` | 方法，`NestLevel=1` 或跳过 |
-| 参数 `a int` | `param_name='a'`, `param_typ='int'` |
-| 多返回值 | **不支持**，取第一个或跳过 |
+| `func (r *T) Name(...)` | Method; `NestLevel=1` or skipped |
+| Parameter `a int` | `param_name='a'`, `param_typ='int'` |
+| Multiple return values | **Unsupported**; take the first or skip |
 
-**Go → Pascal 类型映射**：
+**Go → Pascal type mapping**:
 
-| Go 类型 | Pascal 类型 |
+| Go type | Pascal type |
 |---------|-------------|
 | `int` / `int32` | `Integer` |
 | `int64` | `Int64` |
@@ -1821,9 +1846,9 @@ procedure tpascal_func_decl_tool.Fill_Go;
 | `float32` | `Single` |
 | `float64` | `Double` |
 | `string` | `string` |
-| 其他 | 空（跳过） |
+| anything else | empty (skipped) |
 
-### 15.5 步骤 4：修改 `Detect_Source_Lang`
+### 15.5 Step 4: Edit `Detect_Source_Lang`
 
 ```diff
 function Detect_Source_Lang(const FileName: string): TSourceLang;
@@ -1843,22 +1868,20 @@ begin
 end;
 ```
 
-### 15.6 步骤 5：修改 `code_decl_to_abi_frm.pas`
+### 15.6 Step 5: Edit `code_decl_to_abi_frm.pas`
 
-#### 5.1 `Sel_Lang_ComboBox` 增加 Go
-
-在 `.lfm` 里：
+#### 5.1 Add Go to `Sel_Lang_ComboBox` (in the `.lfm`)
 
 ```diff
   Items.Strings = (
-    '自动选择'
+    'Auto-detect'
     'Pascal/FPC/Delphi'
     '.c/.h/.cpp/.hpp'
 +   'Go'
   )
 ```
 
-#### 5.2 `Sel_Lang_ComboBoxChange` 增加 Go
+#### 5.2 Add Go to `Sel_Lang_ComboBoxChange`
 
 ```diff
   case Sel_Lang_ComboBox.ItemIndex of
@@ -1869,7 +1892,7 @@ end;
   end;
 ```
 
-#### 5.3 `source_2_json_nex_ButtonClick` 增加 Go
+#### 5.3 Add Go to `source_2_json_nex_ButtonClick`
 
 ```diff
   case current_language of
@@ -1884,7 +1907,7 @@ end;
   end;
 ```
 
-#### 5.4 `empty_unit_ButtonClick` 增加 Go 模板
+#### 5.4 Add a Go template to `empty_unit_ButtonClick`
 
 ```diff
   case current_language of
@@ -1895,230 +1918,233 @@ end;
   end;
 ```
 
-### 15.7 步骤 6：修改 `code_decl_to_abi_mcp_api_tool_provider_unit.pas`
+### 15.7 Step 6: Edit `code_decl_to_abi_mcp_api_tool_provider_unit.pas`
 
-更新 `SetSourceCode` 的 `Language` 参数描述：
+Update the `Language` description of `SetSourceCode`:
 
 ```diff
 - PropObj.S['description'] := 'the SOURCE language. Accepted: pascal, c.';
 + PropObj.S['description'] := 'the SOURCE language. Accepted: pascal, c, go.';
 ```
 
-### 15.8 验证清单
+### 15.8 Verification Checklist
 
-- [ ] `Z.Parsing.pas` 编译通过
-- [ ] `Z.Pascal_Func_Tool.pas` 编译通过
-- [ ] GUI 语言下拉框出现 `Go`
-- [ ] 输入 Go 函数，点击"下一步"生成 L1 JSON 非空
-- [ ] 用 `code_decl_to_abi calc.go calc_service.py` 能产出
+- [ ] `Z.Parsing.pas` compiles
+- [ ] `Z.Pascal_Func_Tool.pas` compiles
+- [ ] GUI language dropdown shows `Go`
+- [ ] Input a Go function, click "Next", L1 JSON is non-empty
+- [ ] `code_decl_to_abi calc.go calc_service.py` produces output
 
 ---
 
-## 第 16 章 调试与排错手册
+## Chapter 16  Debugging and Troubleshooting Manual
 
-### 16.1 常见症状（v3.0 更新）
+### 16.1 Common Symptoms (v3.0 update)
 
-#### 症状 1：CLI 报"cannot detect source language"
+#### Symptom 1: CLI reports "cannot detect source language"
 
-**排查**：
-1. 检查输入扩展名是否在 `Detect_Source_Lang` 支持列表里。
-2. 检查输出扩展名是否在 `Detect_Target_Lang` 支持列表里。
-3. 如果都不支持，向第 14 / 15 章添加。
+**Troubleshooting**:
+1. Check whether the input extension is in `Detect_Source_Lang`'s supported list.
+2. Check whether the output extension is in `Detect_Target_Lang`'s supported list.
+3. If neither is supported, add them following Chapters 14 / 15.
 
-#### 症状 2：MCP `SetSourceCode` 返回 `{"error":"Unsupported source language"}`
+#### Symptom 2: MCP `SetSourceCode` returns `{"error":"Unsupported source language"}`
 
-**排查**：
-1. 检查 `Language` 值是否为 `pascal` / `c`（大小写不敏感）。
-2. 如果传了 `python` / `cpp` / `go`，说明客户端搞错了。**目标语言不是源语言**。
+**Troubleshooting**:
+1. Check whether `Language` is `pascal` / `c` (case-insensitive).
+2. If you passed `python` / `cpp` / `go`, the client is confused. **Target language is not source language.**
 
-#### 症状 3：MCP `ConvertToXxx` 返回空 result
+#### Symptom 3: MCP `ConvertToXxx` returns an empty result
 
-**排查**：
-1. **是否先调用了 `SetSourceCode`？** 顺序错了会被跳过。
-2. **源文本是否为空？** `Work_Parse_And_Generate` 会检查。
-3. **`Edit_ModelJson` 是否为空？** 说明 `JsonToModelButtonClick` 没跑。
-4. **查看 GUI 里 `LogMemo`**：`source_2_json_nex_ButtonClick` 会输出 `Source -> JSON completed.` 或错误。
+**Troubleshooting**:
+1. **Did you call `SetSourceCode` first?** Wrong order → skipped.
+2. **Is the source text empty?** `Work_Parse_And_Generate` checks.
+3. **Is `Edit_ModelJson` empty?** `JsonToModelButtonClick` did not run.
+4. **Check `LogMemo` in the GUI**: `source_2_json_nex_ButtonClick` prints `Source -> JSON completed.` or an error.
 
-#### 症状 4：CLI 输出的 README 为空
+#### Symptom 4: CLI-produced README is empty
 
-**排查**：
-1. `Write_Text_List` 是否成功？（看 `Wrote : <path>` 日志）
-2. README 生成函数是否返回 nil？（`Model` 为 nil 或 `UnitName` 为空）
-3. 输出目录是否有写权限？
+**Troubleshooting**:
+1. Did `Write_Text_List` succeed? (look for `Wrote : <path>` in the log)
+2. Did the README generator return nil? (`Model` nil or `UnitName` empty)
+3. Does the output directory have write permission?
 
-#### 症状 5：MCP `RegisterTools` 返回 False
+#### Symptom 5: MCP `RegisterTools` returns False
 
-**排查**：
-1. `LF_CheckApiEx(BEACON_APP, REGISTER_API)` 返回 True？
-   - 若 False，agent beacon 未启动。
-2. `regCount` 是否为 21（或新增后）？
-   - 若少，说明某些 `LF_CallEx` 失败。
-3. 查看 `LogMemo` 里的 `[RegisterTools] OK/FAIL: <toolname>` 日志。
+**Troubleshooting**:
+1. `LF_CheckApiEx(BEACON_APP, REGISTER_API)` returned True?
+   - If False, the agent beacon is not running.
+2. `regCount` equal to 21 (or the updated number)?
+   - If smaller, some `LF_CallEx` calls failed.
+3. Check `[RegisterTools] OK/FAIL: <toolname>` in `LogMemo`.
 
-#### 症状 6：CLI 主程序直接退出，没有 GUI
+#### Symptom 6: CLI main program exits without showing GUI
 
-**根因**：`Process_CommandLine` 返回 False（命令行被处理了）。
+**Cause**: `Process_CommandLine` returned False (CLI was handled).
 
-**修法**：不带参数启动 `code_decl_to_abi`。
+**Fix**: launch `code_decl_to_abi` without arguments.
 
-### 16.2 关键日志点（v3.0 更新）
+### 16.2 Key Log Points (v3.0 update)
 
-| 位置 | 日志内容 |
-|------|----------|
+| Location | Log content |
+|----------|-------------|
 | `tpascal_func_decl_tool.Fill_Pascal` | `ParseSuccess` |
 | `TPascal_Func_Model.LoadFromParser` | `Report` |
 | `CollectSupportedFunctions` | `Skipped "<name>": ...` |
 | `do_internal_call_..._decl_to_json` | `DoStatus(Report.AsText)` |
 | `Callback_*` | `DoStatus('[api] ...')` |
-| **`CmdLine_DoStatus_Hook`** | **CLI 所有 DoStatus** |
-| **`Work_Parse_And_Generate`** | **内部 DoStatus** |
+| **`CmdLine_DoStatus_Hook`** | **All CLI DoStatus output** |
+| **`Work_Parse_And_Generate`** | **Internal DoStatus** |
 | **`RegisterTool`** | **`[RegisterTool] OK/FAIL: <toolname>`** |
 
-### 16.3 断点建议（v3.0 更新）
+### 16.3 Breakpoint Suggestions (v3.0 update)
 
-| 场景 | 断点 |
-|------|------|
-| CLI 解析失败 | `code_decl_to_abi_cmdline.Execute_Conversion` 的 `Tool.ParseSuccess` |
-| CLI 写文件失败 | `Write_Text_List` |
-| MCP SetSourceCode 无效果 | `Work_Apply_Language` |
-| MCP Convert 无输出 | `Work_Parse_And_Generate` 的 `G_Last_Generated_Source` |
-| MCP Reader 返回空 | 对应 `Work_Get_*` 函数 |
-| MCP 工具注册失败 | `RegisterTool` 的 `RespJson` |
+| Scenario | Breakpoint |
+|----------|------------|
+| CLI parsing failure | `Tool.ParseSuccess` in `code_decl_to_abi_cmdline.Execute_Conversion` |
+| CLI write failure | `Write_Text_List` |
+| MCP SetSourceCode ineffective | `Work_Apply_Language` |
+| MCP Convert no output | `G_Last_Generated_Source` in `Work_Parse_And_Generate` |
+| MCP Reader returns empty | The corresponding `Work_Get_*` |
+| MCP tool registration failure | `RespJson` in `RegisterTool` |
 
-### 16.4 开启生成器日志
+### 16.4 Enabling Generator Logging
 
 ```pascal
 initialization
   pas_abi_service_generator_tool.GenerateCode_LogEnabled := True;
-  // ... 其余 5 个
+  // ... the other five
 ```
 
-输出到 GUI 的 `LogMemo` 或 CLI 的 stdout。
+Output goes to GUI's `LogMemo` or CLI's stdout.
 
 ---
 
-## 第 17 章 回归测试入口
+## Chapter 17  Regression Test Entry Points
 
-### 17.1 三层入口的测试入口
+### 17.1 Test Entry Points for the Three Frontends
 
-| 入口 | 测试方法 |
-|------|----------|
-| GUI | 用内置"测试单元"按钮 |
+| Entry | Test method |
+|-------|-------------|
+| GUI | Use the built-in "test unit" button |
 | CLI | `code_decl_to_abi --help` + `code_decl_to_abi test.pas out.pas` |
-| MCP | 用 MCP 客户端依次调 21 个工具 |
+| MCP | Use an MCP client to call all 21 tools in order |
 
-### 17.2 回归测试清单（v3.0）
+### 17.2 Regression Checklist (v3.0)
 
-- [ ] `lazbuild -B code_decl_to_abi.lpi` 编译通过
-- [ ] 启动 GUI 无崩溃
-- [ ] `code_decl_to_abi --help` 正常
-- [ ] `code_decl_to_abi --call` + 缺参数 → 返回 1
-- [ ] `code_decl_to_abi badinput.xyz out.pas` → 返回 1
-- [ ] Pascal 测试单元 → 14 个标签页全有内容
-- [ ] C 测试单元 → 14 个标签页全有内容
-- [ ] CLI 生成的 Pascal 服务端能编译
-- [ ] CLI 生成的 Pascal 调用端能编译
-- [ ] CLI 生成的 Python 服务端能 `py_compile`
-- [ ] CLI 生成的 Python 调用端能 `py_compile`
-- [ ] CLI 生成的 C++ 服务端能 `g++ -c`
-- [ ] CLI 生成的 C++ 调用端能 `g++ -c`
-- [ ] **CLI 的 `_readme.md` 非空**
-- [ ] MCP `Execute_And_Reg_all` 返回 True
-- [ ] MCP 21 个工具全部注册成功
-- [ ] MCP `SetSourceCode('unit X; ...', 'pascal')` 返回 ok
-- [ ] MCP 6 个 Convert 全部返回非空 result
-- [ ] MCP 14 个 Reader 全部返回非空
-- [ ] 关闭 GUI 无泄漏
+- [ ] `lazbuild -B code_decl_to_abi.lpi` compiles
+- [ ] Starting the GUI does not crash
+- [ ] `code_decl_to_abi --help` works
+- [ ] `code_decl_to_abi --call` with missing args → exit 1
+- [ ] `code_decl_to_abi badinput.xyz out.pas` → exit 1
+- [ ] Pascal test unit → all 14 tabs have content
+- [ ] C test unit → all 14 tabs have content
+- [ ] CLI-generated Pascal service compiles
+- [ ] CLI-generated Pascal call compiles
+- [ ] CLI-generated Python service passes `py_compile`
+- [ ] CLI-generated Python call passes `py_compile`
+- [ ] CLI-generated C++ service passes `g++ -c`
+- [ ] CLI-generated C++ call passes `g++ -c`
+- [ ] **CLI's `_readme.md` is non-empty**
+- [ ] MCP `Execute_And_Reg_all` returns True
+- [ ] All 21 MCP tools register successfully
+- [ ] MCP `SetSourceCode('unit X; ...', 'pascal')` returns ok
+- [ ] All 6 MCP Convert calls return non-empty results
+- [ ] All 14 MCP Readers return non-empty
+- [ ] Closing the GUI does not leak
 
----
-
-## 第 18 章 材料未覆盖清单
-
-> 以下内容我**无法从提供的材料确定**。遇到这些场景，**必须回查源码或询问人类**。
-
-1. **`code_decl_to_abi.lpi` 的完整内容**
-2. **`mimalloc4p` 的来源**
-3. **`Z.Define.inc` 的完整内容**
-4. **`Z.Parsing.pas` 的 `TSourceLanguage` 完整定义**
-5. **`TTextParsing` 是否支持 `tsGo` 风格**
-6. **`code_decl_to_abi_frm.lfm` 的完整内容**
-7. **`code_decl_to_abi_frm.lpi` 的搜索路径配置**
-8. **`pascal_agent_service_unit` 的 `TRegisteredAgent` 完整实现**
-9. **`abi_tool_provider_intf_tool_provider_unit` 的 `SendLogAsync` 完整实现**
-10. **LingoFuse 库的版本号**
-11. **`cpp_abi_service_generator_tool` 的完整 `Safe_Write_*` 实现细节**
-12. **`Z.Pascal_Func_Tool.Fill_C.inc` 的完整内容**
-13. **`code_decl_to_abi_cmdline.pas` 的 `Print_Help` 与 `code_decl_to_abi.lpr` 的 `exitCode` 交互细节**
-14. **MCP 21 个工具与 beacon 的具体契约**
-    - 从 `code_decl_to_abi_mcp_api_tool_provider_unit.pas` 看到 `REGISTER_API = 'register_agent'`，但 beacon 端的具体 JSON 契约（`{"status":"ok"}` 的准确格式）未提供。
-15. **`code_decl_to_abi_mcp_api_tool_provider_unit` 是否被主程序 uses**
-    - 材料中主程序 uses 未列出该单元，但它必须被某个地方 uses 才能生效。
-16. **`Work_*` 函数具体放在哪个单元**
-    - 可能放在 `code_decl_to_abi_mcp_api_tool_provider_unit.pas` 的 implementation 段，也可能另起单元。
-17. **`TCompute.Sync` 在 FPC 与 Delphi 下的确切行为差异**
-    - `code_decl_to_abi_mcp_api_tool_provider_unit.pas` 用 `{$IFDEF FPC}...{$ELSE FPC}...{$ENDIF FPC}` 分流，但底层 `TCompute.Sync` 的实现细节未提供。
-18. **`Edit_*_Readme` 的存在性**
-    - 从 `code_decl_to_abi_frm.pas` 看到 `Edit_PasServiceReadme` 等 6 个 README 编辑器，但 MCP 单元的 `Work_Get_*Readme` 是否读这些编辑器，需要看完整实现。
+**Roadmap note**: The regression list **scales linearly**. A new target language adds 1 code-compile check per side (2 total for service+call) and 1 README-non-empty check per side. A new source language adds 1 parser sanity check.
 
 ---
 
-## 第 19 章 给 AI 的作业规则
+## Chapter 18  Not Covered by the Material
 
-### 19.1 改代码前必须做的 3 件事
+> The following I **cannot determine from the material you provided**. When you hit these, **you must consult the source or ask a human**.
 
-1. **确认改动入口**：是 CLI / GUI / MCP？
-2. **查本知识库对应章节**：第 8 / 9 / 10 章是 v3.0 新增。
-3. **列出改动文件清单**：用第 14 / 15 章的表格作为模板。
-
-### 19.2 改代码时必须遵守的 7 条铁律（v3.0 更新）
-
-1. **新增单元的 `{$I}` 路径必须是 `..\..\..\Z.Define.inc`**（三层上级），**或用 `uses` 引入 Z 单元**。
-2. **新增单元必须在 3 处注册**：`.lpr` uses、`.frm.pas` implementation uses、MCP 单元的 `RegisterAPIs` / `RegisterTools`。
-3. **线协议不能变**：`[status:uint8_t][payload]`，`0x00` 成功，`0xFF` 失败。
-4. **类型映射必须与已有三种语言一致**：整数 / 浮点 / 字符串三族，其他返回空。
-5. **回调必须 `cdecl`**，且不能调用阻塞 LF 函数。
-6. **新增目标语言时，CLI / GUI / MCP 三处必须同步改**，否则功能不一致。
-7. **README 系统与代码生成必须同步更新**：代码改动 → README 的 §9 API Reference 也要跟着改。
-
-### 19.3 遇到不确定时的处理
-
-1. **查第 18 章"材料未覆盖清单"**。
-2. **如果命中**：明确告知用户"这需要回查源码"，**不要猜**。
-3. **如果不命中**：按本知识库执行。
-
-### 19.4 输出代码时的元信息
-
-回答时标注：
-- **依据章节**（如"第 14.2 节"）
-- **改动文件**（如"新建 `rust_abi_service_generator_tool.pas`"）
-- **验证方式**（如"用第 17.2 节回归清单验证"）
-
-### 19.5 禁止行为
-
-- ❌ 编造不存在的字段名或函数名
-- ❌ 改变 `{$I}` 路径
-- ❌ 忘记在 3 处注册新单元
-- ❌ 改变线协议
-- ❌ 在回调中调用阻塞函数
-- ❌ 把第 18 章的"未覆盖"当作"已知"
-- ❌ **新增目标语言时只改 GUI，不改 CLI / MCP**
-- ❌ **改代码生成器时不改 README 生成器**
-- ❌ **MCP 工具改名后不更新 `regCount` 断言**
+1. **Full contents of `code_decl_to_abi.lpi`**
+2. **Provenance of `mimalloc4p`**
+3. **Full contents of `Z.Define.inc`**
+4. **Full `TSourceLanguage` definition in `Z.Parsing.pas`**
+5. **Whether `TTextParsing` supports a `tsGo` style**
+6. **Full contents of `code_decl_to_abi_frm.lfm`**
+7. **Search-path configuration in `code_decl_to_abi_frm.lpi`**
+8. **Full implementation of `TRegisteredAgent` in `pascal_agent_service_unit`**
+9. **Full implementation of `SendLogAsync` in `abi_tool_provider_intf_tool_provider_unit`**
+10. **LingoFuse library version number**
+11. **Full `Safe_Write_*` implementation details in `cpp_abi_service_generator_tool`**
+12. **Full contents of `Z.Pascal_Func_Tool.Fill_C.inc`**
+13. **Interaction between `Print_Help` in `code_decl_to_abi_cmdline.pas` and `exitCode` in `code_decl_to_abi.lpr`**
+14. **Concrete contract between the 21 MCP tools and the beacon**
+    - From `code_decl_to_abi_mcp_api_tool_provider_unit.pas` we see `REGISTER_API = 'register_agent'`, but the beacon-side JSON contract (exact shape of `{"status":"ok"}`) is not provided.
+15. **Whether `code_decl_to_abi_mcp_api_tool_provider_unit` is `uses`-ed by the main program**
+    - The main program's `uses` list does not include it, but it must be `uses`-ed somewhere to be effective.
+16. **Which unit the `Work_*` functions live in**
+    - They may live in the `implementation` section of `code_decl_to_abi_mcp_api_tool_provider_unit.pas`, or in a separate unit.
+17. **Exact behavior difference of `TCompute.Sync` between FPC and Delphi**
+    - `code_decl_to_abi_mcp_api_tool_provider_unit.pas` branches on `{$IFDEF FPC}...{$ELSE FPC}...{$ENDIF FPC}`, but the underlying `TCompute.Sync` implementation is not provided.
+18. **Existence of `Edit_*_Readme`**
+    - From `code_decl_to_abi_frm.pas` we see 6 README editors like `Edit_PasServiceReadme`, but whether the MCP unit's `Work_Get_*Readme` reads these editors requires the full implementation.
 
 ---
 
-**文档版本**：3.0（三层入口 + README 系统）
-**定位**：施工图。读完即可改代码、修 bug、加语言、写工具、接 MCP。
-**与 2.0 的区别**：
-- 新增第 8 章 README 系统
-- 新增第 9 章命令行接口
-- 新增第 10 章 MCP / Agent 接口（21 个工具）
-- 更新第 2 章系统总览（三层入口）
-- 更新第 11 章 GUI（`GenerateSourceButtonClick` 新增 README + `.Hint` 契约）
-- 更新第 13 章已知 bug 清单（4 个新 bug）
-- 更新第 14 章新增目标语言清单（CLI + MCP 两处新增）
-- 更新第 17 章回归测试（三层入口）
-- 更新第 18 章材料未覆盖清单（新增 3 条）
-- 更新第 19 章给 AI 的作业规则（7 条铁律）
-**覆盖范围**：CLI + GUI + MCP + 6 对生成器 + README 系统 + LingoFuse 集成。
-**未覆盖**：见第 18 章。遇到"未覆盖"场景，必须回查源码。
+## Chapter 19  Operating Rules for AI
+
+### 19.1 Three Things to Do Before Changing Code
+
+1. **Identify the entry point**: CLI / GUI / MCP?
+2. **Look up the corresponding chapter in this knowledge base**: Chapters 8 / 9 / 10 are new in v3.0.
+3. **List the files you will change**: use the tables in Chapters 14 / 15 as templates.
+
+### 19.2 Seven Iron Rules When Changing Code (v3.0 update)
+
+1. **A new unit's `{$I}` path must be `..\..\..\Z.Define.inc`** (three levels up), **or use `uses` to pull in Z units**.
+2. **A new unit must be registered in 3 places**: `.lpr` uses, `.frm.pas` implementation uses, and (if exposed via MCP) the MCP unit's `RegisterAPIs` / `RegisterTools`.
+3. **The wire protocol must not change**: `[status:uint8_t][payload]`, `0x00` success, `0xFF` failure.
+4. **Type mapping must match the existing three languages**: integer / float / string families; anything else returns empty.
+5. **Callbacks must be `cdecl`**, and must not call blocking LF functions.
+6. **When adding a target language, CLI / GUI / MCP must change in sync**, otherwise the features diverge.
+7. **The README system and the code generator must be updated together**: code change → the README's §9 API Reference must follow.
+
+### 19.3 Handling Uncertainty
+
+1. **Check Chapter 18 "Not Covered by the Material"**.
+2. **If your case is listed**: tell the user explicitly "this requires consulting the source", **do not guess**.
+3. **If not listed**: proceed per this knowledge base.
+
+### 19.4 Metadata to Include When Outputting Code
+
+When answering, annotate:
+- **Chapter reference** (e.g. "Section 14.2")
+- **Files changed** (e.g. "new file `rust_abi_service_generator_tool.pas`")
+- **Verification method** (e.g. "verify with the checklist in Section 17.2")
+
+### 19.5 Forbidden Actions
+
+- ❌ Invent field or function names that do not exist
+- ❌ Change `{$I}` paths
+- ❌ Forget to register a new unit in the 3 required places
+- ❌ Change the wire protocol
+- ❌ Call blocking functions inside a callback
+- ❌ Treat Chapter 18's "not covered" as "known"
+- ❌ **Add a target language but only change the GUI, not CLI / MCP**
+- ❌ **Change the code generator but not the README generator**
+- ❌ **Rename an MCP tool but forget to update the `regCount` assertion**
+
+---
+
+**Document version**: 3.0 (three entry points + README system)
+**Purpose**: A construction blueprint. After reading, you can modify code, fix bugs, add languages, write tools, and integrate with MCP.
+**Differences vs 2.0**:
+- New Chapter 8: README system
+- New Chapter 9: command-line interface
+- New Chapter 10: MCP / Agent interface (21 tools)
+- Updated Chapter 2: system overview (three entry points)
+- Updated Chapter 11: GUI (`GenerateSourceButtonClick` now writes READMEs + `.Hint` contract)
+- Updated Chapter 13: known bug list (4 new bugs)
+- Updated Chapter 14: target-language change list (CLI + MCP additions)
+- Updated Chapter 17: regression tests (three entry points)
+- Updated Chapter 18: not-covered list (3 new items)
+- Updated Chapter 19: AI operating rules (7 iron rules)
+**Coverage**: CLI + GUI + MCP + 6 generator pairs + README system + LingoFuse integration.
+**Roadmap**: The generator backend is **designed to support an unbounded number of target languages**. Each new language is a mechanical 7-step addition with no architectural ceiling.
+**Not covered**: See Chapter 18. When you hit a "not covered" scenario, you must consult the source.
