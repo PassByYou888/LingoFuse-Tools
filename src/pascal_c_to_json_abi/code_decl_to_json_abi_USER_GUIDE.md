@@ -1,259 +1,346 @@
-# code_decl_to_json_abi 使用说明
+# code_decl_to_json_abi User Guide
 
-> 本文档描述 **如何使用** `code_decl_to_json_abi` 工具，包括：
-> 图形界面（GUI）操作、命令行（CLI）操作、以及在智能体（MCP / LingoFuse）中远程调用。
+> This document describes **how to use** `code_decl_to_json_abi`, covering:
+> - Graphical User Interface (GUI) operation
+> - Command-Line Interface (CLI) operation
+> - Remote invocation from an agent (MCP / LingoFuse)
+> - **Programmatic interface** (embedding the generator in your own tools)
 >
-> 不涉及源码结构，不涉及编译细节。只讲怎么用。
+> **The single most important rule at runtime**: the **bridge must always be running**. Every artifact this tool generates that performs a call ultimately depends on it. See Chapter 2.
+>
+> **The single most important rule after generation**: **read the generated `.md` files.** The real interface code, test programs, and build scripts — including the C++ CMake script — live inside them. See Chapter 3.
 
 ---
 
-## 目录
+## Table of Contents
 
-1. [项目概览](#1-项目概览)
-2. [⚠️ 全局前置：bridge 必须常开](#2-️-全局前置bridge-必须常开)
-3. [环境准备](#3-环境准备)
-4. [GUI 操作](#4-gui-操作)
-5. [命令行操作](#5-命令行操作)
-6. [智能体（MCP）操作](#6-智能体mcp操作)
-7. [产物清单](#7-产物清单)
-8. [常见问题](#8-常见问题)
+1. [Project Overview](#1-project-overview)
+2. [⚠️ Global Prerequisite: The Bridge Must Always Be Running](#2-️-global-prerequisite-the-bridge-must-always-be-running)
+3. [⚠️ Read This First: The Generated Markdown Is The Real Deliverable](#3-️-read-this-first-the-generated-markdown-is-the-real-deliverable)
+4. [Environment Preparation](#4-environment-preparation)
+5. [GUI Operation Guide](#5-gui-operation-guide)
+6. [Command-Line Guide](#6-command-line-guide)
+7. [Agent (MCP-API) Guide](#7-agent-mcp-api-guide)
+8. [Programmatic Interface](#8-programmatic-interface)
+9. [Artifact Inventory](#9-artifact-inventory)
+10. [JSON Safety and Stability](#10-json-safety-and-stability)
+11. [Language Support: Today and Tomorrow](#11-language-support-today-and-tomorrow)
+12. [Frequently Asked Questions](#12-frequently-asked-questions)
 
 ---
 
-## 1. 项目概览
+## 1. Project Overview
 
-`code_decl_to_json_abi` 是一个**原型声明 → HTTP/JSON 接口代码生成器**。
+`code_decl_to_json_abi` is a **prototype-declaration → HTTP/JSON interface code generator**.
 
-给它一份 Pascal 单元或 C 头文件，它会：
+Give it a Pascal unit or a C header, and it will:
 
-1. 解析出所有顶层函数/过程声明；
-2. 归一化为中间模型（Model）；
-3. 生成一整套 **HTTP POST + JSON** 接口代码，覆盖 5 个语言方向、共 17 个文件。
+1. Parse out every top-level function/procedure declaration;
+2. Normalize them into an intermediate model (Model);
+3. Generate a complete set of **HTTP POST + JSON** interface code covering multiple language directions, **17 files in total**.
 
-支持的**源语言**只有两种：
+### Supported source languages
 
-- Pascal（`.pas` / `.pp` / `.p`）
-- C（`.h` / `.hpp` / `.hh` / `.c` / `.cpp` / `.cc` / `.cxx`）
+Only two source languages are accepted:
 
-支持的**目标语言**共 5 种，服务端与调用端分别生成：
+- **Pascal** (`.pas` / `.pp` / `.p`)
+- **C** (`.h` / `.hpp` / `.hh` / `.c` / `.cpp` / `.cc` / `.cxx`)
 
-| 目标 | 服务端（暴露接口） | 调用端（发起调用） |
-|------|---------------------|---------------------|
+### Supported target languages
+
+| Target | Service (exposes the API) | Call (invokes the API) |
+|--------|---------------------------|------------------------|
 | Pascal | ✅ `<unit>_http_json_service_unit.pas` | ✅ `<unit>_http_json_call_unit.pas` |
 | Python | ✅ `<unit>_http_json_service.py` | ✅ `<unit>_http_json_call.py` |
-| C++ | ✅ `.hpp` + `.cpp` 双文件 | ✅ `.hpp` + `.cpp` 双文件 |
-| JavaScript | ❌（不支持服务端） | ✅ `.js` + 自带测试页 `.html` |
-| 每个目标配套 | ✅ Markdown README | ✅ Markdown README |
+| C++ | ✅ `.hpp` + `.cpp` (two files) | ✅ `.hpp` + `.cpp` (two files) |
+| JavaScript | ❌ (no service side) | ✅ `.js` + bundled test page `.html` |
+| Per-target companion | ✅ Markdown README | ✅ Markdown README |
 
-**一句话理解**：你写一份 Pascal/C 的“声明”，工具帮你把跨语言、跨进程的 RPC 接口全部铺好。
-
----
-
-## 2. ⚠️ 全局前置：bridge 必须常开
-
-> **这是使用本工具生成的所有接口代码的最重要前提，务必先读这一节。**
-
-### 2.1 bridge 是什么
-
-**`bridge.py`（或编译好的 `bridge.exe`）是 LingoFuse 提供的 HTTP↔RPC 转发工具。**
-
-它的职责只有一个：**把 HTTP 请求翻译成 LingoFuse 内部调用，再把返回值翻译回 HTTP 响应。**
-
-```
-HTTP 客户端  ──HTTP POST──▶  bridge.py / bridge.exe  ──LF_Call──▶  服务端
-HTTP 客户端  ◀─HTTP 响应──   bridge.py / bridge.exe  ◀─LF 返回──  服务端
-```
-
-### 2.2 为什么必须常开
-
-本工具生成的**所有调用端代码**（Pascal / Python / C++ / JavaScript）以及**自带的 HTML 测试页**，都**不直接**和服务端通信，而是统一走 bridge：
-
-- **Pascal 调用端**：内部 `LFHttpPost` 通过 LingoFuse 把请求打到 bridge。
-- **Python 调用端**：用 `requests.post(...)` 打到 bridge 的 HTTP 端点。
-- **C++ 调用端**：通过 LingoFuse C ABI 打到 bridge。
-- **JavaScript 调用端**：用 `fetch(...)` 直接 POST 到 bridge 的 HTTP 端点。
-- **HTML 测试页**：同上。
-
-**只要 bridge 不在线，以上所有调用端和测试页都会立即失败**，典型表现是：
-
-- `EHTTPCallError: ... Network error`（Pascal / C++）；
-- `HTTPCallError: Network error`（Python）；
-- `Failed to fetch` / CORS 错误（JS / 浏览器）；
-- `Connection refused`（curl 手测）。
-
-### 2.3 bridge 的生命周期规则
-
-| 规则 | 说明 |
-|------|------|
-| **必须单独启动** | bridge 是一个独立的进程，与你的调用端、服务端**分别运行**。 |
-| **必须常驻** | 只要你还打算调用接口或运行测试页，bridge **就必须一直开着**。 |
-| **不能共用终端** | 建议在**独立终端**里启动 bridge，不要和调用端 / 服务端挤在一个终端。 |
-| **必须先于调用端就绪** | 建议启动顺序：**服务端 → bridge → 调用端**。 |
-| **重新启动即重新拉起** | bridge 崩溃或被杀之后，重新运行 bridge 即可恢复服务；调用端不需要重启。 |
-
-### 2.4 三个进程的推荐布局
-
-```
-终端 1（服务端）：          启动生成的服务端（Pascal / Python / C++）
-终端 2（bridge）：          python3 bridge.py --endpoint <与服务端一致的 endpoint> --port 8081 --no-precheck
-终端 3（调用端 / 测试页）：启动生成的调用端，或双击 HTML 测试页
-```
-
-**bridge 在终端 2 必须保持前台运行**。看到它打出 HTTP 监听日志后，才能开始调用。
-
-### 2.5 常见误解
-
-- ❌ “生成了代码就能直接调用。” → 必须 bridge 在跑。
-- ❌ “我只在 GUI 里生成代码，不需要 bridge。” → **GUI 生成阶段确实不需要 bridge**，但**运行生成出来的代码/测试页时必须开 bridge**。
-- ❌ “bridge 和 服务端 二选一就行。” → **两者必须同时在跑**，bridge 是转发工具，服务端才是真正的业务逻辑。
-- ❌ “bridge 只需要跑一次，以后可以关。” → 关闭 bridge = 关闭整条 HTTP↔RPC 通路。
-
-> **记住一句话：bridge（`bridge.py` / `bridge.exe`）是转发工具，必须保持开启。**
-> 生成的所有调用端、测试页都依赖它。
+**One-sentence summary**: you write a Pascal/C "declaration", and the tool lays out all the cross-language, cross-process HTTP/JSON interfaces for you.
 
 ---
 
-## 3. 环境准备
+## 2. ⚠️ Global Prerequisite: The Bridge Must Always Be Running
 
-### 3.1 直接运行
+> **This is the most important runtime prerequisite. Read this chapter before anything else.**
 
-从可执行文件所在的目录运行 `code_decl_to_json_abi` 即可。程序会自动在自身目录下查找：
+### 2.1 What the bridge is
 
-- `pascal_code_abi_rule.md`（Pascal 原型规则）
-- `C_code_abi_rule.md`（C 原型规则）
+**`bridge.py` (or a compiled `bridge.exe`) is the HTTP↔RPC forwarding tool provided by LingoFuse.**
 
-不找到不影响使用，只是 GUI 里的“规则文档”按钮点不开。
+Its only job is: **translate an HTTP request into a LingoFuse internal call, and translate the return value back into an HTTP response.**
 
-### 3.2 生成阶段的依赖
+```
+HTTP client  ──HTTP POST──▶  bridge.py / bridge.exe  ──LF_Call──▶  service
+HTTP client  ◀─HTTP resp──   bridge.py / bridge.exe  ◀─LF ret───   service
+```
 
-- **生成阶段（GUI / CLI）无额外依赖**。工具本身不联网，也不使用 bridge。
-- **运行生成出来的代码 / 测试页**时，才需要 bridge 与服务端。
+### 2.2 Why it must always be running
 
-### 3.3 运行阶段的依赖
+**Every call-side artifact** this tool generates (Pascal / Python / C++ / JavaScript) and the **bundled HTML test page** do **not** talk to the service directly. They all go through the bridge:
 
-| 组件 | 用途 | 是否必须 |
-|------|------|----------|
-| **服务端**（生成的 `*_service_*` 代码编译/运行后得到的进程） | 提供业务逻辑 | ✅ 必须 |
-| **bridge**（`bridge.py` 或 `bridge.exe`） | HTTP ↔ RPC 转发 | ✅ **必须常开** |
-| **调用端**（生成的 `*_call_*` 代码编译/运行后得到的进程，或 HTML 测试页） | 发起调用 | 按需 |
+- **Pascal call side**: uses `LFHttpPost` internally to reach the bridge over LingoFuse.
+- **Python call side**: uses `requests.post(...)` against the bridge's HTTP endpoint.
+- **C++ call side**: reaches the bridge through the LingoFuse C ABI.
+- **JavaScript call side**: uses `fetch(...)` to POST directly to the bridge's HTTP endpoint.
+- **HTML test page**: same as JavaScript.
 
-### 3.4 智能体模式
+**As long as the bridge is not running, all of the above call sides and test pages will fail immediately.** Typical symptoms:
 
-智能体模式需要 LingoFuse 运行时：
+- `EHTTPCallError: ... Network error` (Pascal / C++)
+- `HTTPCallError: Network error` (Python)
+- `Failed to fetch` / CORS errors (JS / browser)
+- `Connection refused` (manual `curl` test)
+
+### 2.3 Bridge lifecycle rules
+
+| Rule | Description |
+|------|-------------|
+| **Must be started separately** | The bridge is an independent process. It runs **separately** from your call side and your service. |
+| **Must stay resident** | As long as you intend to call the interface or run the test page, the bridge **must stay up**. |
+| **Do not share a terminal** | Start the bridge in its **own terminal**. Do not squeeze it into the same terminal as the call side or the service. |
+| **Must be ready before the call side** | Recommended startup order: **service → bridge → call side**. |
+| **Restart to recover** | If the bridge crashes or is killed, just re-run it; the call side does not need to be restarted. |
+
+### 2.4 Recommended three-process layout
+
+```
+Terminal 1 (service):      start the generated service (Pascal / Python / C++)
+Terminal 2 (bridge):       python3 bridge.py --endpoint <same endpoint as the service> --port 8081 --no-precheck
+Terminal 3 (caller / page): start the generated call side, or double-click the HTML test page
+```
+
+**The bridge must stay in the foreground in Terminal 2.** Only after you see it print the HTTP listening log may you begin invoking.
+
+### 2.5 Common misunderstandings
+
+- ❌ "Once the code is generated, I can call it directly." → No — the bridge must be running.
+- ❌ "I only generate code inside the GUI, so I don't need the bridge." → **The GUI generation step genuinely does not need the bridge**, but the moment you **run** the generated code or open the test page, you do.
+- ❌ "The bridge and the service are an either/or choice." → **Both must be running simultaneously.**
+- ❌ "The bridge only needs to run once, then I can close it." → Closing the bridge closes the entire HTTP↔RPC path.
+
+> **Memorize one sentence: the bridge (`bridge.py` / `bridge.exe`) is a forwarder and must always be running.** Every call-side artifact and test page this tool generates depends on it.
+
+---
+
+## 3. ⚠️ Read This First: The Generated Markdown Is The Real Deliverable
+
+> **This is the most important post-generation rule. It changes how you consume everything the tool produces.**
+
+Every generated code artifact is paired with a companion **Markdown document**. That `.md` is not a "nice-to-have" — **it is where the real, runnable interface material lives.** When `code_decl_to_json_abi` produces, say, a C++ service, it writes:
+
+- `<Unit>_http_json_service.hpp` + `<Unit>_http_json_service.cpp` — the generated C++ skeleton.
+- `<Unit>_http_json_service_cpp.md` — **the companion document, and the real deliverable.**
+
+### 3.1 What every generated `.md` contains
+
+Each `<Unit>_http_json_<lang>.md` file contains, at minimum:
+
+1. **A complete, copy-pasteable test program.**
+   - **Pascal**: a full `.lpr` program you can compile as-is, with the exact `fpc -Fu<...>` command lines (search paths for `lingofuse_import.pas`, `Z.Core`, and the generated unit).
+   - **Python**: the generated module already contains `if __name__ == "__main__":`, so the "test program" **is** the module itself; the `.md` tells you which environment variables and `PYTHONPATH` to set.
+   - **C++**: a full `main.cpp`, plus **a CMake script and a raw compiler invocation (g++, clang++, MSVC)**. The CMake target name, include directories, source files, link libraries, and required C++ standard are all spelled out. A minimal fallback header is provided so you can compile even before the official LingoFuse C++ binding is available.
+   - **JavaScript**: a self-contained HTML test page alongside the `.js`, plus instructions on how to serve it.
+
+2. **The full interface reference for that artifact.**
+   - Every API the artifact exposes.
+   - Its typed signature in the target language.
+   - The **request layout** and **success response layout** on the wire.
+   - A **call example** per API.
+
+3. **The build instructions for that specific language.**
+   - **C++ CMake script** — target name, sources, includes, libraries, standard.
+   - **Pascal** — `lazbuild` project steps and `fpc -Fu<...>` command lines.
+   - **Python** — `pip install` / `PYTHONPATH` setup for cmd, PowerShell, and bash.
+   - **JavaScript** — how to open the test page, and how to include the `.js` in your own page.
+
+4. **The deployment section.**
+   - Which directories the runtime expects (`LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib`, `z_ipc_*`).
+   - Startup order: **service → bridge → caller**.
+   - Shutdown order.
+   - Environment variables that must be set on each OS.
+
+5. **The troubleshooting table for that artifact.**
+   - Symptom → cause → fix, tuned to the specific target language.
+
+> **Rule of thumb**: whenever you finish generating code, **open the `.md` first**. It is written for exactly the situation you are in — "I have the code, what do I do with it?".
+
+### 3.2 Why the Markdown is generated alongside the code
+
+The `.md` and the code are generated from **the same `TPascal_Func_Model`** in the same pass. This guarantees:
+
+- **They never drift apart.** If you re-generate after editing the source unit, both the code and the `.md` are updated together.
+- **The `.md` always describes the current code.** The tool reference is driven by the same function list the generators consumed.
+- **You can hand the `.md` to another engineer (or to an agent) and they can reproduce your build.** Nothing is left implicit.
+
+### 3.3 What you will typically not find in the `.md`
+
+- **Business logic.** The `internal_call_<Api>` stubs are deliberately left empty; you fill them in. The `.md` tells you what signature to match and what the wire layout is, but not what to compute.
+- **A ready-made CMake project for your entire application.** The `.md` gives you the CMake snippet for the generated artifact; wiring it into a larger project is your choice.
+- **Credentials or deployment secrets.** The `.md` assumes a local, trusted runtime.
+
+### 3.4 How to find the `.md` files
+
+| Entry | Where to look |
+|-------|---------------|
+| **GUI** | Each sub-tab of the **Final Source** page shows **two editors**: the code, and the companion `.md`. Both are also on disk under `<exe dir>/<UnitName>/`. |
+| **CLI** | Next to `<base>.<ext>`, the tool also writes `<base>_readme.md`. |
+| **MCP** | Every `ConvertToXxx` call returns `{"result": "...", "readme": "..."}` — the `readme` field is the `.md` companion. Every `GetLastXxxReadme` tool returns its full text. |
+
+### 3.5 Practical consequence for this guide
+
+Because the `.md` files carry the language-specific details, this user guide does **not** try to reproduce every build command for every language. Instead:
+
+- Chapters 5–7 cover the **three frontends** and how to drive them.
+- Chapter 8 covers the **programmatic interface**.
+- Chapters 9–11 cover the **wire format, JSON safety, and type system** — the cross-language invariants.
+- **For any language-specific build, test, or CMake question, the answer is in the generated `.md`, not here.**
+
+---
+
+## 4. Environment Preparation
+
+### 4.1 Running the tool directly
+
+Run `code_decl_to_json_abi` from its executable directory. The program will look for the following files next to itself:
+
+- `pascal_code_abi_rule.md` (Pascal prototype rules)
+- `C_code_abi_rule.md` (C prototype rules)
+
+Missing them does not block usage; it merely makes the GUI's "rule document" buttons inert.
+
+### 4.2 Dependencies for the generation phase
+
+- **The generation phase (GUI / CLI) has no extra dependencies.** The tool itself does not go online, and it does not use the bridge.
+- **Running the generated code / test page** is when the bridge and the service come into play.
+
+### 4.3 Dependencies for the runtime phase
+
+| Component | Purpose | Required? |
+|-----------|---------|:---------:|
+| **Service** (compiled from the generated `*_service_*` code) | Provides the business logic | ✅ Required |
+| **Bridge** (`bridge.py` or `bridge.exe`) | HTTP ↔ RPC forwarding | ✅ **Must always be running** |
+| **Call side** (compiled from the generated `*_call_*` code, or the HTML test page) | Issues calls | On demand |
+
+### 4.4 Agent mode
+
+Agent mode requires the LingoFuse runtime:
 
 - `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib`
 - `z_ipc_*.dll` / `libz_ipc_*.so`
-- Beacon 服务（`agent_main_app`）必须在线
+- A Beacon service (`agent_main_app`) must be online
 
-如果只做本地 GUI / CLI，不需要任何运行时依赖。
+If you only use the local GUI / CLI, none of these runtime dependencies are needed.
 
 ---
 
-## 4. GUI 操作
+## 5. GUI Operation Guide
 
-### 4.1 启动 GUI
+### 5.1 Launching the GUI
 
-**不带任何命令行参数**双击运行，直接进入 GUI。
+**Run the executable with no command-line arguments.** The GUI opens directly.
 
-GUI 顶部有 5 个工作页（Tab），从左到右依次推进：
+The GUI has 5 top-level tabs, advancing left to right:
 
 ```
 [1. Welcome] → [2. Source Code] → [3. Source <-> JSON] → [4. JSON <-> Model] → [5. Final Source]
 ```
 
-每个 Tab 页顶部都有一排按钮，指引“上一步 / 下一步”。
+Each tab has a row of "previous / next" buttons at the top, and a bottom panel showing the live `DoStatus` log.
 
-### 4.2 第 1 页：Welcome
+### 5.2 Page 1 — Welcome
 
-- 显示工具的整体说明、架构图、工作流。
-- 右侧按钮：
-  - **Pascal rule doc**：打开 `pascal_code_abi_rule.md`。
-  - **C rule doc**：打开 `C_code_abi_rule.md`。
-- **Next: Enter source code**：跳到第 2 页。
+- Shows the tool's overall description, architecture diagram, and workflow.
+- Right-side buttons:
+  - **Pascal rule doc** — opens `pascal_code_abi_rule.md`.
+  - **C rule doc** — opens `C_code_abi_rule.md`.
+- **Next: Enter source code** — jumps to Page 2.
 
-### 4.3 第 2 页：Source Code
+### 5.3 Page 2 — Source Code
 
-这一页是**输入代码**的地方。
+This page is where you **input the code**.
 
-顶部工具栏：
+**Top toolbar**:
 
-| 控件 | 作用 |
-|------|------|
-| **Select Language 提示标签** | 点击后自动检测语言。 |
-| **Language Selector 下拉框** | `Auto-detect` / `Pascal` / `C` 手动选择。 |
-| **Format** | 只保留顶层函数，重建最小声明。 |
-| **Empty unit** | 插入最小骨架（Pascal 或 C）。 |
-| **Test unit** | 插入覆盖各种语法形态的复杂示例（推荐首次体验时用）。 |
-| **Next: Pascal/C -> JSON** | 解析当前源码，生成 LV0 JSON，跳到第 3 页。 |
+| Control | Purpose |
+|---------|---------|
+| **Select Language label** | Click to auto-detect the source language. |
+| **Language Selector dropdown** | `Auto-detect` / `Pascal` / `C`, manual choice. |
+| **Format** | Keep only top-level functions; rebuild a minimal declaration. |
+| **Empty unit** | Insert a minimal skeleton (Pascal or C). |
+| **Test unit** | Insert a complex sample covering many syntax forms (recommended for a first run). |
+| **Next: Pascal/C → JSON** | Parse the current source, produce LV0 JSON, jump to Page 3. |
 
-操作步骤：
+**Steps**:
 
-1. 粘贴你的 Pascal 单元或 C 头文件到编辑区。
-2. 若不确定语言，点击“Select Language”标签让工具自动检测。
-3. 若发现语法高亮不对，手动从下拉框选择语言。
-4. 点击 **Next: Pascal/C -> JSON**。
+1. Paste your Pascal unit or C header into the editor.
+2. If you are unsure of the language, click **Select Language** to let the tool detect it.
+3. If the syntax highlighting looks wrong, pick the language manually from the dropdown.
+4. Click **Next: Pascal/C → JSON**.
 
-### 4.4 第 3 页：Source <-> JSON
+### 5.4 Page 3 — Source ↔ JSON
 
-这一页展示的是**解析器输出的原始 JSON（LV0）**。
+This page displays the **raw parser output (LV0)**.
 
-顶部按钮：
+| Button | Purpose |
+|--------|---------|
+| **Back: rebuild code from JSON** | Rebuild source code from the current JSON, write it back to Page 2. |
+| **Next: JSON ↔ Model** | Normalize LV0 into LV1 Model, jump to Page 4. |
 
-| 按钮 | 作用 |
-|------|------|
-| **Back: rebuild code from JSON** | 把当前 JSON 反向重建为源码，写回第 2 页。 |
-| **Next: JSON <-> Model** | 把 LV0 归一化为 LV1 模型，跳到第 4 页。 |
+You may **manually correct the JSON here** — for example, if the parser misclassifies a type, edit the string in the JSON directly and click **Next** to continue. The reverse-rebuild button helps you verify that your edits are still legal.
 
-你可以在这里**手动修正 JSON**——例如解析器对某个类型判断不准，可以直接改 JSON 里的字符串，再点“Next”继续。反向重建按钮用于验证你的修改是否仍然合法。
+### 5.5 Page 4 — JSON ↔ Model
 
-### 4.5 第 4 页：JSON <-> Model
+This page displays the **normalized model JSON (LV1)**.
 
-这一页展示的是**归一化后的模型 JSON（LV1）**。
+| Button | Purpose |
+|--------|---------|
+| **Back: JSON ↔ Model** | Reverse-restore LV1 to LV0, write back to Page 3. |
+| **Next: generate source** | Generate all 17 files, jump to Page 5. |
 
-顶部按钮：
+**Tip**: the model JSON automatically drops unsupported types (`Boolean`, `Variant`, arrays, records, classes, interfaces, enums, sets, pointers, `Currency`, `TDateTime`, etc.). If a function does not appear in the final artifacts, it almost always has an unsupported ABI type in its parameters or return value.
 
-| 按钮 | 作用 |
-|------|------|
-| **Back: JSON <-> Model** | 反向把 LV1 还原为 LV0，写回第 3 页。 |
-| **Next: generate source** | 生成全部 17 个文件，跳到第 5 页。 |
+### 5.6 Page 5 — Final Source
 
-**提示**：模型 JSON 会自动剔除不支持的类型（`Boolean`、`Variant`、数组、记录、类、接口、枚举、集合、指针、`Currency`、`TDateTime` 等）。如果某个函数没有出现在最终产物里，多半是它的参数或返回值里有不支持的 ABI 类型。
+This page has **8 sub-tabs**, each showing **two editors** (code + companion `.md`):
 
-### 4.6 第 5 页：Final Source
+| Sub-tab | Content |
+|---------|---------|
+| Pascal Service | Pascal service code + README |
+| Pascal Call | Pascal call code + README |
+| JavaScript Call | JS client code + README |
+| JavaScript Test HTML | Self-contained HTML test page |
+| Python Service | Python service code + README |
+| Python Call | Python call code + README |
+| C++ Service | C++ service `.hpp` + `.cpp` + README |
+| C++ Call | C++ call `.hpp` + `.cpp` + README |
 
-这一页有 8 个子 Tab：
+> **Open the `.md` sub-tab first.** See Chapter 3. The `.md` is where the build commands, CMake scripts, and test programs live.
 
-| 子 Tab | 内容 |
-|--------|------|
-| Pascal Service | Pascal 服务端代码 + README |
-| Pascal Call | Pascal 调用端代码 + README |
-| JavaScript Call | JS 客户端代码 + README |
-| JavaScript Test HTML | 自包含的 HTML 测试页 |
-| Python Service | Python 服务端代码 + README |
-| Python Call | Python 调用端代码 + README |
-| C++ Service | C++ 服务端 .hpp + .cpp + README |
-| C++ Call | C++ 调用端 .hpp + .cpp + README |
+**Files have already been written to disk**: during generation, all files are automatically written to the `<UnitName>/` subdirectory of the executable's directory, with the file name pattern `<UnitName>_http_json_*.xxx`.
 
-**文件已经落盘**：生成时所有文件自动写到**可执行文件所在目录**下的 `<UnitName>/` 子目录里，文件名格式为 `<UnitName>_http_json_*.xxx`。
+Top button:
 
-顶部按钮：
+- **Back: Model JSON** — return to Page 4 to keep adjusting the model.
 
-- **Back: Model JSON**：返回第 4 页继续调整模型。
+### 5.7 Log panel
+
+The bottom panel is the live `DoStatus` log. It shows which file was just saved, any dropped routines during normalization, and any errors from the generators. It clears itself when it exceeds 5000 lines.
 
 ---
 
-## 5. 命令行操作
+## 6. Command-Line Guide
 
-### 5.1 触发条件
+### 6.1 Trigger condition
 
-命令行模式**只在至少传入一个参数时**触发。无参数 = GUI。
+Command-line mode **only triggers when at least one argument is passed**. No arguments = GUI.
 
-程序以 console 子系统构建，因此：
+The program is built for the console subsystem, therefore:
 
-- 双击运行 = 启动 GUI（系统会额外弹出一个空控制台窗口，关闭主窗口即结束）。
-- 命令行运行 = 所有 `DoStatus` 消息直接打到 stdout，正常工作后按退出码返回。
+- Double-click = launch GUI (the system may pop up an extra empty console window; closing the main window ends it).
+- Command-line run = all `DoStatus` messages go straight to stdout, and normal completion returns via exit codes.
 
-### 5.2 语法
+### 6.2 Syntax
 
 ```
 code_decl_to_json_abi --help
@@ -261,79 +348,79 @@ code_decl_to_json_abi <input_file> <output_file>
 code_decl_to_json_abi --call <input_file> <output_file>
 ```
 
-| 参数 | 说明 |
-|------|------|
-| `--help` / `-h` / `-?` / `/?` | 打印帮助后退出。**只识别为第 1 个参数。** |
-| `--call` / `-c` | 生成调用端。**只识别为第 1 个参数**，缺省为服务端。 |
-| `<input_file>` | 输入源文件。语言由**扩展名**判断。 |
-| `<output_file>` | 输出文件。目标语言由**扩展名**判断。 |
+| Argument | Description |
+|----------|-------------|
+| `--help` / `-h` / `-?` / `/?` | Print help and exit. **Recognized only as the 1st argument.** |
+| `--call` / `-c` | Generate the call side. **Recognized only as the 1st argument**; default is the service side. |
+| `<input_file>` | The input source file. Language is determined by **extension**. |
+| `<output_file>` | The output file. Target language is determined by **extension**. |
 
-### 5.3 输入扩展名 → 源语言
+### 6.3 Input extension → source language
 
-| 扩展名 | 源语言 |
-|--------|--------|
+| Extension | Source language |
+|-----------|-----------------|
 | `.pas` / `.pp` / `.p` | Pascal |
 | `.h` / `.hpp` / `.hh` / `.c` / `.cpp` / `.cc` / `.cxx` | C |
 
-### 5.4 输出扩展名 → 目标语言
+### 6.4 Output extension → target language
 
-| 扩展名 | 目标语言 | 支持的方向 |
-|--------|----------|------------|
-| `.pas` / `.pp` / `.p` | Pascal | 服务端 + 调用端 |
-| `.py` | Python | 服务端 + 调用端 |
-| `.hpp` / `.hh` / `.h` / `.cpp` / `.cc` / `.cxx` / `.c` | C++（.hpp + .cpp 双文件） | 服务端 + 调用端 |
-| `.js` | JavaScript | **仅调用端** |
+| Extension | Target language | Supported sides |
+|-----------|-----------------|-----------------|
+| `.pas` / `.pp` / `.p` | Pascal | Service + Call |
+| `.py` | Python | Service + Call |
+| `.hpp` / `.hh` / `.h` / `.cpp` / `.cc` / `.cxx` / `.c` | C++ (`.hpp` + `.cpp` two files) | Service + Call |
+| `.js` | JavaScript | **Call side only** |
 
-**JavaScript 是调用端专用**：指定 `.js` 输出但没有传 `--call`，工具会直接以参数错误退出。
+**JavaScript is call-side only**: specifying a `.js` output without passing `--call` exits immediately with an argument error.
 
-### 5.5 每次运行会产出什么
+### 6.5 What each run produces
 
-以 `<output>` 的基名为准（去掉扩展名），自动写入**同目录**下的产物：
+Taking the base name of `<output>` (extension removed), the tool writes to the **same directory**:
 
-- **代码文件**：`<base>.xxx`（Pascal / Python / JS 单文件；C++ 会产出 `<base>.hpp` + `<base>.cpp` 双文件）。
-- **配套 README**：`<base>_readme.md`。
-- **JS 特有**：额外产出 `<base>_test.html`（自包含测试页）。
+- **Code files**: `<base>.xxx` (single file for Pascal / Python / JS; C++ produces `<base>.hpp` + `<base>.cpp`).
+- **Companion README**: `<base>_readme.md` — **the real deliverable** (see Chapter 3).
+- **JS-specific**: additionally produces `<base>_test.html` (self-contained test page).
 
-### 5.6 示例
+### 6.6 Examples
 
-**服务端：Pascal → Pascal**
+**Service: Pascal → Pascal**
 
 ```
 code_decl_to_json_abi calculator.pas calculator_service.pas
 ```
 
-产物：
+Artifacts:
 
 ```
 calculator_service.pas
 calculator_service_readme.md
 ```
 
-**调用端：Pascal → Pascal**
+**Call: Pascal → Pascal**
 
 ```
 code_decl_to_json_abi --call calculator.pas calculator_call.pas
 ```
 
-**服务端：C → Python**
+**Service: C → Python**
 
 ```
 code_decl_to_json_abi ComplexTestUnit.h calculator_service.py
 ```
 
-**调用端：C → Python**
+**Call: C → Python**
 
 ```
 code_decl_to_json_abi --call ComplexTestUnit.h calculator_call.py
 ```
 
-**服务端：C → C++（.hpp + .cpp 双文件）**
+**Service: C → C++ (`.hpp` + `.cpp` two files)**
 
 ```
 code_decl_to_json_abi ComplexTestUnit.h calculator_service.hpp
 ```
 
-产物：
+Artifacts:
 
 ```
 calculator_service.hpp
@@ -341,13 +428,13 @@ calculator_service.cpp
 calculator_service_readme.md
 ```
 
-**调用端：C → JavaScript（.js + .html 双文件）**
+**Call: C → JavaScript (`.js` + `.html` two files)**
 
 ```
 code_decl_to_json_abi --call ComplexTestUnit.h calculator_call.js
 ```
 
-产物：
+Artifacts:
 
 ```
 calculator_call.js
@@ -355,19 +442,19 @@ calculator_call_readme.md
 calculator_call_test.html
 ```
 
-### 5.7 退出码
+### 6.7 Exit codes
 
-| 退出码 | 含义 |
-|--------|------|
-| `0` | 转换成功。 |
-| `1` | 参数缺失或非法。 |
-| `2` | 源码解析失败（`ParseSuccess=False`，或找不到任何可用声明）。 |
-| `3` | 代码生成失败（生成器返回 nil）。 |
-| `4` | 文件 I/O 错误（读入或写出失败）。 |
+| Exit code | Meaning |
+|:---------:|---------|
+| `0` | Conversion succeeded. |
+| `1` | Missing or invalid argument. |
+| `2` | Source parsing failed (`ParseSuccess=False`, or no usable declarations found). |
+| `3` | Code generation failed (a generator returned `nil`). |
+| `4` | File I/O error (read or write failed). |
 
-### 5.8 输出消息
+### 6.8 Output messages
 
-命令行模式下，所有中间消息都走 stdout，例如：
+In command-line mode, all intermediate messages go to stdout, for example:
 
 ```
 Reading: ComplexTestUnit.h (1234 chars)
@@ -380,145 +467,169 @@ Saved  : calculator_service_readme.md
 Done.
 ```
 
-出现错误时会打印 `Failed.` 并以非零退出码返回。
+On error, it prints `Failed.` and returns a non-zero exit code. **Do not parse the wording**; depend on the exit code.
 
-### 5.9 ⚠️ 命令行不启动 bridge
+### 6.9 ⚠️ The CLI does not start the bridge
 
-**CLI 只负责生成代码，不启动 bridge，也不启动服务端。**
+**The CLI is only responsible for generating code. It does not start the bridge, and it does not start the service.**
 
-生成完成后，要真正跑通一次端到端调用，必须手动：
+To actually run an end-to-end call, you must manually:
 
-1. 编译 / 运行生成的服务端；
-2. **单独启动 `bridge.py`（或 `bridge.exe`）并保持常开**；
-3. 再运行调用端或打开 HTML 测试页。
+1. Compile / run the generated service (see the generated `<base>_readme.md` for build commands — the C++ one has the CMake script);
+2. **Start `bridge.py` (or `bridge.exe`) separately and keep it running**;
+3. Then run the call side or open the HTML test page.
+
+### 6.10 ⚠️ The CLI delivers the `.md` alongside the code — read it
+
+For every generated artifact, the CLI writes a `<base>_readme.md`. **Read it before you try to build anything.** The `.md` contains:
+
+- The exact compile command for the target language.
+- **The C++ CMake script**, when applicable.
+- A complete test program.
+- The tool reference for that artifact.
+- The deployment and troubleshooting sections.
+
+See Chapter 3 for the full contract.
 
 ---
 
-## 6. 智能体（MCP）操作
+## 7. Agent (MCP-API) Guide
 
-### 6.1 触发条件
+### 7.1 Trigger condition
 
-**GUI 启动后**，工具会在后台线程自动启动 MCP 服务：
+**After the GUI starts**, the tool automatically launches the MCP service on a background thread:
 
-1. 创建 LingoFuse App（默认名 `code_decl_to_json_abi_mcp_api`）。
-2. 连接 LingoFuse endpoint（默认 `ipc:agent`）。
-3. 通过 Beacon（默认 App `agent_main_app`，API `register_agent`）注册全部 **22 个工具**。
+1. Creates a LingoFuse App (default name `code_decl_to_json_abi_mcp_api`).
+2. Connects to the LingoFuse endpoint (default `ipc:agent`).
+3. Registers all **22 tools** via the Beacon (default App `agent_main_app`, API `register_agent`).
 
-所以智能体要调用本工具，必须：
+So for an agent to call this tool, the following must hold:
 
-- 本工具的 GUI **正在运行**；
-- Beacon（例如 `pascal_agent_service`）**正在运行**；
-- 二者 LingoFuse endpoint 一致（默认 `ipc:agent`）。
+- This tool's GUI **is running**;
+- The Beacon (e.g. `pascal_agent_service`) **is running**;
+- The two LingoFuse endpoints match (default `ipc:agent`).
 
-> **注意**：智能体模式下的 MCP 服务与 bridge **是两回事**。
-> - MCP 服务：让智能体调用本工具的 22 个 API（生成代码）。
-> - bridge：让运行阶段的所有调用端能访问服务端。
+> **Note**: the MCP service and the bridge **are two different things**.
+> - The MCP service: lets an agent invoke this tool's 22 APIs (to generate code).
+> - The bridge: lets every runtime call side reach the service.
 >
-> **两者互不替代。** 智能体生成代码时不需要 bridge；但生成的代码要跑起来，仍然**必须开 bridge**。
+> **They do not substitute for each other.** The agent does not need the bridge to generate code; but the moment the generated code runs, **the bridge must still be up**.
 
-### 6.2 工具清单（22 个）
+### 7.2 Tool inventory (22 tools)
 
-按功能分 4 组。
+Grouped into 4 functional clusters.
 
-#### 6.2.1 写入 / 检查（Step 1 与 Step 3 的“只读”查询）
+#### 7.2.1 Write / Inspect (Step 1)
 
-| 工具名 | 作用 |
-|--------|------|
-| `CodeDeclToJsonAbi_SetSourceCode` | **Step 1**：把源码字符串（Pascal 或 C）塞进“源代码编辑器”，并选择源语言。参数：`Source`、`Language`（`"pascal"` 或 `"c"`）。 |
-| `CodeDeclToJsonAbi_SetModelJson` | **Step 1 的替代**：直接塞入一个 LV1 模型 JSON。参数：`ModelJson`。 |
-| `CodeDeclToJsonAbi_GetSourceJson` | **只读**：取回当前 LV0 源码 JSON。 |
-| `CodeDeclToJsonAbi_GetModelJson` | **只读**：取回当前 LV1 模型 JSON。 |
+| Tool | Purpose |
+|------|---------|
+| `CodeDeclToJsonAbi_SetSourceCode` | **Step 1**: put a source string (Pascal or C) into the "source editor" and select the source language. Args: `Source`, `Language` (`"pascal"` or `"c"`). |
+| `CodeDeclToJsonAbi_SetModelJson` | **Step 1 alternative**: feed an LV1 Model JSON directly. Arg: `ModelJson`. |
+| `CodeDeclToJsonAbi_GetSourceJson` | **Read-only**: return the current LV0 source JSON. |
+| `CodeDeclToJsonAbi_GetModelJson` | **Read-only**: return the current LV1 model JSON. |
 
-> `SetSourceCode` 和 `SetModelJson` 是**互斥的两条入口**。用哪个都可以，但一旦用了 `SetModelJson` 就直接跳过解析器与归一化器。
+> `SetSourceCode` and `SetModelJson` are **two mutually exclusive entry points**. Either works, but once you use `SetModelJson` you skip both the parser and the normalizer.
 
-#### 6.2.2 生成（Step 2）
+#### 7.2.2 Generation (Step 2)
 
-| 工具名 | 作用 |
-|--------|------|
-| `CodeDeclToJsonAbi_GenerateAll` | **Step 2**：跑完 17 个生成器，并把结果缓存到 17 个编辑器里。返回 JSON，含 `unit_name` 和 `files` 清单。 |
+| Tool | Purpose |
+|------|---------|
+| `CodeDeclToJsonAbi_GenerateAll` | **Step 2**: run all 17 generators and cache the results into the 17 editors. Returns JSON with `unit_name` and a `files` manifest. |
 
-`GenerateAll` 可以重复调用，每次都针对当前模型 JSON 重跑全部生成器。
+`GenerateAll` may be called repeatedly; each call re-runs every generator against the current model JSON.
 
-#### 6.2.3 读取产物（Step 3，共 17 个只读工具）
+#### 7.2.3 Read Artifacts (Step 3, 17 read-only tools)
 
-按目标语言与方向分组：
+Grouped by target language and side:
 
 **Pascal**
 
-| 工具名 | 产物 |
-|--------|------|
-| `CodeDeclToJsonAbi_GetLastPascalServiceCode` | Pascal 服务端代码 |
-| `CodeDeclToJsonAbi_GetLastPascalServiceReadme` | Pascal 服务端 README |
-| `CodeDeclToJsonAbi_GetLastPascalCallCode` | Pascal 调用端代码 |
-| `CodeDeclToJsonAbi_GetLastPascalCallReadme` | Pascal 调用端 README |
+| Tool | Artifact |
+|------|----------|
+| `CodeDeclToJsonAbi_GetLastPascalServiceCode` | Pascal service code |
+| `CodeDeclToJsonAbi_GetLastPascalServiceReadme` | Pascal service README |
+| `CodeDeclToJsonAbi_GetLastPascalCallCode` | Pascal call code |
+| `CodeDeclToJsonAbi_GetLastPascalCallReadme` | Pascal call README |
 
 **JavaScript**
 
-| 工具名 | 产物 |
-|--------|------|
-| `CodeDeclToJsonAbi_GetLastJsCallCode` | JS 客户端 |
+| Tool | Artifact |
+|------|----------|
+| `CodeDeclToJsonAbi_GetLastJsCallCode` | JS client |
 | `CodeDeclToJsonAbi_GetLastJsCallReadme` | JS README |
-| `CodeDeclToJsonAbi_GetLastJsTestHtml` | HTML 测试页 |
+| `CodeDeclToJsonAbi_GetLastJsTestHtml` | HTML test page |
 
 **Python**
 
-| 工具名 | 产物 |
-|--------|------|
-| `CodeDeclToJsonAbi_GetLastPythonServiceCode` | Python 服务端 |
-| `CodeDeclToJsonAbi_GetLastPythonServiceReadme` | Python 服务端 README |
-| `CodeDeclToJsonAbi_GetLastPythonCallCode` | Python 调用端 |
-| `CodeDeclToJsonAbi_GetLastPythonCallReadme` | Python 调用端 README |
+| Tool | Artifact |
+|------|----------|
+| `CodeDeclToJsonAbi_GetLastPythonServiceCode` | Python service |
+| `CodeDeclToJsonAbi_GetLastPythonServiceReadme` | Python service README |
+| `CodeDeclToJsonAbi_GetLastPythonCallCode` | Python call |
+| `CodeDeclToJsonAbi_GetLastPythonCallReadme` | Python call README |
 
 **C++**
 
-| 工具名 | 产物 |
-|--------|------|
-| `CodeDeclToJsonAbi_GetLastCppServiceHeader` | C++ 服务端 `.hpp` |
-| `CodeDeclToJsonAbi_GetLastCppServiceImpl` | C++ 服务端 `.cpp` |
-| `CodeDeclToJsonAbi_GetLastCppServiceReadme` | C++ 服务端 README |
-| `CodeDeclToJsonAbi_GetLastCppCallHeader` | C++ 调用端 `.hpp` |
-| `CodeDeclToJsonAbi_GetLastCppCallImpl` | C++ 调用端 `.cpp` |
-| `CodeDeclToJsonAbi_GetLastCppCallReadme` | C++ 调用端 README |
+| Tool | Artifact |
+|------|----------|
+| `CodeDeclToJsonAbi_GetLastCppServiceHeader` | C++ service `.hpp` |
+| `CodeDeclToJsonAbi_GetLastCppServiceImpl` | C++ service `.cpp` |
+| `CodeDeclToJsonAbi_GetLastCppServiceReadme` | C++ service README |
+| `CodeDeclToJsonAbi_GetLastCppCallHeader` | C++ call `.hpp` |
+| `CodeDeclToJsonAbi_GetLastCppCallImpl` | C++ call `.cpp` |
+| `CodeDeclToJsonAbi_GetLastCppCallReadme` | C++ call README |
 
-所有 17 个读取器都是**纯读**，不会触发新的解析或生成。
+All 17 readers are **pure read** — they never trigger new parsing or generation.
 
-### 6.3 推荐调用序列
+### 7.3 Recommended call sequences
 
-**最小流程（只需要一份产物）**：
+**Minimum flow (you only need one artifact)**:
 
 ```
 1. CodeDeclToJsonAbi_SetSourceCode(Source="...", Language="pascal")
 2. CodeDeclToJsonAbi_GenerateAll()
-3. CodeDeclToJsonAbi_GetLastPythonServiceCode()      ← 按需取你想要的
+3. CodeDeclToJsonAbi_GetLastPythonServiceCode()      ← pick whichever you want
 ```
 
-**只读取解析/模型的检查流程**：
+**Inspect-only flow (see the parse and the model)**:
 
 ```
 1. CodeDeclToJsonAbi_SetSourceCode(Source="...", Language="c")
-2. CodeDeclToJsonAbi_GetSourceJson()                 ← 看 LV0
-3. CodeDeclToJsonAbi_GetModelJson()                  ← 看 LV1（自动归一化后的结果）
+2. CodeDeclToJsonAbi_GetSourceJson()                 ← inspect LV0
+3. CodeDeclToJsonAbi_GetModelJson()                  ← inspect LV1
 ```
 
-**直接注入已有模型的流程**：
+**Direct-injection flow (you already have a model)**:
 
 ```
 1. CodeDeclToJsonAbi_SetModelJson(ModelJson="...")
 2. CodeDeclToJsonAbi_GenerateAll()
-3. 按需调用 17 个读取器
+3. Invoke any of the 17 readers as needed
 ```
 
-### 6.4 工具返回值
+**Build-prep flow (recommended for agents that will also build the artifacts)**:
 
-所有工具的返回值都是 **JSON 字符串**。
+```
+1. CodeDeclToJsonAbi_SetSourceCode(<source>, "c")
+2. CodeDeclToJsonAbi_GenerateAll()
+3. CodeDeclToJsonAbi_GetLastCppServiceHeader()      ← the .hpp
+4. CodeDeclToJsonAbi_GetLastCppServiceImpl()        ← the .cpp
+5. CodeDeclToJsonAbi_GetLastCppServiceReadme()      ← ⚠️ READ THIS FIRST
+```
 
-`SetSourceCode` / `SetModelJson` 成功：
+Step 5 returns the `.md`. **The `.md` is where the CMake script, the test `main.cpp`, the include directories, and the link libraries are.** An agent that intends to actually build the artifact should read the `.md` before doing anything else.
+
+### 7.4 Tool return values
+
+Every tool returns a **JSON string**.
+
+`SetSourceCode` / `SetModelJson` on success:
 
 ```json
 {"status":"ok","unit_name":"Calculator"}
 ```
 
-`GenerateAll` 成功：
+`GenerateAll` on success:
 
 ```json
 {
@@ -546,165 +657,386 @@ Done.
 }
 ```
 
-失败：
+On failure:
 
 ```json
 {"error":"<message>"}
 ```
 
-**17 个读取器** 成功时直接返回**产物全文**（纯文本，不是 JSON）；失败时返回空字符串。
+**The 17 readers** return the **full artifact text** (plain text, not JSON) on success; on failure, they return an empty string.
 
-### 6.5 智能体操作注意事项
+### 7.5 Agent-mode notes
 
-1. **源语言只接受 `"pascal"` 或 `"c"`**，其他值会被拒绝。
-2. **不要在一次会话中交替使用 `SetSourceCode` 和 `SetModelJson`**——后一次调用会完全覆盖前一次的状态，`GetSourceJson` 只对 `SetSourceCode` 有效。
-3. **`GenerateAll` 是幂等的**：重复调用不会累积垃圾，只会重写 17 个缓存。
-4. **先 `SetSourceCode`/`SetModelJson`，再 `GenerateAll`，最后读取**——顺序反过来会失败。
-5. **17 个读取器只对“最近一次成功的 `GenerateAll`”有效**：在调用 `GenerateAll` 之前调用它们，只会得到空字符串。
-6. **GUI 必须活着**：MCP 服务是 GUI 启动时挂上的，GUI 关闭后工具全部下线。
-7. **智能体生成代码 ≠ 运行代码**：生成出来的代码要跑起来，**仍然必须手动启动 bridge 并保持常开**。
+1. **The source language only accepts `"pascal"` or `"c"`**; any other value is rejected.
+2. **Do not alternate `SetSourceCode` and `SetModelJson` within one session** — the later call completely overwrites the earlier state, and `GetSourceJson` is only meaningful for `SetSourceCode`.
+3. **`GenerateAll` is idempotent**: repeated calls do not accumulate garbage; they simply rewrite the 17 caches.
+4. **Order matters**: `SetSourceCode`/`SetModelJson` → `GenerateAll` → read. Reversing the order fails.
+5. **The 17 readers are only valid for the "most recent successful `GenerateAll`"**: calling them before `GenerateAll` returns empty strings.
+6. **The GUI must be alive**: the MCP service is attached at GUI startup; closing the GUI takes all tools offline.
+7. **Generating code with an agent ≠ running the code**: to actually run the generated code, **you must still manually start the bridge and keep it running**.
+8. **Point agents at the `.md` files.** After a successful `GenerateAll`, every `GetLastXxxReadme` returns a `.md`. **That `.md` is where the build commands, CMake scripts, and test programs live.** An agent that intends to build the artifact must read the `.md` first.
+
+### 7.6 Example agent interaction
+
+```
+# 1. Feed the source
+CodeDeclToJsonAbi_SetSourceCode(
+    Source   = "<contents of calculator.pas>",
+    Language = "pascal")
+
+# 2. Generate everything
+CodeDeclToJsonAbi_GenerateAll()
+
+# 3. Read the artifacts (and the companions)
+CodeDeclToJsonAbi_GetLastCppServiceHeader()      # the .hpp
+CodeDeclToJsonAbi_GetLastCppServiceImpl()        # the .cpp
+CodeDeclToJsonAbi_GetLastCppServiceReadme()      # ⚠️ the .md — has the CMake script
+
+CodeDeclToJsonAbi_GetLastPythonServiceCode()     # the .py
+CodeDeclToJsonAbi_GetLastPythonServiceReadme()   # ⚠️ the .md — has the run instructions
+
+CodeDeclToJsonAbi_GetLastPascalServiceCode()     # the .pas
+CodeDeclToJsonAbi_GetLastPascalServiceReadme()   # ⚠️ the .md — has the .lpr test program
+```
+
+The agent can then either forward the artifacts to a user or, if the environment permits, execute the build and run instructions directly from the `.md`.
 
 ---
 
-## 7. 产物清单
+## 8. Programmatic Interface
 
-### 7.1 每种产物的用途
+The tool can also be driven from another program. This section describes the **public API surface** — the same functions the CLI, GUI, and MCP provider call internally.
 
-| 文件后缀 / 名称 | 用途 | 运行阶段是否需要 bridge |
-|-----------------|------|--------------------------|
-| `*_http_json_service_unit.pas` | Pascal 服务端：注册 API、监听 RPC、把 LingoFuse 调用转成 JSON。 | ❌（服务端不经过 bridge） |
-| `*_http_json_call_unit.pas` | Pascal 调用端：把本地函数调用转成对 bridge.py 的 HTTP POST。 | ✅ **必须** |
-| `*_http_json_service.py` | Python 服务端。 | ❌ |
-| `*_http_json_call.py` | Python 调用端。 | ✅ **必须** |
-| `*_http_json_service.hpp` / `.cpp` | C++ 服务端（.hpp 声明 + .cpp 实现）。 | ❌ |
-| `*_http_json_call.hpp` / `.cpp` | C++ 调用端。 | ✅ **必须** |
-| `*_http_json_call.js` | 浏览器 JS 客户端（IIFE 形式，挂到 `window.<UnitName>Api`）。 | ✅ **必须** |
-| `*_http_json_call_test.html` | 自包含的 HTML 测试页，双击即可测试。 | ✅ **必须** |
-| `*_readme.md` | 每种产物的配套说明（含 wire protocol、类型映射、示例）。 | — |
+### 8.1 Where the API lives
 
-> **注意**：**服务端本身不经过 bridge**。bridge 只服务于“调用端 → 服务端”的方向。
-> 也就是说，bridge 要转发的是**调用端的请求**，它把调用端的 HTTP 翻译成 LingoFuse 调用发往服务端。
+| Unit | Exports |
+|------|---------|
+| `http_pas_abi_service_generator_tool` | `GenerateABIServicePascalCode` / `GenerateABIServicePascalReadme` |
+| `http_pas_abi_call_generator_tool` | `GenerateABICallPascalCode` / `GenerateABICallPascalReadme` |
+| `http_py_abi_service_generator_tool` | `GenerateABIServicePyCode` / `GenerateABIServicePyReadme` |
+| `http_py_abi_call_generator_tool` | `GenerateABICallPyCode` / `GenerateABICallPyReadme` |
+| `http_cpp_abi_service_generator_tool` | `GenerateABIServiceHppCode` / `GenerateABIServiceCppCode` / `GenerateABIServiceCppReadme` |
+| `http_cpp_abi_call_generator_tool` | `GenerateABICallHppCode` / `GenerateABICallCppCode` / `GenerateABICallCppReadme` |
+| `http_js_abi_call_generator_tool` | `GenerateABICallJsCode` / `GenerateABICallJsReadme` / `GenerateABICallJsTestHtml` |
 
-### 7.2 文件位置
+Each code function returns a `TPascalStringList` that the caller must dispose.
 
-- **GUI / 命令行**：产物写在**可执行文件所在目录**下的 `<UnitName>/` 子目录里。
-- **智能体（MCP）**：产物与 GUI 版一致，同样写在可执行文件目录下的 `<UnitName>/`；同时 17 个编辑器的内容会通过读取器原样返回给智能体。
+### 8.2 Model building
 
-### 7.3 配套 bridge：转发工具，必须常开
+The generators consume a `TPascal_Func_Model`. To build one from source text:
 
-**生成的调用端（Pascal / Python / C++ / JavaScript）都通过 bridge 与后端通信：**
+```pascal
+var
+  Parser: tpascal_func_decl_tool;
+  Model: TPascal_Func_Model;
+  Report: TPascalStringList;
+begin
+  Parser := tpascal_func_decl_tool.CreateFrom_Pascal_Code(SourceText);
+  try
+    Report := TPascalStringList.Create;
+    try
+      Model := TPascal_Func_Model.Create;
+      try
+        Model.Typ_Normalize_Func := tnf_ABI;   // required by the ABI generators
+        Model.LoadFromParser(Parser, Report);
+        // Model is now ready for the generator functions.
+      finally
+        Model.Free;
+      end;
+    finally
+      Report.Free;
+    end;
+  finally
+    Parser.Free;
+  end;
+end;
+```
+
+For a C header, substitute `CreateFrom_C_Code`.
+
+### 8.3 Minimum viable embedding
+
+```pascal
+var
+  Parser: tpascal_func_decl_tool;
+  Model: TPascal_Func_Model;
+  Code, Readme: TPascalStringList;
+begin
+  Parser := tpascal_func_decl_tool.CreateFrom_Pascal_Code(SourceText);
+  try
+    Model := TPascal_Func_Model.Create;
+    try
+      Model.Typ_Normalize_Func := tnf_ABI;
+      Model.LoadFromParser(Parser, nil);      // nil report = silent
+
+      Code := GenerateABIServicePascalCode(Model);
+      try
+        if Code <> nil then
+          Code.SaveToFile('MyUnit_http_json_service_unit.pas');
+      finally
+        Code.Free;
+      end;
+
+      Readme := GenerateABIServicePascalReadme(Model);
+      try
+        if Readme <> nil then
+          Readme.SaveToFile('MyUnit_http_json_service_pascal.md');
+      finally
+        Readme.Free;
+      end;
+    finally
+      Model.Free;
+    end;
+  finally
+    Parser.Free;
+  end;
+end;
+```
+
+### 8.4 Contract summary
+
+| Function family | Input | Output | Notes |
+|-----------------|-------|--------|-------|
+| `GenerateABI*Code` / `GenerateABI*Readme` | `TPascal_Func_Model` (must be `tnf_ABI`) | `TPascalStringList` or `nil` | Caller disposes; `nil` on empty model |
+| `tpascal_func_decl_tool.CreateFrom_*` | source text | parser instance | Caller disposes |
+| `TPascal_Func_Model.LoadFromParser` | parser + optional report | — | Applies the six filters (Chapter 11) |
+
+### 8.5 ⚠️ The `.md` generator is part of the API
+
+Every `GenerateABI*Code` function has a **companion `GenerateABI*Readme` function**. If you call only the code function and not the README function, you produce a `.pas` / `.py` / `.hpp` without its build instructions. **Always call both.** The generated code and its `.md` are designed to be produced together.
+
+### 8.6 Registering the generators with the tool itself
+
+If you are extending the tool and want your generator to appear in the CLI, GUI, or MCP frontends, you must register it in three places (see `code_decl_to_abi_OPERATIONS.md` Chapter 3):
+
+1. `code_decl_to_json_abi.lpr` — `uses` clause, so the unit's `initialization` runs.
+2. `code_decl_to_abi_json_frm.pas` — `implementation uses`, so the GUI can call it.
+3. `code_decl_to_json_abi_mcp_api_tool_provider_unit.pas` — `RegisterAPIs`, `RegisterTools`, and the appropriate `Work_*` helper, so agents can reach it.
+
+---
+
+## 9. Artifact Inventory
+
+### 9.1 What each artifact is for
+
+| Extension / name | Purpose | Needs the bridge at runtime? |
+|------------------|---------|:----------------------------:|
+| `*_http_json_service_unit.pas` | Pascal service: registers APIs, listens for RPC, converts LingoFuse calls into JSON. | ❌ (the service does not go through the bridge) |
+| `*_http_json_call_unit.pas` | Pascal call side: turns a local function call into an HTTP POST to `bridge.py`. | ✅ **Required** |
+| `*_http_json_service.py` | Python service. | ❌ |
+| `*_http_json_call.py` | Python call side. | ✅ **Required** |
+| `*_http_json_service.hpp` / `.cpp` | C++ service (`.hpp` declarations + `.cpp` implementation). | ❌ |
+| `*_http_json_call.hpp` / `.cpp` | C++ call side. | ✅ **Required** |
+| `*_http_json_call.js` | Browser JS client (IIFE, attached to `window.<UnitName>Api`). | ✅ **Required** |
+| `*_http_json_call_test.html` | Self-contained HTML test page; double-click to test. | ✅ **Required** |
+| `*_readme.md` | **Per-artifact companion documentation. The real deliverable.** Contains wire protocol, type mapping, deployment, testing, API reference, and language-specific build scripts (including the C++ CMake script). | — |
+
+> **Note**: **The service itself does not go through the bridge.** The bridge only serves the "call → service" direction.
+
+### 9.2 File locations
+
+- **GUI / command line**: artifacts are written to the `<UnitName>/` subdirectory of the executable's directory.
+- **Agent (MCP)**: artifacts are identical to the GUI version and are written to the same `<UnitName>/` directory; additionally, the content of the 17 editors is returned verbatim to the agent via the readers.
+
+### 9.3 The bridge is a forwarder, and must always be running
+
+**Every generated call side (Pascal / Python / C++ / JavaScript) talks to the backend through the bridge:**
 
 ```
-调用端 ──HTTP POST──▶ bridge.py / bridge.exe ──LF_Call──▶ 服务端
-调用端 ◀─HTTP 响应── bridge.py / bridge.exe ◀─LF 返回── 服务端
+caller ──HTTP POST──▶ bridge.py / bridge.exe ──LF_Call──▶ service
+caller ◀─HTTP resp──  bridge.py / bridge.exe ◀─LF ret───  service
 ```
 
-**启动 bridge 时需要指定与服务端一致的 endpoint，例如：**
+**When starting the bridge, specify an endpoint that matches the service, e.g.:**
 
 ```
 python3 bridge.py --endpoint ipc:calc_http_json --port 8081 --no-precheck
 ```
 
-或（编译好的可执行版本）：
+Or the compiled executable form:
 
 ```
 bridge.exe --endpoint ipc:calc_http_json --port 8081 --no-precheck
 ```
 
-`--no-precheck` 会跳过 bridge 的 API 预检查（约 3 秒延迟），首次启动更稳。
+`--no-precheck` skips the bridge's API precheck (about 3 seconds of latency), which is more stable on first startup.
 
-**重要规则再强调一次**：
+**Important rules, once more for emphasis**:
 
-- **bridge 是转发工具，必须保持开启**。关闭 bridge = 关闭整条通路。
-- bridge 可以 `bridge.py` 运行，也可以编译成 `bridge.exe` 运行，两者行为一致。
-- bridge 应放在**独立终端**里前台运行，看到 HTTP 监听日志后，再去运行调用端。
-- 崩溃/被杀后，重启 bridge 即可恢复；调用端无需重启。
+- **The bridge is a forwarder and must always be running.** Closing the bridge closes the whole path.
+- The bridge may run as `bridge.py` or be compiled into `bridge.exe` — both behave identically.
+- The bridge should run in its **own terminal**, in the foreground. Only after you see the HTTP listening log should you start the call side.
+- After a crash or kill, restarting the bridge is enough to recover; the call side does not need to be restarted.
 
 ---
 
-## 8. 常见问题
+## 10. JSON Safety and Stability
 
-### Q1：为什么我传进去的函数没有出现在生成结果里？
+Because every generated call side ultimately speaks JSON over HTTP, **JSON is the safety and stability boundary of the entire pipeline**. The following points are guaranteed by the toolchain:
 
-检查三点：
+1. **UTF-8 everywhere.** Requests and responses are always UTF-8; the bridge serializes with `ensure_ascii=False`, so non-ASCII payloads (Chinese, emoji, and other multi-byte content) are carried as literal UTF-8 rather than being re-encoded as `\uXXXX` escapes.
 
-1. **函数是否在顶层**（`interface` 段，非嵌套在 `class` / `record` 里）。嵌套声明会被跳过。
-2. **参数与返回类型是否在支持列表中**：只接受整数族、浮点族、字符串族。`Boolean`、`Variant`、数组、记录、类、接口、枚举、集合、指针、`Currency`、`TDateTime` 都不支持。
-3. **函数名是否非空**（`Name.Len > 0`）。
+2. **NUL-terminator policy is explicit.** LingoFuse strings are NUL-terminated on the wire. The bridge **strips the trailing NUL** before forwarding to HTTP clients, and the generated call sides never emit a stray NUL into JSON. This removes the single most common class of "extra byte at the end of the JSON" bugs.
 
-### Q2：为什么模型 JSON 里函数比源文件少？
+3. **The bridge is binary-safe.** If a payload cannot be parsed as JSON at all, the bridge forwards it verbatim rather than corrupting it. JSON repair (BOM removal, trailing-comma handling, encoding fallback) is applied only when JSON parsing is actually possible.
 
-同上。归一化时会把不支持类型的函数整体剔除。
+4. **Deterministic unwrapping.** The bridge wraps every service response in a stable envelope (`{"status_code": ..., "headers": ..., "body": ...}`). The generated call sides unwrap `body` and check `body.code`; code `0` returns `body.result`, any other code raises the language-appropriate exception. There is no ambiguity about where the payload lives.
 
-### Q3：CLI 输出 `.js` 但没传 `--call` 会怎样？
+5. **No silent precision loss on the wire.** Large integers are transmitted as JSON numbers by default, which is safe for Python (unbounded `int`) and for C++ (via `std::int64_t` on the service side). It is **not** safe for the JavaScript client, whose `Number` is IEEE-754 double. For `int64` / `uint64` interfaces intended for browser consumption, **the recommended pattern is to have the service return the value as a string**. The generated READMEs call this out explicitly.
 
-直接以参数错误退出，退出码 `1`。JavaScript 是调用端专用目标。
+6. **Stable error schema.** Every failure surfaces either as `{"error":"<message>"}` (tool-level) or as `{"code": -N, "error": "<message>"}` (service/bridge level). Call sides translate these into language-specific exceptions: `EHTTPCallError` (Pascal), `HTTPCallError` (Python / C++), `LFHttpCallError` (JavaScript).
 
-### Q4：CLI 运行后没看到任何输出？
+The practical upshot: **as long as the bridge is running and the endpoint strings match on both sides, JSON payloads produced by one language's call side are consumed correctly by any other language's service side, and vice versa.**
 
-本工具在 CLI 模式下把所有 `DoStatus` 消息写到 stdout。如果你在 IDE 里运行或重定向了 stdout，就可能看不到。直接在终端里跑即可。
+---
 
-### Q5：GUI 里“规则文档”按钮点了没反应？
+## 11. Language Support: Today and Tomorrow
 
-可执行文件目录下缺少 `pascal_code_abi_rule.md` 或 `C_code_abi_rule.md`。把这两个文件放到可执行文件旁边即可。
+### 11.1 Excellent interface support for strongly-typed languages
 
-### Q6：智能体调用工具返回 `{"error":"Form not available"}`？
+For **Pascal, C++, and Python**, the generated interfaces are first-class, not merely stubs:
 
-GUI 没有运行。MCP 服务是 GUI 生命周期内的服务，GUI 关闭后工具全部不可用。
+- **Pascal**: the generated service unit registers cdecl callbacks with LingoFuse directly and uses `Z.Json` for serialization. The generated call unit uses `LFHttpPost` from `lf_http_bridge_client` and exposes each API as a **typed free function**, so a Pascal caller never touches raw JSON.
+- **C++**: the generated service produces a clean `.hpp`/`.cpp` pair with a namespace, typed function signatures, `LF_CDECL`-compatible callbacks, and JSON I/O helpers. The generated call side exposes a **typed free function per API** and carries a rich set of tunables (`HTTP_CALL_BASE_URL`, `HTTP_CALL_TIMEOUT_MS`, `HTTP_CALL_DEFAULT_TIMEOUT_S`, etc.). **The generated `.md` contains the CMake script and every compiler invocation you need.**
+- **Python**: the generated service module exposes a `register_all_http_json_apis(app)` entry point with typed internal stubs; the generated call module exposes **one typed Python function per API** and a unified internal `_call_api()` dispatcher.
 
-### Q7：智能体返回 `{"error":"Beacon not available ..."}`？
+In all three languages, the type families (integer / float / string) map to the language's natural primitives, JSON serialization is handled internally, and the only thing the developer has to do is fill in the `internal_call_<Api>` stub body.
 
-Beacon 服务（默认 `agent_main_app`）不在线，或 endpoint 与本工具不一致。检查两侧 `--endpoint` 参数。
+### 11.2 Excellent support for full-stack languages (JavaScript today; TypeScript and PHP on the roadmap)
 
-### Q8：`SetSourceCode` 后立刻 `GetModelJson` 拿到的是什么？
+- **JavaScript (available today)**: the generated `.js` is a **self-contained IIFE**, attaches itself to `window.<Unit>Api` (or `globalThis.<Unit>Api`), uses only `fetch` / `Promise` / `async-await`, and has **no third-party dependencies**. Every API is exposed as an `async` function with a JSDoc-annotated signature. A **self-contained HTML test page** is bundled alongside, so a full-stack developer can open it in a browser and exercise the interface immediately.
+- **TypeScript (roadmap)**: because TypeScript is a strict superset of JavaScript and the generated JS already carries JSDoc type annotations that TS understands, a TS generator is a natural next step. It will reuse most of the JS backend and add `.d.ts`-style declaration output, unlocking a typed full-stack path.
+- **PHP (roadmap)**: PHP is a separate backend that will plug into the same CLI / GUI / MCP dispatch. It will expose each API as a typed PHP function using the same HTTP/JSON wire protocol, so a PHP backend can call the same LingoFuse service that a Pascal or Python client is calling.
 
-是**归一化器自动跑的**结果。`GetSourceJson` 与 `GetModelJson` 都会在 `SetSourceCode` 成功时把 LV0/LV1 顺手算好，供你检查。
+### 11.3 The system is designed for unbounded extension
 
-### Q9：多次 `GenerateAll` 会不会污染结果？
+**Today is the starting phase.** The system currently ships production-ready bindings for **three strongly-typed languages (Pascal, C++, Python)** and **one full-stack language (JavaScript)**.
 
-不会。每次 `GenerateAll` 都从头重跑 17 个生成器，覆盖旧缓存。
+**The generator backend treats each target language as a mechanical, pluggable unit.** Adding a new language is a **mechanical process**, not an architectural change. The steps are documented in `code_decl_to_abi_OPERATIONS.md` Chapter 14, and they are the same for every language:
 
-### Q10：能不能只生成某一种语言的产物？
+1. Create two generator units: `<lang>_abi_service_generator_tool.pas` and `<lang>_abi_call_generator_tool.pas`.
+2. Provide a type mapping table from the three ABI families (integer / float / string) to the target language's native types.
+3. Register the new units in the main program, the CLI dispatcher, the GUI form, and the MCP tool provider.
+4. Update the CLI's `Detect_Target_Lang` and help text.
+5. Update the MCP `regCount` assertion.
 
-**当前版本不支持**。`GenerateAll` 一次把 17 个全部生成。若只需要某一种，可以从 17 个读取器里挑你要的；写入磁盘的 17 个文件可以忽略。
+**There is no architectural ceiling on the number of supported target languages.** Every language with (a) an HTTP client, (b) a JSON library, and (c) a runtime that can speak the wire protocol is a candidate.
 
-### Q11：运行生成的调用端 / HTML 测试页，报 `Network error` / `Failed to fetch` / `Connection refused`？
+**The user-facing contract does not change when a language is added**: the same CLI flags, the same GUI workflow, and the same MCP tools continue to work. The only difference is a new set of `<lang>_*` generator units in the backend, and a new companion `.md` per artifact.
 
-**99% 是 bridge 没开（或开了又关了）。**
+---
 
-排查步骤：
+## 12. Frequently Asked Questions
 
-1. **确认 bridge 是否正在运行**：看 bridge 的终端里是否还有实时日志输出。
-2. **确认 bridge 的 endpoint 与服务端一致**：两边都必须是同一字符串，例如都是 `ipc:calc_http_json`。
-3. **确认 bridge 的端口与调用端一致**：默认 `8081`。调用端的 `HTTP_CALL_BASE_URL` 或 HTML 页里的 Base URL 必须写成 `http://127.0.0.1:8081/<unit>`。
-4. **重启 bridge**：有时候 bridge 崩了但终端没关，看起来还“开着”。直接重启一次最省事。
+### Q1: Why is a function I passed in missing from the generated result?
 
-> 再重复一遍：**bridge（`bridge.py` / `bridge.exe`）是转发工具，必须保持开启。**
+Check three things:
 
-### Q12：服务端已经跑起来了，为什么还是调不通？
+1. **Is the function top-level** (in the `interface` section, not nested inside a `class` / `record`)? Nested declarations are skipped.
+2. **Are its parameters and return type in the supported set?** Only the integer family, float family, and string family are accepted. `Boolean`, `Variant`, arrays, records, classes, interfaces, enums, sets, pointers, `Currency`, `TDateTime` are not supported.
+3. **Is the function name non-empty** (`Name.Len > 0`)?
 
-服务端、bridge、调用端是**三个独立进程**，缺一不可：
+### Q2: Why does the model JSON have fewer functions than the source file?
+
+Same as above. During normalization, any function with unsupported types is dropped wholesale.
+
+### Q3: What happens if the CLI is asked to output `.js` without `--call`?
+
+It exits immediately with an argument error, exit code `1`. JavaScript is a call-side-only target.
+
+### Q4: I see no output at all after running the CLI.
+
+In CLI mode, this tool writes all `DoStatus` messages to stdout. If you are running from inside an IDE or have redirected stdout, you may not see them. Run it directly in a terminal.
+
+### Q5: The "rule document" buttons in the GUI do nothing.
+
+The executable directory is missing `pascal_code_abi_rule.md` or `C_code_abi_rule.md`. Put those two files next to the executable.
+
+### Q6: An agent call returns `{"error":"Form not available"}`.
+
+The GUI is not running. The MCP service is a GUI-lifetime service; after the GUI closes, all tools become unavailable.
+
+### Q7: An agent call returns `{"error":"Beacon not available ..."}`.
+
+The Beacon service (default `agent_main_app`) is not online, or its endpoint differs from this tool's endpoint. Check both sides' `--endpoint` arguments.
+
+### Q8: What exactly do I get if I call `GetModelJson` immediately after `SetSourceCode`?
+
+You get the result of the **normalizer running automatically**. Both `GetSourceJson` and `GetModelJson` compute LV0/LV1 on the fly when `SetSourceCode` succeeds, so you can inspect them.
+
+### Q9: Does calling `GenerateAll` multiple times pollute the result?
+
+No. Every `GenerateAll` re-runs all 17 generators from scratch, overwriting the old caches.
+
+### Q10: Can I generate only one target language?
+
+**The current version does not support that.** `GenerateAll` produces all 17 at once. If you only want one of them, pick it out of the 17 readers; the 17 files written to disk can simply be ignored.
+
+### Q11: Running the generated call side or HTML test page gives `Network error` / `Failed to fetch` / `Connection refused`.
+
+**99% of the time, the bridge is not running (or was up and got closed).**
+
+Troubleshooting steps:
+
+1. **Confirm the bridge is actually running**: check its terminal for live log output.
+2. **Confirm the bridge's endpoint matches the service**: both sides must be the same string, e.g. `ipc:calc_http_json`.
+3. **Confirm the bridge's port matches the caller's expectation**: default `8081`. The caller's `HTTP_CALL_BASE_URL` or the HTML page's Base URL must be `http://127.0.0.1:8081/<unit>`.
+4. **Restart the bridge**: sometimes the bridge crashed but its terminal is still open, so it looks like it is "still up". A restart is the quickest fix.
+
+> Once again: **the bridge (`bridge.py` / `bridge.exe`) is a forwarder and must always be running.**
+
+### Q12: The service is up — why can I still not reach it?
+
+The service, the bridge, and the caller are **three independent processes**, and all three are required:
 
 ```
-服务端进程（必须在线）
+service process (must be online)
      ▲
      │ LF_Call
-bridge 进程（必须在线，前台常开）
+bridge process (must be online, foreground, always running)
      ▲
      │ HTTP POST
-调用端进程（按需启动）
+caller process (started on demand)
 ```
 
-- 只有服务端，没有 bridge → 调用端报 Network error。
-- 只有 bridge，没有服务端 → bridge 报 API not available / 超时。
-- 三者都在，但没有按顺序启动 → 建议按 “服务端 → bridge → 调用端” 顺序重启一遍。
+- Only the service, no bridge → the caller reports `Network error`.
+- Only the bridge, no service → the bridge reports API not available / timeout.
+- All three up but not started in order → restart in the order "service → bridge → caller".
+
+### Q13: What about TypeScript and PHP?
+
+TypeScript and PHP are **on the roadmap** as part of the full-stack-language expansion. Until their generators land:
+
+- For TypeScript projects, use the JavaScript output — its JSDoc type annotations are already TS-friendly.
+- For PHP projects, treat it as a future addition; the wire protocol it will use is unchanged, so a PHP client can, in the meantime, be hand-written against the same HTTP/JSON contract described in the generated READMEs.
+
+The architecture is intentionally unbounded: **as new target-language backends are added, they slot into the same CLI, GUI, and MCP dispatchers. There is no ceiling on how many programming languages the generator can eventually target.**
+
+### Q14: Where do I find the CMake script for the generated C++?
+
+**In the generated `<Unit>_http_json_service_cpp.md` (or `_call_cpp.md`).** The `.md` companion is where all language-specific build material lives — CMake scripts, compiler invocations, include paths, link libraries, and a full test `main.cpp`. See Chapter 3 for the full contract.
+
+### Q15: Where do I find the test program for the generated Pascal?
+
+**In the generated `<Unit>_http_json_service_pascal.md` (or `_call_pascal.md`).** It contains a complete `.lpr` file and the exact `fpc -Fu<...>` command line to build it.
+
+### Q16: How do I build the generated Python service?
+
+**Read the `<Unit>_http_json_service_python.md`.** It tells you which `PYTHONPATH` or `pip install` is needed, and it relies on the generated module's own `if __name__ == "__main__":` block as the test program — no separate script is required.
+
+### Q17: Why does the guide keep telling me to read the `.md`?
+
+Because **the `.md` is the real deliverable.** The code file is the skeleton; the `.md` is the manual that tells you how to build, test, and deploy that skeleton. The code and the `.md` are generated from the same model in the same pass, so they never drift apart. Whenever you are about to compile, run, or debug a generated artifact, **the answer is in its `.md`, not in this user guide.** This guide explains how to *drive the tool*; the `.md` explains how to *use the artifact*.
 
 ---
 
-## 附录：三个使用姿势的一句话总结
+## Appendix: One-Sentence Summary of the Usage Modes
 
-- **GUI**：五个 Tab 从左到右点下去，看哪一步出错就往回改。
-- **CLI**：`code_decl_to_json_abi [--call] 输入 输出`，扩展名决定语言，退出码决定成败。
-- **智能体**：`SetSourceCode`（或 `SetModelJson`）→ `GenerateAll` → 17 个读取器按需取。
+- **GUI**: five tabs, click left to right; when something goes wrong, step back and fix it. Open the `.md` sub-tab before trying to build.
+- **CLI**: `code_decl_to_json_abi [--call] input output`; extension picks the language, exit code tells success or failure. Read `<base>_readme.md` before building.
+- **Agent**: `SetSourceCode` (or `SetModelJson`) → `GenerateAll` → invoke the 17 readers as needed. Read the `readme` fields for build instructions.
+- **Programmatic**: call the `GenerateABI*Code` and `GenerateABI*Readme` functions directly; always generate both.
 
-**运行阶段唯一不可忘的规则**：**bridge（`bridge.py` 或 `bridge.exe`）是转发工具，必须保持开启。**
+**The one rule you must never forget at runtime**: **the bridge (`bridge.py` or `bridge.exe`) is a forwarder and must always be running.**
+
+**The one rule you must never forget after generation**: **read the generated `.md` files. The test code, the build scripts (including the C++ CMake script), and the interface reference all live there.**
