@@ -1,90 +1,90 @@
-# code_decl_to_mcp 工具链与 LLM 生态知识库（v5.0）
+# code_decl_to_mcp Toolchain and LLM Ecosystem Knowledge Base (v5.0)
 
-> **定位**：面向 AI 与人类工程师的权威参考。目标是让读者**无需翻阅源码**即可安全、准确地使用、修改、维护 `code_decl_to_mcp` 工具链及其配套的 LLM 生态组件。
+> **Purpose**: An authoritative reference for AI and human engineers. The goal is to let readers **safely and accurately use, modify, and maintain** the `code_decl_to_mcp` toolchain and its accompanying LLM ecosystem components **without reading the source code**.
 >
-> **使用方式**：AI 可直接引用本文件内的 API 签名、契约、模板、反例；遇到不确定清单中的场景，必须回查源码或询问人类。
+> **How to use**: AI may directly cite the API signatures, contracts, templates, and anti-patterns in this document. When a scenario falls under the uncertainty list, you **must** consult the source or ask a human.
 >
-> **v5.0 修订摘要**（相对 v4.0）：
-> - **全新第 3 章：README 生成体系** — 三语言 README 生成器完整契约
-> - **新增第 2.6 节：FPC 编译约束** — `{$mode delphi}` 下不能内联 `var` 声明
-> - **新增第 0.5/0.6 节：三份 README 速查 + 三仓库依赖模型**
-> - **重写第 16 章（自查清单）与新增第 17 章（自我审查验证）**
-> - **更新反例集、故障排查树、修改指引，把 README 相关条目并入**
-> - **第 1.5 节：输出文件全景图（代码 + README）**
+> **v5.0 revision summary** (relative to v4.0):
+> - **Entirely new Chapter 3: The README generation system** — full contract for the three-language README generators
+> - **New Section 2.6: FPC compilation constraint** — no inline `var` declarations under `{$mode delphi}`
+> - **New Sections 0.5 / 0.6: Three README quick reference + three-repository dependency model**
+> - **Rewrote Chapter 16 (Self-Check Checklist) and added Chapter 17 (Self-Audit Verification)**
+> - **Updated the anti-pattern set, troubleshooting trees, and modification guide to fold in the README-related items**
+> - **New Section 1.5: Output file panorama (code + README)**
 
 ---
 
-## 目录
+## Table of Contents
 
-- [第 0 章 快速定位](#第-0-章-快速定位)
-- [第 1 章 code_decl_to_mcp 工具链](#第-1-章-code_decl_to_mcp-工具链)
-- [第 2 章 代码生成器](#第-2-章-代码生成器)
-- [第 3 章 README 生成体系（v5.0 新增）](#第-3-章-readme-生成体系v50-新增)
-- [第 4 章 LLM 服务端](#第-4-章-llm-服务端)
-- [第 5 章 MCP 网关](#第-5-章-mcp-网关)
-- [第 6 章 中间件与桥接](#第-6-章-中间件与桥接)
-- [第 7 章 共享模块](#第-7-章-共享模块)
-- [第 8 章 Wire format 与协议](#第-8-章-wire-format-与协议)
-- [第 9 章 配置参数参考](#第-9-章-配置参数参考)
-- [第 10 章 生命周期与状态机](#第-10-章-生命周期与状态机)
-- [第 11 章 线程模型](#第-11-章-线程模型)
-- [第 12 章 反例集](#第-12-章-反例集)
-- [第 13 章 故障排查树](#第-13-章-故障排查树)
-- [第 14 章 端到端示例](#第-14-章-端到端示例)
-- [第 15 章 修改与扩展指引](#第-15-章-修改与扩展指引)
-- [第 16 章 自查清单](#第-16-章-自查清单)
-- [第 17 章 自我审查验证（v5.0 新增）](#第-17-章-自我审查验证v50-新增)
-- [附录 A：配置参数速查](#附录-a配置参数速查)
-- [附录 B：错误码与错误消息索引](#附录-b错误码与错误消息索引)
-- [附录 C：诚实的不确定清单](#附录-c诚实的不确定清单)
-- [附录 D：修订历史](#附录-d修订历史)
+- [Chapter 0  Quick Orientation](#chapter-0-quick-orientation)
+- [Chapter 1  The code_decl_to_mcp Toolchain](#chapter-1-the-code_decl_to_mcp-toolchain)
+- [Chapter 2  Code Generators](#chapter-2-code-generators)
+- [Chapter 3  README Generation System (new in v5.0)](#chapter-3-readme-generation-system-new-in-v50)
+- [Chapter 4  LLM Server](#chapter-4-llm-server)
+- [Chapter 5  MCP Gateway](#chapter-5-mcp-gateway)
+- [Chapter 6  Middleware and Bridging](#chapter-6-middleware-and-bridging)
+- [Chapter 7  Shared Modules](#chapter-7-shared-modules)
+- [Chapter 8  Wire Format and Protocol](#chapter-8-wire-format-and-protocol)
+- [Chapter 9  Configuration Parameter Reference](#chapter-9-configuration-parameter-reference)
+- [Chapter 10  Lifecycle and State Machine](#chapter-10-lifecycle-and-state-machine)
+- [Chapter 11  Threading Model](#chapter-11-threading-model)
+- [Chapter 12  Anti-Patterns](#chapter-12-anti-patterns)
+- [Chapter 13  Troubleshooting Trees](#chapter-13-troubleshooting-trees)
+- [Chapter 14  End-to-End Examples](#chapter-14-end-to-end-examples)
+- [Chapter 15  Modification and Extension Guide](#chapter-15-modification-and-extension-guide)
+- [Chapter 16  Self-Check Checklist](#chapter-16-self-check-checklist)
+- [Chapter 17  Self-Audit Verification (new in v5.0)](#chapter-17-self-audit-verification-new-in-v50)
+- [Appendix A: Configuration Parameter Quick Reference](#appendix-a-configuration-parameter-quick-reference)
+- [Appendix B: Error Code and Error Message Index](#appendix-b-error-code-and-error-message-index)
+- [Appendix C: Honest Uncertainty List](#appendix-c-honest-uncertainty-list)
+- [Appendix D: Revision History](#appendix-d-revision-history)
 
 ---
 
-## 第 0 章 快速定位
+## Chapter 0  Quick Orientation
 
-### 0.1 一句话
+### 0.1 In One Sentence
 
-**把 Pascal / C 的函数声明，自动变成 AI 可调用的 MCP 工具——同时输出 Pascal、Python、C++ 三种工具提供者代码，以及三份与代码同步的 README 使用文档。**
+**Turn Pascal / C function declarations into AI-callable MCP tools — emitting tool-provider code for Pascal, Python, and C++ simultaneously, along with three README usage documents that stay in sync with the code.**
 
-### 0.2 六层架构（v5.0 增加 README 层）
+### 0.2 Six-Layer Architecture (v5.0 adds the README layer)
 
 ```mermaid
 flowchart TB
-    subgraph L0["Layer 0：原始代码"]
-        A1["Pascal 源码"]
-        A2["C 头文件"]
+    subgraph L0["Layer 0: Original code"]
+        A1["Pascal source"]
+        A2["C header"]
     end
 
-    subgraph L1["Layer 1：统一声明体"]
-        B["标准 Pascal 文本"]
+    subgraph L1["Layer 1: Unified declaration body"]
+        B["Standard Pascal text"]
     end
 
-    subgraph L2["Layer 2：底层数据"]
-        C["tfunc_decl 原始记录"]
+    subgraph L2["Layer 2: Low-level data"]
+        C["tfunc_decl raw records"]
     end
 
-    subgraph L3["Layer 3：中间模型"]
-        D["TFunctionStructure（LV1 规范化）"]
+    subgraph L3["Layer 3: Intermediate model"]
+        D["TFunctionStructure (LV1 normalized)"]
     end
 
-    subgraph L4["Layer 4：目标代码"]
-        E1["Pascal 工具提供者"]
-        E2["Python 工具提供者"]
-        E3["C++ 工具提供者"]
+    subgraph L4["Layer 4: Target code"]
+        E1["Pascal tool provider"]
+        E2["Python tool provider"]
+        E3["C++ tool provider"]
     end
 
-    subgraph L45["Layer 4.5：文档（v5.0 新增）"]
+    subgraph L45["Layer 4.5: Documentation (new in v5.0)"]
         R1["Pascal README"]
         R2["Python README"]
         R3["C++ README"]
     end
 
-    subgraph L5["Layer 5：运行时生态"]
-        F1["信标（agent_main_app）"]
-        F2["MCP 网关（mcp_api_tool）"]
-        F3["LLM 服务端"]
-        F4["客户端"]
+    subgraph L5["Layer 5: Runtime ecosystem"]
+        F1["Beacon (agent_main_app)"]
+        F2["MCP gateway (mcp_api_tool)"]
+        F3["LLM server"]
+        F4["Client"]
     end
 
     A1 --> B
@@ -106,79 +106,79 @@ flowchart TB
     F1 -.-> F3
 ```
 
-**核心关系**：`Layer 4` 与 `Layer 4.5` **共享同一个 `TPascal_Func_Model`**，因此**代码与文档天然同步**。
+**Core relationship**: `Layer 4` and `Layer 4.5` **share the same `TPascal_Func_Model`**, so **code and documentation are inherently in sync**.
 
-### 0.3 组件职责与入口
+### 0.3 Component Responsibilities and Entry Points
 
-| 组件 | 类型 | 入口 | 输出 |
-|------|------|------|------|
-| `code_decl_to_mcp` | GUI | `code_decl_to_mcp.lpr` | 7 个代码/文档文件 |
-| `pas_mcp_generator_tool` | 代码生成器 | `GeneratePascalCode(Model)` | Pascal 单元 |
-| `py_mcp_generator_tool` | 代码生成器 | `GeneratePythonCode(Model)` | Python 模块 |
-| `cpp_mcp_generator_tool` | 代码生成器 | `GenerateHPPCode` / `GenerateCPPCode` | `.hpp` + `.cpp` |
-| **`pas_mcp_generator_tool`** | **文档生成器** | **`GeneratePascalReadme(Model)`** | **Pascal README** |
-| **`py_mcp_generator_tool`** | **文档生成器** | **`GeneratePythonReadme(Model)`** | **Python README** |
-| **`cpp_mcp_generator_tool`** | **文档生成器** | **`GenerateCPPReadme(Model)`** | **C++ README** |
-| `mcp_api_tool.py` | MCP 网关 | `main()` | MCP stdio/http/sse |
-| `language_middleware.py` | 中间件 | `LanguageMiddleware.get_instance()` | 单例 |
-| `llm_service.py` | LLM 服务端 | `main()` | LingoFuse RPC |
-| `llm_proxy.py` | LLM 代理 | `main()` | LingoFuse RPC |
-| `llm_proxy_tool.py` | LLM 工具桥 | `main()` | LingoFuse RPC |
-| `llm_test.py` | 测试客户端 | `main()` | 命令行 |
-| `bridge.py` | HTTP 桥接 | `main()` | HTTP POST |
-| `mcp_api_proxy.py` | stdio 调试代理 | `main()` | 命令行 |
+| Component | Type | Entry | Output |
+|-----------|------|-------|--------|
+| `code_decl_to_mcp` | GUI | `code_decl_to_mcp.lpr` | 7 code/doc files |
+| `pas_mcp_generator_tool` | Code generator | `GeneratePascalCode(Model)` | Pascal unit |
+| `py_mcp_generator_tool` | Code generator | `GeneratePythonCode(Model)` | Python module |
+| `cpp_mcp_generator_tool` | Code generator | `GenerateHPPCode` / `GenerateCPPCode` | `.hpp` + `.cpp` |
+| **`pas_mcp_generator_tool`** | **Doc generator** | **`GeneratePascalReadme(Model)`** | **Pascal README** |
+| **`py_mcp_generator_tool`** | **Doc generator** | **`GeneratePythonReadme(Model)`** | **Python README** |
+| **`cpp_mcp_generator_tool`** | **Doc generator** | **`GenerateCPPReadme(Model)`** | **C++ README** |
+| `mcp_api_tool.py` | MCP gateway | `main()` | MCP stdio/http/sse |
+| `language_middleware.py` | Middleware | `LanguageMiddleware.get_instance()` | Singleton |
+| `llm_service.py` | LLM server | `main()` | LingoFuse RPC |
+| `llm_proxy.py` | LLM proxy | `main()` | LingoFuse RPC |
+| `llm_proxy_tool.py` | LLM tool bridge | `main()` | LingoFuse RPC |
+| `llm_test.py` | Test client | `main()` | CLI |
+| `bridge.py` | HTTP bridge | `main()` | HTTP POST |
+| `mcp_api_proxy.py` | stdio debug proxy | `main()` | CLI |
 
-### 0.4 两条工具执行路径
+### 0.4 Two Tool Execution Paths
 
 ```mermaid
 flowchart LR
-    subgraph PathA["路径 A：客户端侧工具执行"]
-        A1["AI 客户端（支持 MCP）"] -->|MCP 协议| A2["mcp_api_tool"]
-        A2 -->|LF_Call| A3["信标"]
-        A3 --> A4["Pascal 工具"]
+    subgraph PathA["Path A: Client-side tool execution"]
+        A1["AI client (MCP-capable)"] -->|MCP protocol| A2["mcp_api_tool"]
+        A2 -->|LF_Call| A3["Beacon"]
+        A3 --> A4["Pascal tool"]
     end
 
-    subgraph PathB["路径 B：服务端侧工具执行"]
-        B1["AI 客户端（不感知工具）"] -->|LF generate| B2["llm_proxy_tool（LTB）"]
-        B2 -->|HTTP SSE| B3["后端 OpenAI API"]
+    subgraph PathB["Path B: Server-side tool execution"]
+        B1["AI client (tool-unaware)"] -->|LF generate| B2["llm_proxy_tool (LTB)"]
+        B2 -->|HTTP SSE| B3["Backend OpenAI API"]
         B3 -.->|tool_calls| B2
-        B2 -->|LF_Call| B4["信标"]
-        B4 --> B5["Pascal 工具"]
-        B2 -.->|回填结果| B3
+        B2 -->|LF_Call| B4["Beacon"]
+        B4 --> B5["Pascal tool"]
+        B2 -.->|feed back result| B3
     end
 ```
 
-### 0.5 三份 README 速查（v5.0 新增）
+### 0.5 Three READMEs Quick Reference (new in v5.0)
 
-| 语言 | README 文件名 | 主要依赖仓库 | 测试程序形式 |
-|------|-------------|-------------|--------------|
-| Pascal | `<unit>_tool_provider_pascal.md` | ZCore + ZNetV2 + LingoFuse-pasAgent-v3 | 独立 `.lpr`（README 内置完整源码） |
-| Python | `<unit>_tool_provider_python.md` | `py-lingofuse`（优先）或 v3 的 `lingofuse/`（兜底） | **生成的 `.py` 本身**（无需额外脚本） |
-| C++ | `<unit>_tool_provider_cpp.md` | `nlohmann/json` + `LingoFuse.h`（cppAgent **未发布**） | `main.cpp`（README 内置完整源码 + 兜底 `LingoFuse.h`） |
+| Language | README filename | Main dependent repositories | Test program form |
+|----------|-----------------|-----------------------------|-------------------|
+| Pascal | `<unit>_tool_provider_pascal.md` | ZCore + ZNetV2 + LingoFuse-pasAgent-v3 | Standalone `.lpr` (full source embedded in the README) |
+| Python | `<unit>_tool_provider_python.md` | `py-lingofuse` (preferred) or v3's `lingofuse/` (fallback) | **The generated `.py` itself** (no extra script needed) |
+| C++ | `<unit>_tool_provider_cpp.md` | `nlohmann/json` + `LingoFuse.h` (cppAgent **not yet released**) | `main.cpp` (full source + fallback `LingoFuse.h` embedded in the README) |
 
-**三份 README 的共同点**：
-- 全英文内容
-- 含 Mermaid 架构图 + 6~7 步测试指引流程图
-- 从同一 `TPascal_Func_Model` 生成 → 与代码天然同步
-- 均包含：Overview / Architecture / Test Program / Build & Test / Tool Reference / JSON Schema / Troubleshooting / Portability / Resources
+**What all three READMEs share**:
+- Entirely in English
+- Include Mermaid architecture diagrams + 6–7 step test-flow diagrams
+- Generated from the same `TPascal_Func_Model` → inherently in sync with the code
+- All contain: Overview / Architecture / Test Program / Build & Test / Tool Reference / JSON Schema / Troubleshooting / Portability / Resources
 
-### 0.6 三仓库依赖模型（v5.0 新增）
+### 0.6 Three-Repository Dependency Model (new in v5.0)
 
-生成的 Pascal provider **不能独立运行**，它需要三个仓库共存于磁盘：
+A generated Pascal provider **cannot run on its own**; it requires three repositories to coexist on disk:
 
 ```mermaid
 flowchart TD
-    subgraph Repos["磁盘布局"]
-        ZC["ZNetV2/ZCore/<br/>（Z.Core 单元）"]
-        ZN["ZNetV2/<br/>（lingofuse_import.pas 等）"]
-        V3["LingoFuse-pasAgent-v3/src/<br/>（信标 + MCP 网关 + 示例）"]
+    subgraph Repos["Disk layout"]
+        ZC["ZNetV2/ZCore/<br/>(Z.Core units)"]
+        ZN["ZNetV2/<br/>(lingofuse_import.pas etc.)"]
+        V3["LingoFuse-pasAgent-v3/src/<br/>(beacon + MCP gateway + examples)"]
     end
 
-    subgraph Compiler["FPC 编译期依赖"]
+    subgraph Compiler["FPC compile-time dependency"]
         CP["-Fu&lt;ZCore&gt;<br/>-Fu&lt;ZNetV2&gt;"]
     end
 
-    subgraph Runtime["运行期依赖"]
+    subgraph Runtime["Runtime dependency"]
         BEACON["pascal_agent_service.exe"]
         MCP["mcp_api_tool.py"]
     end
@@ -193,29 +193,29 @@ flowchart TD
     style Runtime fill:#e8f5e9,stroke:#2e7d32
 ```
 
-| 仓库 | 提供 | 典型路径 |
-|------|------|---------|
-| **ZCore** | `Z.Core` 单元（`TCompute` / `TCore_Thread` / `TAtomVar` / `TBigList` 等） | `<workspace>/ZNetV2/ZCore/` |
+| Repository | Provides | Typical path |
+|------------|----------|--------------|
+| **ZCore** | `Z.Core` units (`TCompute` / `TCore_Thread` / `TAtomVar` / `TBigList`, etc.) | `<workspace>/ZNetV2/ZCore/` |
 | **ZNetV2** | `lingofuse_import.pas` + `lingofuse_helper.pas` + `z_ipc_*.dll` | `<workspace>/ZNetV2/` |
-| **LingoFuse-pasAgent-v3** | `pascal_agent_service.exe` + `mcp_api_tool.py` + `generate_agent_json.py` + `CreateHealthCheck/` 示例 | `<workspace>/LingoFuse-pasAgent-v3/src/` |
+| **LingoFuse-pasAgent-v3** | `pascal_agent_service.exe` + `mcp_api_tool.py` + `generate_agent_json.py` + `CreateHealthCheck/` examples | `<workspace>/LingoFuse-pasAgent-v3/src/` |
 
-> 三个仓库的 URL 在生成的 README 中均为占位符 `<zcore-repo-url>` / `<znetv2-repo-url>` / `<v3-repo-url>`，**发布前必须替换为真实地址**。
+> The three repository URLs appear in generated READMEs as placeholders `<zcore-repo-url>` / `<znetv2-repo-url>` / `<v3-repo-url>`, **which must be replaced with real URLs before publishing**.
 
 ---
 
-## 第 1 章 code_decl_to_mcp 工具链
+## Chapter 1  The code_decl_to_mcp Toolchain
 
-### 1.1 工具链的数据模型
+### 1.1 Toolchain Data Model
 
-#### 1.1.1 `TFunctionStructure`（LV1 模型中的函数）
+#### 1.1.1 `TFunctionStructure` (a function in the LV1 model)
 
 ```pascal
 TFunctionStructure = record
-  Name: TP_String;              // 函数名（Pascal 原始名）
-  IsFunction: boolean;          // True=function，False=procedure
-  Params: TParamArray;          // 参数数组
-  ReturnType: TP_String;        // 归一化返回类型（'Int64' / 'Double' / 'string' / ''）
-  Comment: TP_String;           // 清理后的注释
+  Name: TP_String;              // Function name (original Pascal name)
+  IsFunction: boolean;          // True=function, False=procedure
+  Params: TParamArray;          // Parameter array
+  ReturnType: TP_String;        // Normalized return type ('Int64' / 'Double' / 'string' / '')
+  Comment: TP_String;           // Cleaned comment
   procedure Clear;
   function Clone: TFunctionStructure;
 end;
@@ -223,21 +223,21 @@ end;
 TParamArray = array of TParamStructure;
 
 TParamStructure = record
-  Name: TP_String;              // 参数名（原始）
-  Typ: TP_String;               // 原始类型字符串
-  PascalType: TP_String;        // 归一化类型（'Int64' / 'Double' / 'string'）
-  Description: TP_String;       // 从注释提取的描述
+  Name: TP_String;              // Parameter name (original)
+  Typ: TP_String;               // Original type string
+  PascalType: TP_String;        // Normalized type ('Int64' / 'Double' / 'string')
+  Description: TP_String;       // Description extracted from comments
   procedure Clear;
 end;
 ```
 
-**契约**：
-- `Name` **不做任何改名**——它就是 JSON key 的来源。
-- `PascalType` 只有三个合法值：`'Int64'`、`'Double'`、`'string'`。其他值的声明会在 `CollectValidFunctions` 阶段被整条丢弃。
-- `Description` 由 `ExtractParamDescriptions` 从注释中提取，可能为空。
-- `Comment` 已被 `CleanComment` 清理。
+**Contract**:
+- `Name` **is not renamed in any way** — it is the source of the JSON key.
+- `PascalType` has only three legal values: `'Int64'`, `'Double'`, `'string'`. Declarations with other values are dropped entirely during the `CollectValidFunctions` phase.
+- `Description` is extracted by `ExtractParamDescriptions` from comments; it may be empty.
+- `Comment` has already been cleaned by `CleanComment`.
 
-#### 1.1.2 `TPascal_Func_Model`（LV1 容器）
+#### 1.1.2 `TPascal_Func_Model` (the LV1 container)
 
 ```pascal
 TPascal_Func_Model = class(TCore_Object_Intermediate)
@@ -255,79 +255,79 @@ end;
 TTyp_Normalize_Func = (tnf_Json, tnf_ABI);
 ```
 
-**契约**：
-- 默认 `tnf_Json`——整数族归一为 `'Int64'`，浮点族为 `'Double'`，字符串族为 `'string'`。**所有生成器（代码 + README）都要求这个模式**。
-- `LoadFromParser` 跳过 `NestLevel <> 0` 的声明与 `var` / `out` 参数。
+**Contract**:
+- Defaults to `tnf_Json` — the integer family is normalized to `'Int64'`, the float family to `'Double'`, the string family to `'string'`. **All generators (code + README) require this mode.**
+- `LoadFromParser` skips declarations with `NestLevel <> 0` and `var` / `out` parameters.
 
-### 1.2 GUI 工作流
+### 1.2 GUI Workflow
 
-#### 1.2.1 5 个 Tab 的状态机
+#### 1.2.1 The 5-Tab State Machine
 
 ```mermaid
 stateDiagram-v2
     [*] --> Welcome
-    Welcome --> Source: 开始
-    Source --> SourceJson: 下一步
-    SourceJson --> ModelJson: 下一步
-    ModelJson --> FinalSource: 下一步
-    FinalSource --> ModelJson: 上一步
-    ModelJson --> SourceJson: 上一步
-    SourceJson --> Source: 上一步
+    Welcome --> Source: start
+    Source --> SourceJson: next
+    SourceJson --> ModelJson: next
+    ModelJson --> FinalSource: next
+    FinalSource --> ModelJson: back
+    ModelJson --> SourceJson: back
+    SourceJson --> Source: back
 ```
 
-#### 1.2.2 按钮精确行为表
+#### 1.2.2 Precise Button Behavior Table
 
-| 按钮 | 处理函数 | 输入 | 输出 | 副作用 |
-|------|---------|------|------|--------|
-| 格式化 | `Formater_source_ButtonClick` | `source_edit.Text` | `source_edit.Text` | 无 |
-| 下一步: 源码→json | `source_2_json_nex_ButtonClick` | `source_edit.Text` | `source2json_edit.Text` | 切到 `SourceJsonTab` |
-| 上一步: json→代码 | `Button3Click` | `source2json_edit.Text` | `source_edit.Text` | 切到 `SourceTab` |
-| 下一步: json→model | `Button4Click` | `source2json_edit.Text` | `model_json_edit.Text` | 切到 `ModelJsonTab` |
-| 上一步: model→json | `Button5Click` | `model_json_edit.Text` | `source2json_edit.Text` | 切到 `SourceJsonTab` |
-| **下一步: 生成代码 + README** | `Button6Click` | `model_json_edit.Text` | 4 个 TSynEdit + 3 个 README + 落盘 | 创建目录、保存全部文件 |
-| 空单元 | `empty_unit_ButtonClick` | `current_language` | `source_edit.Text` | 无 |
-| 复杂示例 | `empty_unit_Button1Click` | `current_language` | `source_edit.Text` | 无 |
-| 打开规范 | `Open_unit_readme_Button6Click` | `current_language` | 打开外部文档 | 无 |
-| 自动检测语言 | `sel_lang_LabelClick` | `source_edit.Text` | `current_language` + ComboBox | 触发 `Change` |
-| 语言切换 | `Sel_Lang_ComboBoxChange` | `ItemIndex` | `current_language` + Highlighter | 无 |
+| Button | Handler | Input | Output | Side effect |
+|--------|---------|-------|--------|-------------|
+| Format | `Formater_source_ButtonClick` | `source_edit.Text` | `source_edit.Text` | none |
+| Next: source→json | `source_2_json_nex_ButtonClick` | `source_edit.Text` | `source2json_edit.Text` | switch to `SourceJsonTab` |
+| Back: json→source | `Button3Click` | `source2json_edit.Text` | `source_edit.Text` | switch to `SourceTab` |
+| Next: json→model | `Button4Click` | `source2json_edit.Text` | `model_json_edit.Text` | switch to `ModelJsonTab` |
+| Back: model→json | `Button5Click` | `model_json_edit.Text` | `source2json_edit.Text` | switch to `SourceJsonTab` |
+| **Next: generate code + README** | `Button6Click` | `model_json_edit.Text` | 4 TSynEdits + 3 READMEs + disk write | create directory, save all files |
+| Empty unit | `empty_unit_ButtonClick` | `current_language` | `source_edit.Text` | none |
+| Complex sample | `empty_unit_Button1Click` | `current_language` | `source_edit.Text` | none |
+| Open spec | `Open_unit_readme_Button6Click` | `current_language` | opens an external document | none |
+| Auto-detect language | `sel_lang_LabelClick` | `source_edit.Text` | `current_language` + ComboBox | triggers `Change` |
+| Language switch | `Sel_Lang_ComboBoxChange` | `ItemIndex` | `current_language` + Highlighter | none |
 
-#### 1.2.3 `Button6Click` 的落盘规则（**v5.0 更新，包含 README**）
+#### 1.2.3 `Button6Click` Disk-Write Rules (**updated in v5.0, includes README**)
 
 ```pascal
 app_dir := umlCombinePath(umlGetFilePath(ParamStr(0)), func_model.UnitName);
 umlCreateDirectory(app_dir);
 ```
 
-**落盘文件清单**（v5.0 完整）：
+**Disk-write file list** (complete for v5.0):
 
-| # | 文件名 | 类型 | 生成函数 |
-|---|--------|------|---------|
-| 1 | `source.pas`（Pascal）或 `source.h`（C） | 输入副本 | — |
+| # | Filename | Type | Generator |
+|---|----------|------|-----------|
+| 1 | `source.pas` (Pascal) or `source.h` (C) | input copy | — |
 | 2 | `source.json` | LV0 JSON | — |
 | 3 | `source_model.json` | LV1 JSON | — |
-| 4 | `<UnitName>_tool_provider_unit.pas` | Pascal 代码 | `GeneratePascalCode` |
-| 5 | `<UnitName>_tool_provider.py` | Python 代码 | `GeneratePythonCode` |
-| 6 | `<UnitName>_tool_provider.hpp` | C++ 头文件 | `GenerateHPPCode` |
-| 7 | `<UnitName>_tool_provider.cpp` | C++ 实现 | `GenerateCPPCode` |
+| 4 | `<UnitName>_tool_provider_unit.pas` | Pascal code | `GeneratePascalCode` |
+| 5 | `<UnitName>_tool_provider.py` | Python code | `GeneratePythonCode` |
+| 6 | `<UnitName>_tool_provider.hpp` | C++ header | `GenerateHPPCode` |
+| 7 | `<UnitName>_tool_provider.cpp` | C++ implementation | `GenerateCPPCode` |
 | **8** | **`<UnitName>_tool_provider_pascal.md`** | **Pascal README** | **`GeneratePascalReadme`** |
 | **9** | **`<UnitName>_tool_provider_python.md`** | **Python README** | **`GeneratePythonReadme`** |
 | **10** | **`<UnitName>_tool_provider_cpp.md`** | **C++ README** | **`GenerateCPPReadme`** |
 
-> ⚠️ **已知 bug（v4.0 遗留，v5.0 未修）**：Python 代码当前被保存为 `<UnitName>_tool_provider.pas`。修正：把 `SaveCode(func_model.UnitName + '_tool_provider.pas');` 改为 `.py`。**README 生成不涉及此 bug**。
+> ⚠️ **Known bug (left over from v4.0, not fixed in v5.0)**: The Python code is currently saved as `<UnitName>_tool_provider.pas`. Fix: change `SaveCode(func_model.UnitName + '_tool_provider.pas');` to `.py`. **The README generation is unaffected by this bug.**
 
-### 1.3 语言自动检测
+### 1.3 Automatic Language Detection
 
-`Auto_Select_Language` 调用 `DetectSourceLanguage(source_edit.Text)`：
+`Auto_Select_Language` calls `DetectSourceLanguage(source_edit.Text)`:
 
-- 用 `tsPascal` 和 `tsC` 各解析一次，按证据加权打分。
-- **平局返回 `slUnknown`**（不是 `slPascal`）。
-- 空输入返回 `slUnknown`。
+- Parses once with `tsPascal` and once with `tsC`, scoring each with weighted evidence.
+- **A tie returns `slUnknown`** (not `slPascal`).
+- Empty input returns `slUnknown`.
 
-**GUI 映射**：`slPascal → ItemIndex 1`，`slC → ItemIndex 2`，`slUnknown → ItemIndex 0`。
+**GUI mapping**: `slPascal → ItemIndex 1`, `slC → ItemIndex 2`, `slUnknown → ItemIndex 0`.
 
-### 1.4 全局定时器
+### 1.4 Global Timer
 
-`SysTimer` 每 1ms 触发 `sysTimerTimer`：
+`SysTimer` fires `sysTimerTimer` every 1 ms:
 
 ```pascal
 while LF___.LF_GetStatusCount() > 0 do
@@ -336,17 +336,17 @@ Check_Soft_Thread_Synchronize;
 LF___.LF_Sync;
 ```
 
-**作用**：排空 LingoFuse 状态队列、驱动软同步、驱动 LF 同步。
+**Purpose**: drain the LingoFuse status queue, drive soft synchronization, drive LF sync.
 
-> ⚠️ **性能隐患**：1ms = 每秒 1000 次调用。建议改为 10ms。
+> ⚠️ **Performance hazard**: 1 ms = 1000 calls per second. Recommend changing to 10 ms.
 
-### 1.5 输出文件全景图（v5.0 新增）
+### 1.5 Output File Panorama (new in v5.0)
 
 ```mermaid
 flowchart TD
     M["TPascal_Func_Model"]
-    M --> CO["代码输出"]
-    M --> DO["文档输出"]
+    M --> CO["Code output"]
+    M --> DO["Doc output"]
 
     CO --> C1["&lt;unit&gt;_tool_provider_unit.pas"]
     CO --> C2["&lt;unit&gt;_tool_provider.py"]
@@ -362,13 +362,13 @@ flowchart TD
     style DO fill:#e8f5e9
 ```
 
-**关键设计**：代码与文档从**同一个 Model**生成——任一方更新，另一方自动同步。**不需要手动维护 README 与代码的一致性**。
+**Key design**: Code and documentation are generated **from the same Model** — updating one automatically updates the other. **There is no need to manually maintain README/code consistency.**
 
 ---
 
-## 第 2 章 代码生成器
+## Chapter 2  Code Generators
 
-### 2.1 生成器签名与契约
+### 2.1 Generator Signatures and Contracts
 
 ```pascal
 function GeneratePascalCode(Model: TPascal_Func_Model): TPascalStringList;
@@ -377,13 +377,13 @@ function GenerateHPPCode(Model: TPascal_Func_Model): TPascalStringList;
 function GenerateCPPCode(Model: TPascal_Func_Model): TPascalStringList;
 ```
 
-**公共契约**：
-- 输入必须是 `tnf_Json` 模式的 `TPascal_Func_Model`。
-- `Model = nil` 或 `Model.UnitName = ''` 时返回 `nil`。
-- 返回的 `TPascalStringList` **由调用者负责释放**。
-- 无支持的函数时返回空骨架。
+**Common contract**:
+- Input must be a `TPascal_Func_Model` in `tnf_Json` mode.
+- `Model = nil` or `Model.UnitName = ''` → returns `nil`.
+- The returned `TPascalStringList` **must be released by the caller**.
+- When there are no supported functions, an empty skeleton is returned.
 
-**类型白名单**：
+**Type whitelist**:
 
 ```pascal
 function IsSupportedType(const Typ: TP_String): boolean;
@@ -392,21 +392,21 @@ begin
 end;
 ```
 
-**三个代码生成器必须严格一致**。未支持的声明**整条丢弃**。
+**The three code generators must be strictly consistent**. Unsupported declarations are **dropped entirely**.
 
-### 2.2 Pascal 生成器
+### 2.2 Pascal Generator
 
-**关键辅助函数**：
+**Key helper functions**:
 
-| 函数 | 职责 | 备注 |
-|------|------|------|
-| `MakeApiName` | 清洗为 Pascal 标识符 | ⚠️ 字符替换表**不完整**（见 §12.7） |
-| `MakeCallbackName` | `'Callback_' + MakeApiName` | 生成器实现 |
-| `MakeInternalCallName` | `'internal_call_' + MakeApiName` | 生成器实现 |
-| `PascalStrLit` | Pascal 字符串字面量 | 委托 `TTextParsing.Translate_Text_To_Pascal_Decl` |
-| `GetFullDescription` | 注释提取 | ⚠️ 经 `TPascalStringList.AsText`（见 §2.6 与 §12.11） |
+| Function | Responsibility | Note |
+|----------|----------------|------|
+| `MakeApiName` | Cleans to a Pascal identifier | ⚠️ Character replacement table is **incomplete** (see §12.7) |
+| `MakeCallbackName` | `'Callback_' + MakeApiName` | Generator implementation |
+| `MakeInternalCallName` | `'internal_call_' + MakeApiName` | Generator implementation |
+| `PascalStrLit` | Pascal string literal | Delegates to `TTextParsing.Translate_Text_To_Pascal_Decl` |
+| `GetFullDescription` | Comment extraction | ⚠️ Goes through `TPascalStringList.AsText` (see §2.6 and §12.11) |
 
-**生成产物的关键结构**：
+**Key structure of the generated output**:
 
 ```
 unit <UnitName>_tool_provider_unit;
@@ -427,11 +427,11 @@ function RegisterTools: Boolean;
 function Execute_And_Reg_all: Boolean;
 
 implementation
-// ret2str 重载、internal_call_* 桩、回调、RegisterTool、RegisterAPIs、Execute_And_Reg_all
+// ret2str overloads, internal_call_* stubs, callbacks, RegisterTool, RegisterAPIs, Execute_And_Reg_all
 end.
 ```
 
-**Callback 的标准骨架**（每个 API 一个）：
+**Standard callback skeleton** (one per API):
 
 ```pascal
 procedure Callback_<Name>_<ApiName>(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
@@ -447,10 +447,10 @@ begin
     jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
     if Length(jsonBytes) = 0 then begin ... Exit; end;
     if not jo.Parae(jsonBytes) then begin ... Exit; end;
-    <param> := jo.I64['<param>'];    // 或 jo.F / jo.S
+    <param> := jo.I64['<param>'];    // or jo.F / jo.S
     ret := internal_call_<Name>_<ApiName>(<args>);
     jo.Clear;
-    jo.I64['result'] := ret;         // 或 jo.F / jo.S
+    jo.I64['result'] := ret;         // or jo.F / jo.S
     LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
   except
     on E: Exception do begin
@@ -463,31 +463,31 @@ begin
 end;
 ```
 
-**返回值类型到 `jo.X` 的映射**：
+**Mapping of return type to `jo.X`**:
 
-| ReturnType | 写入 | 读取 |
-|-----------|------|------|
+| ReturnType | Write | Read |
+|------------|-------|------|
 | `Int64` | `jo.I64['result']` | `jo.I64['result']` |
 | `Double` | `jo.F['result']` | `jo.F['result']` |
 | `string` | `jo.S['result']` | `jo.S['result']` |
 
-**Procedure 写 `jo.S['status'] := 'ok';`**。
+**A procedure writes `jo.S['status'] := 'ok';`**.
 
-### 2.3 Python 生成器
+### 2.3 Python Generator
 
-**关键辅助函数**：
+**Key helper functions**:
 
-| 函数 | 职责 |
-|------|------|
+| Function | Responsibility |
+|----------|----------------|
 | `PascalTypeToPythonType` | `Int64→int` / `Double→float` / `string→str` |
 | `PascalTypeToJsonSchemaType` | `Int64→integer` / `Double→number` / `string→string` |
 | `PascalTypeDefaultValue` | `Int64→0` / `Double→0.0` / `string→""` |
-| `PyStrLit` | Python 字符串字面量（`TP_Char` 迭代，保留非 ASCII） |
-| `MakePythonIdentifier` | 白名单过滤（**比 Pascal 侧更安全**） |
-| `UniqueApiName` | 确保工具名唯一 |
-| `GetFullDescription` | 逐字符扫描 `TP_String`（**不经 `SystemString`**） |
+| `PyStrLit` | Python string literal (iterates `TP_Char`, preserves non-ASCII) |
+| `MakePythonIdentifier` | Whitelist filter (**safer than the Pascal side**) |
+| `UniqueApiName` | Ensures the tool name is unique |
+| `GetFullDescription` | Scans `TP_String` character by character (**does not go through `SystemString`**) |
 
-**生成产物的关键结构**：
+**Key structure of the generated output**:
 
 ```python
 # -*- coding: utf-8 -*-
@@ -525,22 +525,22 @@ if __name__ == "__main__":
     ...
 ```
 
-**参数提取的默认值**：`data.get('<name>') or <default>`。
+**Default value for parameter extraction**: `data.get('<name>') or <default>`.
 
-### 2.4 C++ 生成器
+### 2.4 C++ Generator
 
-**与 Pascal/Python 的差异**：
+**Differences from Pascal/Python**:
 
-| 差异 | 说明 |
-|------|------|
-| 输出两个文件 | `.hpp`（声明）+ `.cpp`（实现） |
-| 使用 `nlohmann/json` | `#include "json.hpp"` |
-| 回调宏 | `LF_CDECL`（不是 `cdecl`） |
-| 重名工具 | **丢弃**（MCP 要求唯一） |
-| 描述截断 | `MAX_DESC_LEN = 200` |
-| `DEBUG_LOG` 默认 | `false`（Pascal/Python 是 `True`） |
+| Difference | Note |
+|------------|------|
+| Outputs two files | `.hpp` (declaration) + `.cpp` (implementation) |
+| Uses `nlohmann/json` | `#include "json.hpp"` |
+| Callback macro | `LF_CDECL` (not `cdecl`) |
+| Duplicate tool names | **Dropped** (MCP requires uniqueness) |
+| Description truncation | `MAX_DESC_LEN = 200` |
+| `DEBUG_LOG` default | `false` (Pascal/Python are `True`) |
 
-**生成产物结构**（`.cpp` 关键）：
+**Generated output structure** (`.cpp` key parts):
 
 ```cpp
 extern const char* MY_APP_NAME   = "<UnitName>";
@@ -564,24 +564,24 @@ bool RegisterTools() { ... }
 bool Execute_And_Reg_all() { ... }
 ```
 
-### 2.5 三语言生成器的对称性
+### 2.5 Symmetry of the Three-Language Generators
 
-| 维度 | Pascal | Python | C++ |
-|------|--------|--------|-----|
-| 类型白名单 | `Int64`/`Double`/`string` | 同 | 同 |
-| JSON Schema 映射 | 同 | 同 | 同 |
-| 描述提取 | 经 `TPascalStringList.AsText` | 逐字符扫描 `TP_String` | 经 `CleanComment_Local` |
-| 重名工具 | 加数字后缀 | 加数字后缀 | **丢弃** |
-| 描述截断 | 无 | 无 | `MAX_DESC_LEN = 200` |
-| 回调宏 | `cdecl` | `@LFCallFunc` | `LF_CDECL` |
+| Dimension | Pascal | Python | C++ |
+|-----------|--------|--------|-----|
+| Type whitelist | `Int64`/`Double`/`string` | same | same |
+| JSON Schema mapping | same | same | same |
+| Description extraction | via `TPascalStringList.AsText` | char-by-char scan of `TP_String` | via `CleanComment_Local` |
+| Duplicate tool names | numeric suffix added | numeric suffix added | **dropped** |
+| Description truncation | none | none | `MAX_DESC_LEN = 200` |
+| Callback macro | `cdecl` | `@LFCallFunc` | `LF_CDECL` |
 
-**修改任一时必须检查其他两个的对称性**。
+**Modifying any one requires checking the symmetry with the other two.**
 
-### 2.6 FPC 编译约束（v5.0 新增）
+### 2.6 FPC Compilation Constraint (new in v5.0)
 
-**铁律**：**FPC 在 `{$mode delphi}` 下不允许在过程体内部使用 `var` 声明**。
+**Iron rule**: **FPC under `{$mode delphi}` does not allow `var` declarations inside a procedure body.**
 
-**错误代码**（会在 FPC 3.2.2 上报 `Illegal expression` + `Syntax error, ";" expected`）：
+**Incorrect code** (raises `Illegal expression` + `Syntax error, ";" expected` on FPC 3.2.2):
 
 ```pascal
 procedure DoSomething;
@@ -596,7 +596,7 @@ begin
 end;
 ```
 
-**正确做法**：所有局部变量**必须**在过程/函数的 `var` 区声明。
+**Correct approach**: all local variables **must** be declared in the procedure/function's `var` section.
 
 ```pascal
 procedure DoSomething;
@@ -610,26 +610,26 @@ begin
 end;
 ```
 
-**影响面**：所有三个生成器单元的**所有过程/函数**。
+**Impact scope**: **every procedure/function** in all three generator units.
 
-**历史教训**：v3.0 的 `cpp_mcp_generator_tool.pas` 曾在 `GenerateHPPCode` 里写了内联 `var`，导致 FPC 编译失败。v4.0 修正。
+**Historical lesson**: `cpp_mcp_generator_tool.pas` in v3.0 had an inline `var` in `GenerateHPPCode`, which caused an FPC compilation failure. Fixed in v4.0.
 
-**注意**：`{$mode objfpc}` + `{$modeswitch advancedrecords}` 允许在**记录**内部定义方法；但**过程体内部的 `var`**在任何模式下都**不允许**（FPC 3.3+ 有可能放宽，但主流版本不行）。
+**Note**: `{$mode objfpc}` + `{$modeswitch advancedrecords}` allows methods to be defined **inside records**; but **inline `var` inside a procedure body** is **not allowed** in any mode (FPC 3.3+ may relax this, but mainstream versions do not).
 
 ---
 
-## 第 3 章 README 生成体系（v5.0 新增）
+## Chapter 3  README Generation System (new in v5.0)
 
-### 3.0 核心设计原则
+### 3.0 Core Design Principles
 
-1. **一份 Model，一份真相** —— 代码与文档从同一 `TPascal_Func_Model` 生成，不需要人工同步。
-2. **全英文** —— 所有 README 内容为英文，避免 Markdown 渲染与跨语言字符集问题。
-3. **可复制即用** —— 每份 README 都包含完整可编译/可运行的测试程序源码，用户无需额外编写骨架。
-4. **语言特定 + 结构统一** —— 十节骨架（Overview / Architecture / Test / Build & Test / Tool Reference / JSON Schema / Troubleshoot / Portability / Resources）严格统一；每节的具体内容按语言定制。
-5. **Mermaid 图优先** —— 架构图、测试流程图、工具注册时序图使用 Mermaid，兼容 GitHub/GitLab/VSCode/Obsidian。
-6. **占位符可识别** —— 未确定的仓库 URL 用 `<xxx-repo-url>` 形式的**字面占位符**，并明确提示用户替换。
+1. **One model, one truth** — code and documentation are generated from the same `TPascal_Func_Model`; no manual synchronization is needed.
+2. **All English** — all README content is English, avoiding Markdown rendering and cross-language charset issues.
+3. **Copy-paste ready** — every README contains a complete, compilable/runnable test-program source; the user does not need to write any scaffolding.
+4. **Language-specific + structurally unified** — the ten-section skeleton (Overview / Architecture / Test / Build & Test / Tool Reference / JSON Schema / Troubleshoot / Portability / Resources) is strictly unified; the content within each section is customized per language.
+5. **Mermaid-first** — architecture diagrams, test-flow diagrams, and tool-registration sequence diagrams use Mermaid, compatible with GitHub/GitLab/VSCode/Obsidian.
+6. **Recognizable placeholders** — unresolved repository URLs are written as literal placeholders of the form `<xxx-repo-url>`, with an explicit reminder to replace them.
 
-### 3.1 公共契约
+### 3.1 Common Contract
 
 ```pascal
 function GeneratePascalReadme(Model: TPascal_Func_Model): TPascalStringList;
@@ -637,44 +637,44 @@ function GeneratePythonReadme(Model: TPascal_Func_Model): TPascalStringList;
 function GenerateCPPReadme(Model: TPascal_Func_Model): TPascalStringList;
 ```
 
-**契约**：
-- 输入必须是 `tnf_Json` 模式的 `TPascal_Func_Model`。
-- `Model = nil` 或 `Model.UnitName = ''` 时**返回非 nil 的降级文本**（顶部一行 `# README generation skipped` + 原因），避免产生空文件让用户困惑。
-- 返回的 `TPascalStringList` **由调用者负责释放**。
-- 无支持的函数时**不报错**，README 中会在 Tool Reference 章节给出**明确的"暴露 0 个 API"警告**并列出可能原因。
-- **不依赖**网络、文件系统、外部进程。
+**Contract**:
+- Input must be a `TPascal_Func_Model` in `tnf_Json` mode.
+- When `Model = nil` or `Model.UnitName = ''`, **returns non-nil degraded text** (a single top line `# README generation skipped` + reason), to avoid producing an empty file that confuses the user.
+- The returned `TPascalStringList` **must be released by the caller**.
+- When there are no supported functions, **no error is raised**; the README's Tool Reference section will contain an explicit **"0 APIs exposed"** warning listing possible reasons.
+- **Does not depend** on the network, filesystem, or external processes.
 
-### 3.2 README 的十节骨架
+### 3.2 The Ten-Section README Skeleton
 
-| # | 节名 | 内容 | 语言特化 |
-|---|------|------|---------|
-| 1 | Overview | 依赖表 + 文件清单 | ✅ 各语言依赖不同 |
-| 2 | Runtime Architecture | Mermaid flowchart | ❌ 统一 |
-| 3 | Test Program | 完整可运行测试程序 | ✅ 语言特化 |
-| 4 | Build & Test Procedure | 6~7 步指引 + Mermaid flowchart | ✅ 步骤略有差异 |
-| 5 | Tool Reference | 表格 + 逐 API 小节 + JSON 示例 | ❌ 统一 |
-| 6 | JSON Schema Specification | 类型白名单 | ❌ 统一（但 C++ 表格多一列 C++ 类型） |
-| 7 | Debugging & Troubleshooting | 全局变量 + 常见问题 | ✅ 语言特化 |
-| 8 | Portability Notes | 语言环境便携性 | ✅ 语言特化 |
-| 9 | Reference Resources | 资源链接 | ✅ 语言特化 |
-| 10 | (Header) | 标题 + auto-generated 声明 + 源/输出/API 数 | ❌ 统一 |
+| # | Section | Content | Language-specific |
+|---|---------|---------|-------------------|
+| 1 | Overview | Dependency table + file list | ✅ depends on language |
+| 2 | Runtime Architecture | Mermaid flowchart | ❌ unified |
+| 3 | Test Program | Complete runnable test program | ✅ language-specific |
+| 4 | Build & Test Procedure | 6–7 step guide + Mermaid flowchart | ✅ steps slightly differ |
+| 5 | Tool Reference | Table + per-API subsection + JSON examples | ❌ unified |
+| 6 | JSON Schema Specification | Type whitelist | ❌ unified (but the C++ table has an extra column) |
+| 7 | Debugging & Troubleshooting | Global variables + FAQ | ✅ language-specific |
+| 8 | Portability Notes | Language environment portability | ✅ language-specific |
+| 9 | Reference Resources | Resource links | ✅ language-specific |
+| 10 | (Header) | Title + auto-generated declaration + source/output/API counts | ❌ unified |
 
-### 3.3 Pascal README 细节
+### 3.3 Pascal README Details
 
-**输出文件名**：`<unit>_tool_provider_pascal.md`
+**Output filename**: `<unit>_tool_provider_pascal.md`
 
-**依赖表**（严格列出三仓库）：
+**Dependency table** (strictly listing the three repositories):
 
-| 依赖 | 用途 | 获取方式 |
-|------|------|---------|
-| LingoFuse-pasAgent-v3 | 完整运行时 | `git clone <v3-repo-url>` |
-| `lingofuse_import.pas` | C ABI 导入 | `<v3>/src/` |
-| `lingofuse_helper.pas` | 可选 RAII | `<v3>/src/` |
-| `pascal_agent_service.exe` | 信标服务端 | 由 `<v3>/src/pascal_agent_service.lpr` 编译 |
-| **ZCore 仓库** | `Z.Core` 单元 | `git clone <zcore-repo-url>` |
-| **ZNetV2 仓库** | 网络/`z_ipc_*.dll` | `git clone <znetv2-repo-url>` |
+| Dependency | Purpose | How to get it |
+|------------|---------|---------------|
+| LingoFuse-pasAgent-v3 | Complete runtime | `git clone <v3-repo-url>` |
+| `lingofuse_import.pas` | C ABI import | `<v3>/src/` |
+| `lingofuse_helper.pas` | Optional RAII | `<v3>/src/` |
+| `pascal_agent_service.exe` | Beacon server | Compiled from `<v3>/src/pascal_agent_service.lpr` |
+| **ZCore repository** | `Z.Core` units | `git clone <zcore-repo-url>` |
+| **ZNetV2 repository** | Networking / `z_ipc_*.dll` | `git clone <znetv2-repo-url>` |
 
-**§3 Test Program** 提供的**完整 `.lpr`**（关键结构）：
+**§3 Test Program** provides a **complete `.lpr`** (key structure):
 
 ```pascal
 program <AppName>_provider;
@@ -715,42 +715,42 @@ begin
 end.
 ```
 
-**要点**：
-- `{$mode objfpc}{$H+}` —— 独立程序的主模式。
-- `{$CODEPAGE UTF8}` —— 确保中文源码字符串正确。
-- `cthreads` 必须首列（Unix）—— 让 RTS 链接多线程 C 库。
-- `Z.Core` 必须在 `uses` 中 —— provider 内部用到 `TCompute` / `TCore_Thread`。
-- `LF_ExitMainThread` + `LF_Shutdown` —— 释放所有 LingoFuse 资源。
+**Key points**:
+- `{$mode objfpc}{$H+}` — the main mode for a standalone program.
+- `{$CODEPAGE UTF8}` — ensures Chinese source strings are correct.
+- `cthreads` must be first on Unix — so the RTS links the multithreaded C library.
+- `Z.Core` must be in `uses` — the provider internally uses `TCompute` / `TCore_Thread`.
+- `LF_ExitMainThread` + `LF_Shutdown` — release all LingoFuse resources.
 
-**§4 Build & Test 的编译命令**：
+**§4 Build & Test compile command**:
 
 ```bash
 fpc -Fu<workspace>/ZNetV2/ZCore -Fu<workspace>/ZNetV2 <AppName>_provider.lpr
 ```
 
-或 `lazbuild` 打开 `.lpi` 按 F9。
+Or open the `.lpi` in Lazarus and press F9.
 
-**§8 Delphi Portability** —— `.lpr` → `.dpr` 转换步骤：
-1. 改扩展名。
-2. 替换 `{$mode objfpc}{$H+}` 为 Delphi 项目头（通常不需要 mode 指令）。
-3. 移除 `cthreads`（Delphi 的 RTL 自动处理线程）。
-4. 设置单元搜索路径。
-5. **生成的 `<UnitName>_tool_provider_unit.pas` 本身已用 `{$DEFINE FPC_DELPHI_MODE}`，Delphi 兼容 as-is**。
+**§8 Delphi Portability** — `.lpr` → `.dpr` conversion steps:
+1. Change the extension.
+2. Replace `{$mode objfpc}{$H+}` with the Delphi project header (usually no mode directive is needed).
+3. Remove `cthreads` (Delphi's RTL handles threading automatically).
+4. Set the unit search path.
+5. **The generated `<UnitName>_tool_provider_unit.pas` itself already uses `{$DEFINE FPC_DELPHI_MODE}` and is Delphi-compatible as-is.**
 
-### 3.4 Python README 细节
+### 3.4 Python README Details
 
-**输出文件名**：`<unit>_tool_provider_python.md`
+**Output filename**: `<unit>_tool_provider_python.md`
 
-**包来源策略**（**明确的两条路径**）：
+**Package source strategy** (**two explicit paths**):
 
-| # | 来源 | 何时用 | 如何获取 |
-|---|------|-------|---------|
-| **1** | 独立 `py-lingofuse` 仓库或 PyPI 包 | 存在时优先 | `pip install py-lingofuse` 或 `git clone <py-lingofuse-repo-url>` |
-| **2** | v3 内置的 `<v3>/src/lingofuse/` | 兜底 | 从 `<v3-repo-url>` 克隆后设置 `PYTHONPATH` |
+| # | Source | When to use | How to get it |
+|---|--------|-------------|---------------|
+| **1** | Independent `py-lingofuse` repository or PyPI package | Preferred when available | `pip install py-lingofuse` or `git clone <py-lingofuse-repo-url>` |
+| **2** | v3's built-in `<v3>/src/lingofuse/` | Fallback | Clone from `<v3-repo-url>` then set `PYTHONPATH` |
 
-**§3 Test Provider Script** 的关键点：**生成的 `.py` 本身已经是可运行的**——它自带 `if __name__ == "__main__":` 块。README 明确告诉用户**不需要写额外的测试脚本**。
+**§3 Test Provider Script** key point: **the generated `.py` is itself runnable** — it includes its own `if __name__ == "__main__":` block. The README explicitly tells the user **no extra test script is needed**.
 
-**§4 Build & Test 的 7 步**（比 Pascal/C++ 多一步"验证 import"）：
+**§4 Build & Test in 7 steps** (one more step than Pascal/C++: "verify import"):
 
 ```mermaid
 flowchart TD
@@ -764,35 +764,35 @@ flowchart TD
     S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
 ```
 
-**Step 2 的命令**（关键验证）：
+**Step 2 command** (key verification):
 
 ```bash
 python -c "import lingofuse._lf_native as m; print('OK', m.__file__)"
 ```
 
-**Path A / Path B 的环境变量差异**：
+**Environment variable difference between Path A / Path B**:
 
-- Path A（`pip install py-lingofuse`）：无需环境变量。
-- Path B（v3 兜底）：
-  - **Windows (cmd)**：`set PYTHONPATH=D:\LingoFuse-pasAgent-v3\src`
-  - **Windows (PowerShell)**：`$env:PYTHONPATH = "D:\LingoFuse-pasAgent-v3\src"`
-  - **Linux/macOS**：`export PYTHONPATH=/path/to/LingoFuse-pasAgent-v3/src`
+- Path A (`pip install py-lingofuse`): no environment variable needed.
+- Path B (v3 fallback):
+  - **Windows (cmd)**: `set PYTHONPATH=D:\LingoFuse-pasAgent-v3\src`
+  - **Windows (PowerShell)**: `$env:PYTHONPATH = "D:\LingoFuse-pasAgent-v3\src"`
+  - **Linux/macOS**: `export PYTHONPATH=/path/to/LingoFuse-pasAgent-v3/src`
 
-**§8 Python Portability**：venv / PyInstaller / Nuitka 集成说明。
+**§8 Python Portability**: venv / PyInstaller / Nuitka integration notes.
 
-### 3.5 C++ README 细节
+### 3.5 C++ README Details
 
-**输出文件名**：`<unit>_tool_provider_cpp.md`
+**Output filename**: `<unit>_tool_provider_cpp.md`
 
-**关键状态**：**cppAgent 仓库尚未发布**。README 明确说明这一点，并提供**三条获取 `LingoFuse.h` 的备选路径**：
+**Key status**: **the cppAgent repository has not been released yet**. The README states this explicitly and offers **three alternative paths to obtain `LingoFuse.h`**:
 
-| 来源 | 说明 |
-|------|------|
-| LingoFuse 运行时发行包 | `LingoFuse.h` 通常与 `LingoFuse64.dll` 同目录 |
-| v3 的 `lingofuse_import.pas` | 手动翻译为 C++ |
-| **§3.1 的最小兜底 header** | README **内置**可直接使用的最小 `LingoFuse.h` |
+| Source | Note |
+|--------|------|
+| LingoFuse runtime distribution | `LingoFuse.h` is usually next to `LingoFuse64.dll` |
+| v3's `lingofuse_import.pas` | Manually translate to C++ |
+| **§3.1 minimal fallback header** | README **embeds** a directly usable minimal `LingoFuse.h` |
 
-**§3 Test Program** 提供的**完整 `main.cpp`**（关键结构）：
+**§3 Test Program** provides a **complete `main.cpp`** (key structure):
 
 ```cpp
 #include "<UnitName>_tool_provider.hpp"
@@ -823,9 +823,9 @@ int main()
 }
 ```
 
-**§3.1 最小 `LingoFuse.h`**（**关键兜底**）：README 中**内嵌**一个 ~50 行的 header，包含所有用到的 `LF_*` 函数声明与 `LF_CDECL` 宏。用户可直接复制使用，等 cppAgent 发布后替换为官方版本。
+**§3.1 minimal `LingoFuse.h`** (**key fallback**): the README **embeds** a ~50-line header containing all the `LF_*` function declarations used and the `LF_CDECL` macro. Users can copy it directly and replace it with the official version once cppAgent is released.
 
-**§4 Build 的三套命令**：
+**§4 Build in three command variants**:
 
 ```bash
 # Linux / macOS
@@ -841,44 +841,45 @@ g++ -std=c++17 -O2 -I. main.cpp <unit>_tool_provider.cpp \
     -L. -lLingoFuse -o provider.exe
 ```
 
-**§8 C++ Portability**：
-- 支持的编译器版本表（MSVC 16.8+, g++ 7.0+, clang++ 5.0+）
-- Windows `__cdecl` 调用约定
-- 静态 vs 动态链接
-- CMake 模板（等 cppAgent 发布后启用）
+**§8 C++ Portability**:
+- Supported compiler version table (MSVC 16.8+, g++ 7.0+, clang++ 5.0+)
+- Windows `__cdecl` calling convention
+- Static vs dynamic linking
+- CMake template (to be enabled once cppAgent is released)
 
-### 3.6 三份 README 的对称性与差异
+### 3.6 Symmetry and Differences Among the Three READMEs
 
-**完全一致**：
-- 十节骨架
-- §2 Runtime Architecture 的 Mermaid 图
-- §5 Tool Reference 的表格与 JSON 示例结构
-- §6 JSON Schema 白名单（C++ 多一列 C++ 类型）
-- §7.1 全局配置变量表结构
+**Fully identical**:
+- The ten-section skeleton
+- §2 Runtime Architecture Mermaid diagram
+- §5 Tool Reference table and JSON example structure
+- §6 JSON Schema whitelist (C++ has one extra column)
+- §7.1 global configuration variable table structure
 
-**语言特化**：
-| 节 | Pascal | Python | C++ |
-|----|--------|--------|-----|
-| §1 依赖 | ZCore + ZNetV2 + v3 | py-lingofuse 或 v3 | json.hpp + LingoFuse.h + lib |
-| §3 测试程序 | `.lpr` 完整源码 | `.py` 自带 `__main__` | `main.cpp` + 兜底 header |
-| §4 步骤数 | 6 步 | **7 步**（多"验证 import"） | 7 步 |
-| §4 编译 | `fpc -Fu...` | `pip` / `PYTHONPATH` | g++ / cl / MinGW |
-| §8 便携性 | `.lpr` → `.dpr` | venv / PyInstaller | 编译器矩阵 / CMake |
+**Language-specific**:
 
-**§5 Tool Reference 的格式**（三语言完全一致）：
+| Section | Pascal | Python | C++ |
+|---------|--------|--------|-----|
+| §1 Dependencies | ZCore + ZNetV2 + v3 | py-lingofuse or v3 | json.hpp + LingoFuse.h + lib |
+| §3 Test program | `.lpr` full source | `.py` self-contained `__main__` | `main.cpp` + fallback header |
+| §4 Step count | 6 | **7** (extra "verify import") | 7 |
+| §4 Build | `fpc -Fu...` | `pip` / `PYTHONPATH` | g++ / cl / MinGW |
+| §8 Portability | `.lpr` → `.dpr` | venv / PyInstaller | compiler matrix / CMake |
+
+**§5 Tool Reference format** (identical across all three languages):
 
 ```markdown
 ### 5.N `<api_name>`
 
-- Original Pascal function: `<原始名>`
+- Original Pascal function: `<original name>`
 - Exposed API name: `<api_name>`
-- Kind: `function`（returns `<ReturnType>`）或 `procedure`
-- Description: `<描述或(无描述)>`
+- Kind: `function` (returns `<ReturnType>`) or `procedure`
+- Description: `<description or (no description)>`
 
 **Parameters**
 
-| Name | Pascal type | [语言] type | JSON type | Description |
-|------|-------------|-------------|-----------|-------------|
+| Name | Pascal type | [language] type | JSON type | Description |
+|------|-------------|-----------------|-----------|-------------|
 | `a` | `Int64` | ... | `integer` | ... |
 
 **Input JSON example**
@@ -890,26 +891,26 @@ g++ -std=c++17 -O2 -I. main.cpp <unit>_tool_provider.cpp \
 **Output JSON example**
 
 ```json
-{ "result": 0 }    （function）或 { "status": "ok" } （procedure）
+{ "result": 0 }    (function) or { "status": "ok" } (procedure)
 ```
 ```
 
-**§6 JSON Schema 的映射**（三语言一致，但 C++ 多一列）：
+**§6 JSON Schema mapping** (identical across all three, but C++ has one extra column):
 
-| Pascal 归一化 | JSON Schema | Pascal 类型 | Python 类型 | C++ 类型 |
-|--------------|------------|------------|------------|---------|
+| Pascal normalized | JSON Schema | Pascal type | Python type | C++ type |
+|-------------------|-------------|-------------|-------------|----------|
 | `int64` | `integer` | `Int64` | `int` | `std::int64_t` |
 | `double` | `number` | `Double` | `float` | `double` |
 | `string` | `string` | `string` | `str` | `std::string` |
 
-### 3.7 使用方法（从生成到落盘）
+### 3.7 Usage (from generation to disk-write)
 
-#### 3.7.1 在 GUI 中调用（v5.0 集成后）
+#### 3.7.1 Calling in the GUI (after v5.0 integration)
 
-在 `Button6Click` 中，**每个代码生成器调用之后追加对应的 README 生成**：
+In `Button6Click`, **after each code generator call, append the corresponding README generation**:
 
 ```pascal
-// 现有（代码）：
+// Existing (code):
 l := GeneratePascalCode(func_model);
 if l <> nil then
 begin
@@ -918,7 +919,7 @@ begin
   disposeObjectAndNil(l);
 end;
 
-// 追加（README）：
+// Appended (README):
 l := GeneratePascalReadme(func_model);
 if l <> nil then
 begin
@@ -926,10 +927,10 @@ begin
   disposeObjectAndNil(l);
 end;
 
-// Python / C++ 同理
+// Python / C++ same pattern
 ```
 
-#### 3.7.2 在独立工具中调用
+#### 3.7.2 Calling in a standalone tool
 
 ```pascal
 var
@@ -961,18 +962,18 @@ begin
 end;
 ```
 
-#### 3.7.3 边界情况
+#### 3.7.3 Edge cases
 
-- **`Model = nil`** → 返回非 nil 的降级文本（`# README generation skipped` + 原因）。
-- **`Model.UnitName = ''`** → 同上。
-- **`Length(ValidFuncs) = 0`** → 返回完整 README，但 §5 明确警告"0 个 API"并列出可能原因。
-- **未识别的语言类型** → 该函数被过滤，README 中**不出现**该 API。
+- **`Model = nil`** → returns non-nil degraded text (`# README generation skipped` + reason).
+- **`Model.UnitName = ''`** → same as above.
+- **`Length(ValidFuncs) = 0`** → returns the full README, but §5 explicitly warns of "0 APIs" and lists possible reasons.
+- **Unrecognized language type** → that function is filtered out; the README **does not include** that API.
 
 ---
 
-## 第 4 章 LLM 服务端
+## Chapter 4  LLM Server
 
-### 4.1 三种服务端的能力矩阵
+### 4.1 Capability Matrix of the Three Servers
 
 | API | `llm_service` | `llm_proxy` | `llm_proxy_tool` |
 |-----|:-------------:|:-----------:|:----------------:|
@@ -989,14 +990,14 @@ end;
 | `tools` / `tool_calls` / `tool_results` | — | — | **1** |
 | `server_kind` | `service` | `proxy` | `proxy` |
 
-**`vision=0` 的精确语义**：服务端**自身不做视觉处理**，不等于整个链路不支持多模态。图片能否被理解由**后端**决定。
+**Precise meaning of `vision=0`**: the server **itself performs no visual processing**; it does not mean the whole pipeline lacks multimodal support. Whether an image can be understood is determined by the **backend**.
 
 ### 4.2 `llm_service.py`
 
-**完整 API**：
+**Complete API**:
 
-| API 名 | 类型 | 输入 | 输出 |
-|--------|------|------|------|
+| API name | Type | Input | Output |
+|----------|------|-------|--------|
 | `generate` | Call | `{session_id?, content, prompt?, client_name?, options?, attachments?}` | `{code, session_id, task_id, mode}` |
 | `create_session` | Call | `{client_name, system_message?}` | `{code, session_id, client_name}` |
 | `close_session` | Call | `{session_id, cancel_running?}` | `{code, status}` |
@@ -1005,42 +1006,42 @@ end;
 | `set_system_message` | Call | `{content}` | `{code, status}` |
 | `get_api_capabilities` | Call | `{}` | `{code, server_kind, capabilities}` |
 | `health` | Call | `{}` | `{code, status, ...}` |
-| `llm_stream` | Notify | `{type, session_id, text/message/reason}` | 无 |
+| `llm_stream` | Notify | `{type, session_id, text/message/reason}` | none |
 
-**`options` 白名单**：`max_tokens` (int, [1, 2^20])、`temperature` (float, [0, 2])、`top_p` ([0, 1])、`top_k` ([0, 1000])、`repeat_penalty` ([0, 4])、`thinking` (bool)、`ephemeral` (bool)。**其他字段被静默丢弃**。
+**`options` whitelist**: `max_tokens` (int, [1, 2^20]), `temperature` (float, [0, 2]), `top_p` ([0, 1]), `top_k` ([0, 1000]), `repeat_penalty` ([0, 4]), `thinking` (bool), `ephemeral` (bool). **Other fields are silently dropped.**
 
-**附件限制**：单文本 ≤ 256 KB；总文本 ≤ 512 KB；单图片 base64 ≤ 8 MB；总图片 ≤ 16 MB。**图片仅 `--vision` 启用时接受**（`llm_service` 始终拒绝）。
+**Attachment limits**: single text ≤ 256 KB; total text ≤ 512 KB; single image base64 ≤ 8 MB; total images ≤ 16 MB. **Images are accepted only when `--vision` is enabled** (`llm_service` always rejects them).
 
-**会话回收的双条件**（仅 `llm_service`）：
+**Dual condition for session reclamation** (only in `llm_service`):
 
 ```
-回收 ⇔ (status = idle) AND (空闲 > session_timeout) AND (客户端 App 离线)
+reclaim ⇔ (status = idle) AND (idle time > session_timeout) AND (client app offline)
 ```
 
-**`check_app` 缓存延迟约 3 秒**——刚离线时可能误判为在线。
+**`check_app` cache delay is about 3 seconds** — a client that just went offline may be incorrectly considered online.
 
-**Thinking 的优先级**：
-1. 单次请求 `options.thinking`
-2. 命令行 `--thinking` / `--no-thinking`
-3. 环境变量 `LLM_THINKING`
-4. 模块常量 `DEFAULT_THINKING`（= False）
+**Thinking priority**:
+1. Per-request `options.thinking`
+2. Command line `--thinking` / `--no-thinking`
+3. Environment variable `LLM_THINKING`
+4. Module constant `DEFAULT_THINKING` (= False)
 
-**关键参数**见附录 A.2。
+**Key parameters**: see Appendix A.2.
 
 ### 4.3 `llm_proxy.py`
 
-**与 `llm_service` 的差异**：
+**Differences from `llm_service`**:
 
-| 维度 | `llm_service` | `llm_proxy` |
-|------|--------------|-------------|
-| 模型加载 | 本地 llama.cpp | 无 |
-| 推理线程 | 单 worker 串行 | 无推理 |
-| 上下文管理 | 服务端持有 KV cache | 每轮重建 messages |
-| `set_system_message` | ✅ | ❌ 明确拒绝 |
-| 会话回收 | 双条件 | 单条件（仅超时） |
-| 默认 `session_timeout` | 600 | 1800 |
+| Dimension | `llm_service` | `llm_proxy` |
+|-----------|---------------|-------------|
+| Model loading | Local llama.cpp | none |
+| Inference thread | Single serial worker | no inference |
+| Context management | Server holds the KV cache | Rebuilds messages every round |
+| `set_system_message` | ✅ | ❌ explicitly rejected |
+| Session reclamation | dual condition | single condition (timeout only) |
+| Default `session_timeout` | 600 | 1800 |
 
-**`set_system_message` 的拒绝响应**：
+**`set_system_message` rejection response**:
 
 ```json
 {
@@ -1050,67 +1051,67 @@ end;
 }
 ```
 
-**替换方案**：用 `create_session` 的 `system_message` 字段。
+**Replacement approach**: use the `system_message` field of `create_session`.
 
-**独有参数**见附录 A.3。
+**Unique parameters**: see Appendix A.3.
 
-### 4.4 `llm_proxy_tool.py`（LTB）
+### 4.4 `llm_proxy_tool.py` (LTB)
 
-**定位**：`llm_proxy` + **服务端侧工具执行**。
+**Positioning**: `llm_proxy` + **server-side tool execution**.
 
-**多轮 `tool_calls` 循环的精确状态机**：
+**Precise state machine of the multi-round `tool_calls` loop**:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Round0: generate 到达
-    Round0 --> CallBackend: 携带 tools
-    CallBackend --> CheckCalls: 收到 SSE 结束
-    CheckCalls --> Final: 无 tool_calls
-    CheckCalls --> ExecuteTools: 有 tool_calls
-    ExecuteTools --> AppendHistory: 追加 role=tool
-    AppendHistory --> CheckCaps: 检查轮次/调用数上限
-    CheckCaps --> CallBackend: 未超限，下一轮带 tools
-    CheckCaps --> CallBackendNoTools: 超限或到最后一轮，不带 tools
+    [*] --> Round0: generate arrives
+    Round0 --> CallBackend: with tools
+    CallBackend --> CheckCalls: SSE finished
+    CheckCalls --> Final: no tool_calls
+    CheckCalls --> ExecuteTools: has tool_calls
+    ExecuteTools --> AppendHistory: append role=tool
+    AppendHistory --> CheckCaps: check round/call limits
+    CheckCaps --> CallBackend: under limits, next round with tools
+    CheckCaps --> CallBackendNoTools: over limit or last round, no tools
     CallBackendNoTools --> Final
-    Final --> EmitFinish: 发送 finish
+    Final --> EmitFinish: send finish
     EmitFinish --> [*]
 ```
 
-**关键判定**：
+**Key decisions**:
 - `is_final_round = force_final_round OR (round_idx == max_tool_rounds - 1)`
-- `force_final_round` 在 `total_tool_calls >= max_total_tool_calls` 时置 True。
-- **最终轮不带 `tools`**，强制模型产出文本。
+- `force_final_round` is set to True when `total_tool_calls >= max_total_tool_calls`.
+- **The final round does not carry `tools`**, forcing the model to produce text.
 
-**工具结果的截断**：
-1. 单条 > `max_tool_result_chars` → 截断 + `...(truncated)`。
-2. 总字符 > `max_total_tool_result_chars` → 截断 + `...(tool-result budget exhausted)`。
+**Tool-result truncation**:
+1. Single result > `max_tool_result_chars` → truncated + `...(truncated)`.
+2. Total characters > `max_total_tool_result_chars` → truncated + `...(tool-result budget exhausted)`.
 
-**多模态在工具链中**：
-- **首轮**：发送完整多模态内容（含 `image_url`）。
-- **后续轮**：历史中图片替换为短占位符。
+**Multimodality in the tool chain**:
+- **First round**: sends the full multimodal content (including `image_url`).
+- **Subsequent rounds**: images in history are replaced with short placeholders.
 
-**预连接 middleware 的顺序（关键）**：LTB 必须在 `Server.start()` 之前调用 `_ensure_tools_ready()`。原因：`LF_PrepareDone()` 在同一进程内只有第一次返回 1。
+**Pre-connect middleware ordering (critical)**: LTB must call `_ensure_tools_ready()` before `Server.start()`. Reason: `LF_PrepareDone()` returns 1 only on the first call in a process.
 
-**独有参数**见附录 A.4。
+**Unique parameters**: see Appendix A.4.
 
 ---
 
-## 第 5 章 MCP 网关
+## Chapter 5  MCP Gateway
 
 ### 5.1 `mcp_api_tool.py`
 
-**完整 API**：
+**Complete API**:
 
-| API 名 | 类型 | 输入 | 输出 |
-|--------|------|------|------|
+| API name | Type | Input | Output |
+|----------|------|-------|--------|
 | `agent_main` | Call | `{}` | `{tools: [...]}` |
 | `agent_log` | Call | `{message}` | `{status: "ok"}` |
 | `register_agent` | Call | `{name, description, target_app, target_api, parameters}` | `{status: "ok"}` |
 
-**工具注册 JSON 的精确结构**：
+**Precise structure of the tool registration JSON**:
 
 ```json
-// agent_main 返回
+// agent_main returns
 {
   "tools": [
     {
@@ -1131,101 +1132,101 @@ stateDiagram-v2
 }
 ```
 
-**传输模式**：
-- `stdio`：客户端启动时自动启动。**在主进程运行**（避免 Windows multiprocessing spawn 问题）。
-- `http`：Streamable HTTP（推荐）。
-- `sse`：已弃用。
+**Transport modes**:
+- `stdio`: started automatically by the client. **Runs in the main process** (to avoid the Windows multiprocessing spawn problem).
+- `http`: Streamable HTTP (recommended).
+- `sse`: deprecated.
 
-**stdio 模式的控制台抑制**：
+**Console suppression in stdio mode**:
 
 ```python
 LF_SetOption(b"ConsoleOutput", b"False")
 LF_SetOption(b"Quiet", b"True")
 ```
 
-**原因**：LingoFuse 的 C 层会输出诊断信息，污染 MCP 的 stdio 通道。
+**Reason**: LingoFuse's C layer emits diagnostic output, which pollutes the MCP stdio channel.
 
-**信号处理**：
+**Signal handling**:
 
 ```python
 def signal_handler(sig, frame):
-    raise KeyboardInterrupt()   # 不是 sys.exit(0)
+    raise KeyboardInterrupt()   # not sys.exit(0)
 ```
 
-**原因**：`sys.exit(0)` 抛 `SystemExit`，不会被 `except KeyboardInterrupt` 捕获，导致 http/sse 模式的子进程孤儿化。
+**Reason**: `sys.exit(0)` raises `SystemExit`, which is not caught by `except KeyboardInterrupt`, causing the http/sse child process to become an orphan.
 
-**关键参数**见附录 A.5。
+**Key parameters**: see Appendix A.5.
 
 ### 5.2 `mcp_api_proxy.py`
 
-**定位**：透明的 stdio 转发器，用于调试 MCP 握手。**字节级转发，不做 JSON 处理**。
+**Positioning**: a transparent stdio forwarder for debugging the MCP handshake. **Byte-level forwarding, no JSON processing.**
 
-**数据流**：
+**Data flow**:
 
-| 通道 | 方向 | 过滤 |
-|------|------|------|
-| `LM->Server` | stdin → child.stdin | 无 |
-| `Server->LM` | child.stdout → stdout | **JSON-RPC 行过滤**（只转发 `{` 开头的行） |
-| `Server-ERR` | child.stderr → stderr | 无 |
+| Channel | Direction | Filter |
+|---------|-----------|--------|
+| `LM->Server` | stdin → child.stdin | none |
+| `Server->LM` | child.stdout → stdout | **JSON-RPC line filter** (only forwards lines starting with `{`) |
+| `Server-ERR` | child.stderr → stderr | none |
 
-**关键实现细节**：
-- **`bufsize=0` 是禁忌**：会使 stdin 非阻塞，FastMCP 4.x 会立即 EOF。
-- **`read1()` 而非 `read()`**：只要有数据就返回。
-- **不设顶层 `SIGINT` 处理器**：让 `KeyboardInterrupt` 传播到 `main()`。
+**Key implementation details**:
+- **`bufsize=0` is a trap**: it makes stdin non-blocking, and FastMCP 4.x will immediately EOF.
+- **`read1()` instead of `read()`**: returns as soon as any data is available.
+- **Do not install a top-level `SIGINT` handler**: let `KeyboardInterrupt` propagate to `main()`.
 
 ---
 
-## 第 6 章 中间件与桥接
+## Chapter 6  Middleware and Bridging
 
 ### 6.1 `language_middleware.py`
 
-**单例 + 懒连接**：构造时不连接，第一次 `get_tools()` / `call_tool()` / `log()` 时连接。
+**Singleton + lazy connection**: does not connect in the constructor; connects on first `get_tools()` / `call_tool()` / `log()`.
 
-**完整 API**：
+**Complete API**:
 
-| 方法 | 作用 |
-|------|------|
-| `get_instance(...)` | 获取单例（可选更新配置） |
-| `get_tools() -> List[Dict]` | 工具列表 |
-| `call_tool(tool_name, arguments) -> Any` | 调用工具 |
-| `log(message) -> Optional[Dict]` | 发送日志 |
-| `is_connected() -> bool` | 是否已连接 |
-| `reconnect()` | 强制重连 |
-| `shutdown()` | 显式关闭 |
+| Method | Purpose |
+|--------|---------|
+| `get_instance(...)` | Get the singleton (optionally updating the configuration) |
+| `get_tools() -> List[Dict]` | Tool list |
+| `call_tool(tool_name, arguments) -> Any` | Call a tool |
+| `log(message) -> Optional[Dict]` | Send a log |
+| `is_connected() -> bool` | Whether it is connected |
+| `reconnect()` | Force a reconnect |
+| `shutdown()` | Explicit shutdown |
 
-**生命周期铁律**：`LF_ExitMainThread` → `LF_FreeApp` → `LF_Shutdown`。
+**Lifecycle iron rule**: `LF_ExitMainThread` → `LF_FreeApp` → `LF_Shutdown`.
 
-**`_disconnect()` 不调用 `LF_Shutdown()`**——App handle 必须在 disconnect/reconnect 周期中保持有效。
+**`_disconnect()` does not call `LF_Shutdown()`** — the App handle must remain valid across disconnect/reconnect cycles.
 
-**`reg_tool` 回调的字段名**：`name`（**不是** `tool_name`）——与 Pascal 侧 `do_register_agent` 对齐。
+**Field name of the `reg_tool` callback**: `name` (**not** `tool_name`) — aligned with `do_register_agent` on the Pascal side.
 
 ### 6.2 `bridge.py`
 
-**请求格式**：`POST /<app>/<api>`（或 `POST /<api>`，使用默认 app）。
+**Request format**: `POST /<app>/<api>` (or `POST /<api>`, using the default app).
 
-**响应格式**：
+**Response format**:
 
-| 情形 | HTTP | Body |
+| Case | HTTP | Body |
 |------|------|------|
-| 成功 | 200 | 原样返回后端字节 |
-| 调用失败 | 200 | `{"code": -1, "error": "..."}` |
-| 请求格式错误 | 400 | `{"code": -2, "error": "..."}` |
-| API 预检失败 | 200 | `{"code": -3, "error": "..."}` |
+| Success | 200 | Returns the backend bytes as-is |
+| Call failure | 200 | `{"code": -1, "error": "..."}` |
+| Request format error | 400 | `{"code": -2, "error": "..."}` |
+| API precheck failure | 200 | `{"code": -3, "error": "..."}` |
 
-**JSON 规范化**：双向（请求 + 响应），默认开启，**幂等**。处理的异常：UTF-8 BOM、尾随 NUL、尾随逗号、非 UTF-8 编码（GBK / Latin-1）。**二进制安全**：无法解析为 JSON 的 payload **原样转发**。
+**JSON normalization**: bidirectional (request + response), enabled by default, **idempotent**. Handles: UTF-8 BOM, trailing NUL, trailing comma, non-UTF-8 encoding (GBK / Latin-1). **Binary-safe**: payloads that cannot be parsed as JSON are **forwarded as-is**.
 
-**关键参数**见附录 A.6。
+**Key parameters**: see Appendix A.6.
 
 ---
 
-## 第 7 章 共享模块
+## Chapter 7  Shared Modules
 
 ### 7.1 `llm_common.attachments`
 
-**限制常量**：
+**Limit constants**:
 
-| 常量 | 值 |
-|------|-----|
+| Constant | Value |
+|----------|-------|
 | `MAX_TEXT_BYTES_PER_FILE` | 256 * 1024 |
 | `MAX_TEXT_BYTES_TOTAL` | 512 * 1024 |
 | `MAX_IMAGE_B64_PER_FILE` | 8 * 1024 * 1024 |
@@ -1233,10 +1234,10 @@ def signal_handler(sig, frame):
 | `MAX_ATTACHMENT_NAME_LEN` | 256 |
 | `ALLOWED_IMAGE_MIMES` | `{image/png, image/jpeg, image/jpg, image/webp}` |
 
-**`build_user_content` 的返回值**：
-- 无图片：纯字符串。
-- 有图片：`[{"type":"text",...}, {"type":"image_url",...}]`。
-- **纯图片无文本**：`[{"type":"image_url",...}]`（无空 text part）。
+**Return value of `build_user_content`**:
+- No images: a plain string.
+- Has images: `[{"type":"text",...}, {"type":"image_url",...}]`.
+- **Image-only with no text**: `[{"type":"image_url",...}]` (no empty text part).
 
 ### 7.2 `llm_common.capabilities`
 
@@ -1264,41 +1265,41 @@ COMMON_SCALAR_SPECS = (
 )
 ```
 
-**丢弃规则**：`None` 丢弃；`bool` **显式丢弃**；类型转换失败丢弃；越界值 clamp。
+**Drop rules**: `None` → drop; `bool` → **explicitly dropped**; type-conversion failure → drop; out-of-range → clamp.
 
 ### 7.4 `llm_common.sse_client`
 
-**转发白名单**：
+**Forwarding whitelist**:
 ```python
 _FORWARDED_SCALAR_KEYS = ("max_tokens", "temperature", "top_p", "top_k", "repeat_penalty")
 _FORWARDED_PASSTHROUGH_KEYS = ("tools", "tool_choice", "response_format")
 ```
 
-**关键实现细节**：使用 `http.client`（不是 `requests`）；`Accept-Encoding: identity`；`TCP_NODELAY`；`skip_accept_encoding=True`。
+**Key implementation details**: uses `http.client` (not `requests`); `Accept-Encoding: identity`; `TCP_NODELAY`; `skip_accept_encoding=True`.
 
 ### 7.5 `lingofuse.lf_io`
 
-**关键函数**：
+**Key functions**:
 
-| 函数 | 作用 |
-|------|------|
+| Function | Purpose |
+|----------|---------|
 | `dumps_json(obj) -> str` | `json.dumps(obj, ensure_ascii=False, default=str)` |
 | `write_string(hnd, value)` | UTF-8 + NUL |
-| `read_string(hnd) -> str` | 读到 NUL 或末尾 |
+| `read_string(hnd) -> str` | Read until NUL or end |
 | `write_json(hnd, obj)` | JSON + NUL |
-| `read_json(hnd) -> Any` | 严格读 JSON |
-| `read_json_or_bytes(hnd) -> Any` | 宽容读 |
-| `cstr(value) -> bytes` | NUL 结尾的 UTF-8 字节 |
+| `read_json(hnd) -> Any` | Strict JSON read |
+| `read_json_or_bytes(hnd) -> Any` | Lenient read |
+| `cstr(value) -> bytes` | NUL-terminated UTF-8 bytes |
 
-**Wire format**：`<UTF-8 文本> <NUL>`。
+**Wire format**: `<UTF-8 text> <NUL>`.
 
-**与 Pascal 侧完全兼容**：`LF_WriteString('{"a":1}')` → `7B 22 61 22 3A 31 7D 00`；`lf_io.write_json(hnd, {"a": 1})` → 相同字节。
+**Fully compatible with the Pascal side**: `LF_WriteString('{"a":1}')` → `7B 22 61 22 3A 31 7D 00`; `lf_io.write_json(hnd, {"a": 1})` → same bytes.
 
 ---
 
-## 第 8 章 Wire format 与协议
+## Chapter 8  Wire Format and Protocol
 
-### 8.1 LV1 Model JSON 结构
+### 8.1 LV1 Model JSON Structure
 
 ```json
 {
@@ -1317,7 +1318,7 @@ _FORWARDED_PASSTHROUGH_KEYS = ("tools", "tool_choice", "response_format")
 }
 ```
 
-### 8.2 LV0 Model JSON 结构
+### 8.2 LV0 Model JSON Structure
 
 ```json
 {
@@ -1342,19 +1343,19 @@ _FORWARDED_PASSTHROUGH_KEYS = ("tools", "tool_choice", "response_format")
 }
 ```
 
-### 8.3 流式消息协议
+### 8.3 Streaming Message Protocol
 
-| 类型 | 字段 | 含义 |
-|------|------|------|
-| `chunk` | `session_id`, `text` | 正文流 |
-| `think` | `session_id`, `text` | 思考流 |
-| `finish` | `session_id`, `reason` | 生成结束 |
-| `error` | `session_id`, `message` | 服务端错误 |
-| `closed` | `session_id`, `reason` | 会话关闭 |
+| Type | Fields | Meaning |
+|------|--------|---------|
+| `chunk` | `session_id`, `text` | Main body stream |
+| `think` | `session_id`, `text` | Thinking stream |
+| `finish` | `session_id`, `reason` | Generation finished |
+| `error` | `session_id`, `message` | Server error |
+| `closed` | `session_id`, `reason` | Session closed |
 
-**`reason` 枚举**：`stop` / `error` / `cancelled` / `timeout` / `client` / `shutdown` / `ephemeral` / `timeout+offline`。
+**`reason` enum**: `stop` / `error` / `cancelled` / `timeout` / `client` / `shutdown` / `ephemeral` / `timeout+offline`.
 
-### 8.4 能力矩阵响应
+### 8.4 Capability Matrix Response
 
 ```json
 {
@@ -1368,56 +1369,56 @@ _FORWARDED_PASSTHROUGH_KEYS = ("tools", "tool_choice", "response_format")
 }
 ```
 
-### 8.5 字节序
+### 8.5 Byte Order
 
-**统一小端**。现代平台（x86 / ARM / x86_64 / aarch64）都是小端，通常无问题。
-
----
-
-## 第 9 章 配置参数参考
-
-**优先级**：命令行 > 环境变量 > 内置默认值。
-
-### 9.1 生成器常量
-
-`GenerateCode_LogEnabled`（bool，默认 `False`）。
-
-### 9.2 LLM 服务端 / MCP 网关 / 桥接
-
-见附录 A。
+**Uniformly little-endian**. Modern platforms (x86 / ARM / x86_64 / aarch64) are all little-endian, so this is usually not an issue.
 
 ---
 
-## 第 10 章 生命周期与状态机
+## Chapter 9  Configuration Parameter Reference
 
-### 10.1 `LF_PrepareDone` 的一次性约束
+**Priority**: command line > environment variable > built-in default.
 
-**铁律**：`LF_PrepareDone()` 在同一进程内**只有第一次返回 1**。
+### 9.1 Generator Constant
 
-**影响**：
-- 必须调整初始化顺序，确保关键连接在第一次调用前完成。
-- LTB 必须在 `Server.start()` 前预连接 middleware。
-- 测试代码必须在 `finally` 中调用 `LF_Shutdown()`。
+`GenerateCode_LogEnabled` (bool, default `False`).
 
-### 10.2 数据句柄的自动回收
+### 9.2 LLM Server / MCP Gateway / Bridge
 
-- `TLF_DataPool.Progress` 每 5 秒扫描一次。
-- 释放闲置超过 **5 分钟**的句柄。
-- **不保证及时性**。**不应依赖**——必须显式 `LF_FreeData`。
+See Appendix A.
 
-### 10.3 序列化通知线程
+---
 
-- 每个 `(App, API)` 对拥有一个专用线程。
-- **空闲 5 分钟后自动终止**。
+## Chapter 10  Lifecycle and State Machine
 
-### 10.4 `LF_FreeApp` 的两阶段析构
+### 10.1 The One-Shot Constraint of `LF_PrepareDone`
 
-1. 遍历所有客户端，解绑 App。
-2. `LF_Notify_Sequence_Thread_Pool.Kill_App(app)`。
-3. `app.FakeFree`（仅移除定时器）。
-4. **对象不立即销毁**——等 `LF_Shutdown` 时清理。
+**Iron rule**: `LF_PrepareDone()` **returns 1 only on the first call within a process**.
 
-### 10.5 会话生命周期
+**Impact**:
+- Startup order must be arranged so that critical connections complete before the first call.
+- LTB must pre-connect to the middleware before `Server.start()`.
+- Test code must call `LF_Shutdown()` in a `finally` block.
+
+### 10.2 Automatic Reclamation of Data Handles
+
+- `TLF_DataPool.Progress` scans every 5 seconds.
+- Releases handles idle for more than **5 minutes**.
+- **Timeliness is not guaranteed**. **Do not rely on it** — always call `LF_FreeData` explicitly.
+
+### 10.3 Sequenced Notification Threads
+
+- Each `(App, API)` pair owns a dedicated thread.
+- **Automatically terminates after 5 minutes of idleness**.
+
+### 10.4 Two-Phase Destruction of `LF_FreeApp`
+
+1. Iterate all clients; unbind the App.
+2. `LF_Notify_Sequence_Thread_Pool.Kill_App(app)`.
+3. `app.FakeFree` (removes the timer only).
+4. **The object is not destroyed immediately** — it is cleaned up during `LF_Shutdown`.
+
+### 10.5 Session Lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -1431,261 +1432,261 @@ stateDiagram-v2
 
 ---
 
-## 第 11 章 线程模型
+## Chapter 11  Threading Model
 
-### 11.1 回调执行线程
+### 11.1 Callback Execution Threads
 
-| 回调类型 | 执行线程 | 约束 |
-|----------|----------|------|
-| LingoFuse Call/Notify 回调 | 后台 C4 线程池 | 不阻塞、不调 LF_Call、不访问 UI |
-| 网络事件回调 | 后台 TCompute 工作线程 | 不阻塞、`addr_` 回调返回后失效 |
-| `RegisterSyncCall_M` | 主线程（经 `LF_Sync`） | 需主循环定期调 `LF_Sync` |
-| `llm_stream` Notify 回调 | 客户端 LingoFuse 主线程 | 需 `FActiveSessionId` 过滤 |
+| Callback type | Execution thread | Constraint |
+|---------------|------------------|------------|
+| LingoFuse Call/Notify callback | Background C4 thread pool | Do not block; do not call LF_Call; do not touch the UI |
+| Network event callback | Background TCompute worker thread | Do not block; `addr_` is invalid after the callback returns |
+| `RegisterSyncCall_M` | Main thread (via `LF_Sync`) | The main loop must call `LF_Sync` periodically |
+| `llm_stream` Notify callback | Client LingoFuse main thread | Requires `FActiveSessionId` filtering |
 
-### 11.2 线程安全矩阵
+### 11.2 Thread-Safety Matrix
 
-| 组件 | 线程安全 |
-|------|----------|
-| `TBigList<T>`（非 critical） | ❌ 需外部加锁 |
-| `TCritical_BigList<T>` | ✅ 内部加锁（迭代器除外） |
-| `TBig_Hash_Pair_Pool`（非 critical） | ❌ 需外部加锁 |
-| `TCritical_Big_Hash_Pair_Pool` | ✅ 内部加锁（`For_*` 全程持锁） |
+| Component | Thread-safe |
+|-----------|-------------|
+| `TBigList<T>` (non-critical) | ❌ external lock required |
+| `TCritical_BigList<T>` | ✅ internally locked (except iterators) |
+| `TBig_Hash_Pair_Pool` (non-critical) | ❌ external lock required |
+| `TCritical_Big_Hash_Pair_Pool` | ✅ internally locked (`For_*` holds the lock throughout) |
 | `TCompute.Run*` / `Post*` | ✅ |
-| `LF_Call` / `LF_Notify` | ✅ 可从任意线程调用 |
-| 同一 `TDataHnd` 的并发写 | ❌ 需外部同步 |
-| `TAtomVar<T>` | ✅ 内部 TCritical |
-| `AtomInc` / `AtomDec` | ✅ 硬件原子 |
+| `LF_Call` / `LF_Notify` | ✅ callable from any thread |
+| Concurrent writes to the same `TDataHnd` | ❌ external synchronization required |
+| `TAtomVar<T>` | ✅ internal TCritical |
+| `AtomInc` / `AtomDec` | ✅ hardware atomic |
 
 ---
 
-## 第 12 章 反例集
+## Chapter 12  Anti-Patterns
 
-### 12.1 参数名不匹配
+### 12.1 Parameter Name Mismatch
 
-**错误**（手工修改过的 Python 回调）：
+**Wrong** (a hand-edited Python callback):
 ```python
-a = data.get('x') or 0    # ❌ 源参数名是 'a'
+a = data.get('x') or 0    # ❌ the source parameter name is 'a'
 b = data.get('y') or 0
 ```
 
-**后果**：`data.get('x')` 永远返回 None → 0。
+**Consequence**: `data.get('x')` always returns None → 0.
 
-**正确**：`a = data.get('a') or 0`；`b = data.get('b') or 0`。
+**Correct**: `a = data.get('a') or 0`; `b = data.get('b') or 0`.
 
-### 12.2 返回字段名错误
+### 12.2 Wrong Return Field Name
 
-**错误**：`jo.I64['value'] := ret;` —— 客户端读 `result` 得到 0。
+**Wrong**: `jo.I64['value'] := ret;` — the client reads `result` and gets 0.
 
-**正确**：`jo.I64['result'] := ret;`。
+**Correct**: `jo.I64['result'] := ret;`.
 
-### 12.3 回调缺 `cdecl`
+### 12.3 Callback Missing `cdecl`
 
-**错误**：`procedure Callback_Add_Add(...);`（无 `cdecl`）。
+**Wrong**: `procedure Callback_Add_Add(...);` (no `cdecl`).
 
-**后果**：栈错位，随机崩溃。
+**Consequence**: stack misalignment, random crashes.
 
-**正确**：`procedure Callback_Add_Add(...); cdecl;`。
+**Correct**: `procedure Callback_Add_Add(...); cdecl;`.
 
 ### 12.4 `ensure_ascii=True`
 
-**错误**：`json.dumps({"result": ret})`。
+**Wrong**: `json.dumps({"result": ret})`.
 
-**后果**：中文变 `\u4e2d\u6587`，token 消耗膨胀 5-6 倍。
+**Consequence**: Chinese becomes `\u4e2d\u6587`, inflating token consumption by 5–6×.
 
-**正确**：`json.dumps({"result": ret}, ensure_ascii=False)`。
+**Correct**: `json.dumps({"result": ret}, ensure_ascii=False)`.
 
-### 12.5 回调中调 `LF_Call`
+### 12.5 Calling `LF_Call` Inside a Callback
 
-**错误**：在回调里直接 `LF_CallEx(...)`。**后果**：C4 线程池死锁。
+**Wrong**: directly calling `LF_CallEx(...)` inside a callback. **Consequence**: C4 thread-pool deadlock.
 
-**正确**：`TCompute.RunC_NP(...)` 异步化。
+**Correct**: use `TCompute.RunC_NP(...)` to make it asynchronous.
 
-### 12.6 回调中释放 `_In` / `_Out`
+### 12.6 Releasing `_In` / `_Out` Inside a Callback
 
-**错误**：`LF_FreeData(_In);`。**后果**：use-after-free。
+**Wrong**: `LF_FreeData(_In);`. **Consequence**: use-after-free.
 
-**正确**：**永远不释放**。它们由库管理。
+**Correct**: **never release them**. They are managed by the library.
 
-### 12.7 `MakeApiName` 产生非法标识符
+### 12.7 `MakeApiName` Producing an Invalid Identifier
 
-**源名**：`Foo-Bar`。当前 `MakeApiName` 结果：`Foo-Bar`（`-` 未替换）。
+**Source name**: `Foo-Bar`. Current `MakeApiName` result: `Foo-Bar` (the `-` is not replaced).
 
-**后果**：生成的 `internal_call_Foo-Bar_Foo-Bar` 是**非法标识符**，编译失败。
+**Consequence**: the generated `internal_call_Foo-Bar_Foo-Bar` is an **invalid identifier**, causing a compilation failure.
 
-**正确**：用白名单过滤（见 §15.3）。
+**Correct**: use whitelist filtering (see §15.3).
 
-### 12.8 `LF_PrepareDone` 被多次调用
+### 12.8 `LF_PrepareDone` Called Multiple Times
 
-**错误**（LTB）：
+**Wrong** (LTB):
 ```python
 def start(self):
-    self.server.start(CONFIG.endpoint)   # 内部先 PrepareDone
-    self._ensure_tools_ready()           # ❌ 永久失败
+    self.server.start(CONFIG.endpoint)   # calls PrepareDone internally
+    self._ensure_tools_ready()           # ❌ permanently fails
 ```
 
-**正确**：`_ensure_tools_ready()` 在前。
+**Correct**: `_ensure_tools_ready()` first.
 
-### 12.9 `language_middleware` 的清理顺序错误
+### 12.9 Wrong Cleanup Order in `language_middleware`
 
-**错误**：`LF_Shutdown()` 在 `LF_FreeApp()` 之前。**正确**：`LF_ExitMainThread` → `LF_FreeApp` → `LF_Shutdown`。
+**Wrong**: `LF_Shutdown()` before `LF_FreeApp()`. **Correct**: `LF_ExitMainThread` → `LF_FreeApp` → `LF_Shutdown`.
 
-### 12.10 `llm_proxy` 把图片发给 `llm_service`
+### 12.10 `llm_proxy` Sending Images to `llm_service`
 
-**后果**：返回 `code: -1`。**正确**：改用 `llm_proxy` / LTB，并确保后端是 VLM。
+**Consequence**: returns `code: -1`. **Correct**: switch to `llm_proxy` / LTB and ensure the backend is a VLM.
 
-### 12.11 `GetFullDescription` 的 SystemString 中转隐患（Pascal 侧）
+### 12.11 The SystemString Intermediary Hazard in `GetFullDescription` (Pascal side)
 
-**问题**：Pascal 侧的 `GetFullDescription` 用 `Lines.AsText := Comment;` 经 `SystemString`（FPC 下可能是 `AnsiString`）中转，非 ASCII 字符在 CP936 环境下可能丢失。
+**Problem**: the Pascal-side `GetFullDescription` uses `Lines.AsText := Comment;`, which goes through `SystemString` (possibly `AnsiString` under FPC). Non-ASCII characters may be lost in a CP936 environment.
 
-**后果**：注释中的中文变为 `?`，README 与 tool description 都受影响。
+**Consequence**: Chinese in comments becomes `?`; both the README and the tool description are affected.
 
-**正确**：改为逐字符扫描 `TP_String`（参照 Python 侧 `GetFullDescription`）。
+**Correct**: change it to scan `TP_String` character by character (refer to the Python-side `GetFullDescription`).
 
-### 12.12 README 生成后未替换占位符（v5.0 新增）
+### 12.12 README Generated but Placeholders Not Replaced (new in v5.0)
 
-**错误**：直接把生成的 README 分发给用户，其中的 `<v3-repo-url>` 等仍是字面占位符。
+**Wrong**: distributing the generated README to users while `<v3-repo-url>` and the like are still literal placeholders.
 
-**后果**：用户执行 `git clone <v3-repo-url>` 会失败。
+**Consequence**: `git clone <v3-repo-url>` fails.
 
-**正确**：发布前用 sed 或手动替换所有 `<xxx-repo-url>` 为真实 URL。
+**Correct**: before publishing, use `sed` or manually replace all `<xxx-repo-url>` with real URLs.
 
-### 12.13 C++ README 生成后未提供 `LingoFuse.h`（v5.0 新增）
+### 12.13 C++ README Generated but No `LingoFuse.h` Provided (new in v5.0)
 
-**错误**：用户拿到 C++ README 后按步骤编译，但找不到 `LingoFuse.h`。
+**Wrong**: users receive the C++ README and follow the steps, but cannot find `LingoFuse.h`.
 
-**后果**：编译失败。
+**Consequence**: compilation fails.
 
-**正确**：README §3.1 已内置最小兜底 header，用户可直接复制；但**发布者应主动提示**用户此兜底存在。
+**Correct**: README §3.1 already embeds a minimal fallback header that users can copy; but **publishers should proactively inform users that this fallback exists**.
 
-### 12.14 Python README 的 PYTHONPATH 在 PowerShell 中语法错误（v5.0 新增）
+### 12.14 PowerShell Syntax Error for Python README's PYTHONPATH (new in v5.0)
 
-**错误**：在 PowerShell 中执行 `set PYTHONPATH=D:\...`（cmd 语法）。**正确**：`$env:PYTHONPATH = "D:\..."`。
+**Wrong**: running `set PYTHONPATH=D:\...` (cmd syntax) in PowerShell. **Correct**: `$env:PYTHONPATH = "D:\..."`.
 
-### 12.15 FPC 内联 `var` 声明（v5.0 新增）
+### 12.15 FPC Inline `var` Declarations (new in v5.0)
 
-**错误**：
+**Wrong**:
 ```pascal
 procedure Foo;
 begin
   begin
-    var x: integer;   // ❌ FPC {$mode delphi} 不允许
+    var x: integer;   // ❌ FPC {$mode delphi} disallows this
     // ...
   end;
 end;
 ```
 
-**后果**：`Error: Illegal expression` + `Syntax error, ";" expected`。
+**Consequence**: `Error: Illegal expression` + `Syntax error, ";" expected`.
 
-**正确**：把 `x` 移到 `procedure Foo; var x: integer; begin ... end;`。
-
----
-
-## 第 13 章 故障排查树
-
-### 13.1 "AI 不调工具"
-
-```mermaid
-flowchart TD
-    START["AI 不调工具"] --> Q1{"路径?"}
-    Q1 -- "路径 A（MCP）" --> A1{"mcp_api_tool 启动?"}
-    A1 -- 否 --> AX1["启动 mcp_api_tool"]
-    A1 -- 是 --> A2{"信标启动?"}
-    A2 -- 否 --> AX2["启动 pascal_agent_service"]
-    A2 -- 是 --> A3{"工具提供者启动?"}
-    A3 -- 否 --> AX3["启动 pascal_agent_api"]
-    A3 -- 是 --> A4{"客户端 MCP 配置正确?"}
-    A4 -- 否 --> AX4["检查 MCP 配置文件"]
-    A4 -- 是 --> A5["查看 mcp_api_tool 日志"]
-
-    Q1 -- "路径 B（LTB）" --> B1{"llm_proxy_tool 启动?"}
-    B1 -- 否 --> BX1["启动 llm_proxy_tool"]
-    B1 -- 是 --> B2{"--enable-tools 开?"}
-    B2 -- 否 --> BX2["移除 --no-tools"]
-    B2 -- 是 --> B3{"日志有 'MCP tools loaded: N'?"}
-    B3 -- "N=0" --> BX3["信标/工具提供者未就绪"]
-    B3 -- "N>0" --> B4{"后端返回 tool_calls?"}
-    B4 -- 否 --> BX4["模型不支持 Function Calling"]
-    B4 -- 是 --> B5{"LTB 日志显示执行工具?"}
-    B5 -- 否 --> BX5["检查 tool_calls 参数拼接"]
-    B5 -- 是 --> BX6["工具执行成功，问题在别处"]
-```
-
-### 13.2 "客户端收不到流"
-
-```mermaid
-flowchart TD
-    START["客户端收不到流"] --> Q1{"服务端日志有 'no found app'?"}
-    Q1 -- 是 --> A1["client_name 不是真实 App 名"]
-    Q1 -- 否 --> Q2{"'LF_PrepareDone returned 0'?"}
-    Q2 -- 是 --> A2["进程内已有 PrepareDone 调用"]
-    Q2 -- 否 --> Q3{"'Notify to ... failed'?"}
-    Q3 -- 是 --> A3["客户端可能已离线"]
-    Q3 -- 否 --> Q4["查看 DEBUG 日志"]
-```
-
-### 13.3 "启动失败"
-
-```mermaid
-flowchart TD
-    START["启动失败"] --> Q1{"'LingoFuse64.dll not found'?"}
-    Q1 -- 是 --> A1["DLL 目录加入 PATH"]
-    Q1 -- 否 --> Q2{"'Model file not found'?"}
-    Q2 -- 是 --> A2["检查 --model-path"]
-    Q2 -- 否 --> Q3{"'Queue ... already occupied'?"}
-    Q3 -- 是 --> A3["改 --endpoint / --app-name"]
-    Q3 -- 否 --> Q4["查看完整日志"]
-```
-
-### 13.4 "编译生成的 Pascal provider 失败"（v5.0 新增）
-
-```mermaid
-flowchart TD
-    START["Pascal provider 编译失败"] --> Q1{"报 'Can''t find unit Z.Core'?"}
-    Q1 -- 是 --> A1["加 -Fu&lt;ZCore&gt;"]
-    Q1 -- 否 --> Q2{"报 'Can''t find unit lingofuse_import'?"}
-    Q2 -- 是 --> A2["加 -Fu&lt;ZNetV2&gt;"]
-    Q2 -- 否 --> Q3{"报 'Illegal expression' / 'Syntax error'?"}
-    Q3 -- 是 --> A3["检查是否用了 FPC 不允许的内联 var（见 §2.6）"]
-    Q3 -- 否 --> Q4{"报 'z_ipc_*.dll not found'（运行时）?"}
-    Q4 -- 是 --> A4["把 z_ipc_*.dll 复制到 .exe 同目录"]
-    Q4 -- 否 --> Q5["查看完整错误"]
-```
-
-### 13.5 "Python provider 起不来"（v5.0 新增）
-
-```mermaid
-flowchart TD
-    START["Python provider 启动失败"] --> Q1{"'ModuleNotFoundError: lingofuse'?"}
-    Q1 -- 是 --> A1["pip install 或设置 PYTHONPATH"]
-    Q1 -- 否 --> Q2{"'ModuleNotFoundError: lingofuse._lf_native'?"}
-    Q2 -- 是 --> A2["重新安装或指向 &lt;v3&gt;/src"]
-    Q2 -- 否 --> Q3{"'cannot load library LingoFuse64.dll'?"}
-    Q3 -- 是 --> A3["z_ipc_*.dll / LingoFuse*.dll 加到 PATH"]
-    Q3 -- 否 --> Q4["查看完整 traceback"]
-```
-
-### 13.6 "C++ provider 编译失败"（v5.0 新增）
-
-```mermaid
-flowchart TD
-    START["C++ provider 编译失败"] --> Q1{"'json.hpp: No such file'?"}
-    Q1 -- 是 --> A1["从 nlohmann/json releases 下载"]
-    Q1 -- 否 --> Q2{"'LingoFuse.h: No such file'?"}
-    Q2 -- 是 --> A2["用官方 header 或 README §3.1 兜底"]
-    Q2 -- 否 --> Q3{"'undefined reference to LF_*'?"}
-    Q3 -- 是 --> A3["加 -lLingoFuse 和 -L&lt;path&gt;"]
-    Q3 -- 否 --> Q4{"运行时 'cannot open shared object'?"}
-    Q4 -- 是 --> A4["LD_LIBRARY_PATH=. / 复制 DLL 到 exe 同目录"]
-    Q4 -- 否 --> Q5["查看完整错误"]
-```
+**Correct**: move `x` to `procedure Foo; var x: integer; begin ... end;`.
 
 ---
 
-## 第 14 章 端到端示例
+## Chapter 13  Troubleshooting Trees
 
-### 14.1 场景：用 Pascal 写计算器工具，通过 MCP 暴露给 LM Studio
+### 13.1 "AI does not call tools"
 
-**步骤 1 — 准备声明**（`calculator.pas`）：
+```mermaid
+flowchart TD
+    START["AI does not call tools"] --> Q1{"Path?"}
+    Q1 -- "Path A (MCP)" --> A1{"mcp_api_tool started?"}
+    A1 -- No --> AX1["Start mcp_api_tool"]
+    A1 -- Yes --> A2{"Beacon started?"}
+    A2 -- No --> AX2["Start pascal_agent_service"]
+    A2 -- Yes --> A3{"Tool provider started?"}
+    A3 -- No --> AX3["Start pascal_agent_api"]
+    A3 -- Yes --> A4{"Client MCP config correct?"}
+    A4 -- No --> AX4["Check the MCP config file"]
+    A4 -- Yes --> A5["Check mcp_api_tool logs"]
+
+    Q1 -- "Path B (LTB)" --> B1{"llm_proxy_tool started?"}
+    B1 -- No --> BX1["Start llm_proxy_tool"]
+    B1 -- Yes --> B2{"--enable-tools on?"}
+    B2 -- No --> BX2["Remove --no-tools"]
+    B2 -- Yes --> B3{"Log shows 'MCP tools loaded: N'?"}
+    B3 -- "N=0" --> BX3["Beacon/tool provider not ready"]
+    B3 -- "N>0" --> B4{"Backend returns tool_calls?"}
+    B4 -- No --> BX4["Model does not support Function Calling"]
+    B4 -- Yes --> B5{"LTB log shows tool execution?"}
+    B5 -- No --> BX5["Check tool_calls argument assembly"]
+    B5 -- Yes --> BX6["Tool executed fine; problem is elsewhere"]
+```
+
+### 13.2 "Client receives no stream"
+
+```mermaid
+flowchart TD
+    START["Client receives no stream"] --> Q1{"Server log has 'no found app'?"}
+    Q1 -- Yes --> A1["client_name is not a real App name"]
+    Q1 -- No --> Q2{"'LF_PrepareDone returned 0'?"}
+    Q2 -- Yes --> A2["A PrepareDone call already exists in the process"]
+    Q2 -- No --> Q3{"'Notify to ... failed'?"}
+    Q3 -- Yes --> A3["The client may be offline"]
+    Q3 -- No --> Q4["Check the DEBUG log"]
+```
+
+### 13.3 "Startup failure"
+
+```mermaid
+flowchart TD
+    START["Startup failure"] --> Q1{"'LingoFuse64.dll not found'?"}
+    Q1 -- Yes --> A1["Add the DLL directory to PATH"]
+    Q1 -- No --> Q2{"'Model file not found'?"}
+    Q2 -- Yes --> A2["Check --model-path"]
+    Q2 -- No --> Q3{"'Queue ... already occupied'?"}
+    Q3 -- Yes --> A3["Change --endpoint / --app-name"]
+    Q3 -- No --> Q4["Check the full log"]
+```
+
+### 13.4 "Compiling the generated Pascal provider fails" (new in v5.0)
+
+```mermaid
+flowchart TD
+    START["Pascal provider compile fails"] --> Q1{"'Can''t find unit Z.Core'?"}
+    Q1 -- Yes --> A1["Add -Fu&lt;ZCore&gt;"]
+    Q1 -- No --> Q2{"'Can''t find unit lingofuse_import'?"}
+    Q2 -- Yes --> A2["Add -Fu&lt;ZNetV2&gt;"]
+    Q2 -- No --> Q3{"'Illegal expression' / 'Syntax error'?"}
+    Q3 -- Yes --> A3["Check whether FPC-disallowed inline var was used (see §2.6)"]
+    Q3 -- No --> Q4{"'z_ipc_*.dll not found' (runtime)?"}
+    Q4 -- Yes --> A4["Copy z_ipc_*.dll next to the .exe"]
+    Q4 -- No --> Q5["Check the full error"]
+```
+
+### 13.5 "Python provider fails to start" (new in v5.0)
+
+```mermaid
+flowchart TD
+    START["Python provider startup fails"] --> Q1{"'ModuleNotFoundError: lingofuse'?"}
+    Q1 -- Yes --> A1["pip install or set PYTHONPATH"]
+    Q1 -- No --> Q2{"'ModuleNotFoundError: lingofuse._lf_native'?"}
+    Q2 -- Yes --> A2["Reinstall or point at &lt;v3&gt;/src"]
+    Q2 -- No --> Q3{"'cannot load library LingoFuse64.dll'?"}
+    Q3 -- Yes --> A3["Add z_ipc_*.dll / LingoFuse*.dll to PATH"]
+    Q3 -- No --> Q4["Check the full traceback"]
+```
+
+### 13.6 "C++ provider compilation fails" (new in v5.0)
+
+```mermaid
+flowchart TD
+    START["C++ provider compile fails"] --> Q1{"'json.hpp: No such file'?"}
+    Q1 -- Yes --> A1["Download from nlohmann/json releases"]
+    Q1 -- No --> Q2{"'LingoFuse.h: No such file'?"}
+    Q2 -- Yes --> A2["Use the official header or README §3.1 fallback"]
+    Q2 -- No --> Q3{"'undefined reference to LF_*'?"}
+    Q3 -- Yes --> A3["Add -lLingoFuse and -L&lt;path&gt;"]
+    Q3 -- No --> Q4{"Runtime 'cannot open shared object'?"}
+    Q4 -- Yes --> A4["LD_LIBRARY_PATH=. / copy the DLL next to the exe"]
+    Q4 -- No --> Q5["Check the full error"]
+```
+
+---
+
+## Chapter 14  End-to-End Examples
+
+### 14.1 Scenario: Write a calculator tool in Pascal, expose it to LM Studio via MCP
+
+**Step 1 — Prepare the declaration** (`calculator.pas`):
 
 ```pascal
 unit calculator;
@@ -1713,110 +1714,110 @@ end;
 end.
 ```
 
-**步骤 2 — 用 `code_decl_to_mcp` 生成**：
+**Step 2 — Generate with `code_decl_to_mcp`**:
 
-1. 打开 GUI。
-2. 切到 "2-source"，粘贴 `calculator.pas`。
-3. "自动检测语言" → Pascal。
-4. "下一步: pascal/c → json"。
-5. "下一步: json ↔ model"。
-6. "下一步: 生成源码"。
-7. 在 "5-Final source" Tab 中，**复制 4 个代码文件 + 3 个 README**。
+1. Open the GUI.
+2. Switch to the "2-source" tab and paste `calculator.pas`.
+3. "Auto-detect language" → Pascal.
+4. "Next: pascal/c → json".
+5. "Next: json ↔ model".
+6. "Next: generate source".
+7. In the "5-Final source" tab, **copy the 4 code files + 3 READMEs**.
 
-**步骤 3 — 填充 `internal_call_*`**：
+**Step 3 — Fill in `internal_call_*`**:
 
-在 `calculator_tool_provider_unit.pas` 中，找到 `internal_call_Add_Add`：
+In `calculator_tool_provider_unit.pas`, find `internal_call_Add_Add`:
 
 ```pascal
 function internal_call_Add_Add(a: Int64; b: Int64): Int64;
 begin
-  Result := a + b;   // ← 填入真实逻辑
+  Result := a + b;   // ← fill in the real logic
 end;
 ```
 
-**步骤 4 — 按 Pascal README 的 §4 步骤执行**：
+**Step 4 — Follow the Pascal README's §4 steps**:
 
 1. `git clone <zcore-repo-url> ZNetV2/ZCore`
 2. `git clone <znetv2-repo-url> ZNetV2`
 3. `git clone <v3-repo-url> LingoFuse-pasAgent-v3`
-4. 复制生成的 `.pas` 到 `my_provider/`
-5. 从 README §3 复制 `.lpr` 到 `my_provider/`
+4. Copy the generated `.pas` into `my_provider/`
+5. Copy the `.lpr` from the README's §3 into `my_provider/`
 6. `fpc -Fu<ZCore> -Fu<ZNetV2> <AppName>_provider.lpr`
 
-**步骤 5 — 启动服务链**：
+**Step 5 — Start the service chain**:
 
 ```powershell
-# 终端 1
+# Terminal 1
 .\pascal_agent_service.exe
 
-# 终端 2
+# Terminal 2
 .\<AppName>_provider.exe
 
-# 终端 3
+# Terminal 3
 .\mcp_api_tool.exe --generate-configs --output-dir .\mcp_configs
 .\mcp_api_tool.exe --transport stdio
 ```
 
-**步骤 6 — 配置 LM Studio**：粘贴 `lmstudio_stdio.json` 到 MCP Servers 设置，重启。
+**Step 6 — Configure LM Studio**: paste `lmstudio_stdio.json` into the MCP Servers settings and restart.
 
-**步骤 7 — 测试**：提问 `请帮我计算 (5 + 7) * 3`。
+**Step 7 — Test**: ask `Please compute (5 + 7) * 3`.
 
-### 14.2 场景：Python provider 快速起步
+### 14.2 Scenario: Python provider quick start
 
-**步骤 1 — 生成**：同上，取 `calculator_tool_provider.py`。
+**Step 1 — Generate**: same as above; take `calculator_tool_provider.py`.
 
-**步骤 2 — 设置环境**：
+**Step 2 — Set the environment**:
 
 ```bash
-pip install py-lingofuse    # 或
+pip install py-lingofuse    # or
 export PYTHONPATH=/path/to/LingoFuse-pasAgent-v3/src
 ```
 
-**步骤 3 — 验证**：
+**Step 3 — Verify**:
 
 ```bash
 python -c "import lingofuse._lf_native as m; print('OK', m.__file__)"
 ```
 
-**步骤 4 — 启动**：
+**Step 4 — Start**:
 
 ```bash
 python calculator_tool_provider.py
 ```
 
-**步骤 5 — 其余同 14.1 的步骤 5-7**。
+**Step 5 — Same as steps 5-7 of 14.1**.
 
-### 14.3 场景：C++ provider 从零开始
+### 14.3 Scenario: C++ provider from scratch
 
-**步骤 1 — 生成**：取 `.hpp` + `.cpp` + `calculator_tool_provider_cpp.md`。
+**Step 1 — Generate**: take the `.hpp` + `.cpp` + `calculator_tool_provider_cpp.md`.
 
-**步骤 2 — 按 C++ README §3.1 复制兜底 `LingoFuse.h`**（因为 cppAgent 尚未发布）。
+**Step 2 — Copy the fallback `LingoFuse.h` per the C++ README §3.1** (because cppAgent is not yet released).
 
-**步骤 3 — 按 C++ README §3 复制 `main.cpp`**。
+**Step 3 — Copy `main.cpp` per the C++ README §3**.
 
-**步骤 4 — 下载 `json.hpp`**：https://github.com/nlohmann/json/releases
+**Step 4 — Download `json.hpp`**: https://github.com/nlohmann/json/releases
 
-**步骤 5 — 编译**（三选一）：
+**Step 5 — Compile** (choose one of three):
 
 ```bash
 g++ -std=c++17 -O2 -I. main.cpp calculator_tool_provider.cpp \
     -L. -lLingoFuse -Wl,-rpath,. -o provider
 ```
 
-**步骤 6 — 启动并测试**：同 14.1 的步骤 5-7。
+**Step 6 — Start and test**: same as steps 5-7 of 14.1.
 
-### 14.4 场景：Pascal GUI 客户端通过 LTB 调用工具（服务端侧工具）
+### 14.4 Scenario: Pascal GUI client calls tools through LTB (server-side tools)
 
-**步骤 1 — 启动 LM Studio**（加载模型，开启本地服务器端口 1234）。
+**Step 1 — Start LM Studio** (load a model, enable the local server on port 1234).
 
-**步骤 2 — 启动信标和工具提供者**：
+**Step 2 — Start the beacon and the tool provider**:
 
 ```powershell
 .\pascal_agent_service.exe
 .\calculator_tool_provider_unit.exe
 ```
 
-**步骤 3 — 启动 LTB**：
+**Step 3 — Start LTB**:
 
 ```powershell
 .\llm_proxy_tool.exe `
@@ -1826,7 +1827,7 @@ g++ -std=c++17 -O2 -I. main.cpp calculator_tool_provider.cpp \
   --mcp-tool-provider-app agent_main_app
 ```
 
-**步骤 4 — Pascal GUI 客户端连接**：
+**Step 4 — Pascal GUI client connects**:
 
 ```pascal
 var
@@ -1838,51 +1839,51 @@ begin
   LLM.OnThink := Do_LLM_Think;
   LLM.OnFinish := Do_LLM_Finish;
   if not LLM.Connect(err) then Exit;
-  if not LLM.Generate('请计算 (5 + 7) * 3', '', sid, err) then Exit;
+  if not LLM.Generate('Please compute (5 + 7) * 3', '', sid, err) then Exit;
 end;
 ```
 
-**客户端完全不知道工具体系存在**——LTB 内部完成多轮工具调用。
+**The client has no idea the tool system exists** — LTB performs the multi-round tool calls internally.
 
 ---
 
-## 第 15 章 修改与扩展指引
+## Chapter 15  Modification and Extension Guide
 
-### 15.1 需求 → 修改位置速查
+### 15.1 Requirement → Modification Location Quick Reference
 
-| 需求 | 修改文件 | 修改函数 |
-|------|---------|---------|
-| 添加新类型支持 | **三个代码生成器 + 三个 README 生成器** | `IsSupportedType` 及映射 |
-| 修改 API 名生成规则 | 三个代码生成器 | `MakeApiName` / `MakePythonIdentifier` |
-| 修改回调名前缀 | 三个代码生成器 | `MakeCallbackName` |
-| 修改 JSON Schema 字段 | 三个代码生成器 + 三个 README 生成器 | 对应生成逻辑 |
-| 修改 tool description 拼接 | 三个代码生成器 + 三个 README 生成器 | `GetFullDescription` |
-| **修改 README 章节结构** | **三个 README 生成器** | **`Emit*` 内部函数** |
-| **修改 README 中的依赖表** | **三个 README 生成器** | **`EmitOverview`** |
-| **修改 README 中的测试程序** | **三个 README 生成器** | **`EmitTestProgram` / `EmitTestLpr`** |
-| **修改 README 中的测试步骤** | **三个 README 生成器** | **`EmitBuildTestProcedure`** |
-| **修改 README 的 Mermaid 图** | **三个 README 生成器** | **对应 `Emit*` 函数** |
-| 修改 GUI 按钮行为 | `code_decl_to_mcp_frm.pas` | 对应 `*ButtonClick` |
-| 修改语言检测 | `code_decl_to_mcp_frm.pas` | `Auto_Select_Language` |
-| 修改 LLM 服务端参数 | `llm_service.py` / `llm_proxy.py` / `llm_proxy_tool.py` | `*Config` |
-| 修改 MCP 网关行为 | `mcp_api_tool.py` | `run_fastmcp` / `register_dynamic_tools` |
-| 修改桥接行为 | `bridge.py` | `handle_call` |
+| Requirement | File to modify | Function to modify |
+|-------------|----------------|--------------------|
+| Add support for a new type | **three code generators + three README generators** | `IsSupportedType` and the mappings |
+| Change API name generation rules | three code generators | `MakeApiName` / `MakePythonIdentifier` |
+| Change callback name prefix | three code generators | `MakeCallbackName` |
+| Change JSON Schema fields | three code generators + three README generators | corresponding generation logic |
+| Change tool description concatenation | three code generators + three README generators | `GetFullDescription` |
+| **Change README section structure** | **three README generators** | **`Emit*` inner functions** |
+| **Change the README dependency table** | **three README generators** | **`EmitOverview`** |
+| **Change the README test program** | **three README generators** | **`EmitTestProgram` / `EmitTestLpr`** |
+| **Change the README test steps** | **three README generators** | **`EmitBuildTestProcedure`** |
+| **Change a README Mermaid diagram** | **three README generators** | **the corresponding `Emit*` function** |
+| Change GUI button behavior | `code_decl_to_mcp_frm.pas` | the corresponding `*ButtonClick` |
+| Change language detection | `code_decl_to_mcp_frm.pas` | `Auto_Select_Language` |
+| Change LLM server parameters | `llm_service.py` / `llm_proxy.py` / `llm_proxy_tool.py` | `*Config` |
+| Change MCP gateway behavior | `mcp_api_tool.py` | `run_fastmcp` / `register_dynamic_tools` |
+| Change bridge behavior | `bridge.py` | `handle_call` |
 
-### 15.2 添加新类型（以 `boolean` 为例）
+### 15.2 Adding a New Type (using `boolean` as an example)
 
-**Pascal 代码生成器**：`IsSupportedType` 加 `'Boolean'`；`CallbackLines` 中加参数提取与返回值分支（`jo.B[...]`）。
+**Pascal code generator**: add `'Boolean'` to `IsSupportedType`; add parameter extraction and return-value branches (`jo.B[...]`) in `CallbackLines`.
 
-**Python 代码生成器**：`IsSupportedType` 加；`PascalTypeToPythonType` 加 `bool`；`PascalTypeToJsonSchemaType` 加 `'boolean'`；`PascalTypeDefaultValue` 加 `'False'`；参数提取加 `or False` 分支。
+**Python code generator**: add to `IsSupportedType`; add `bool` to `PascalTypeToPythonType`; add `'boolean'` to `PascalTypeToJsonSchemaType`; add `'False'` to `PascalTypeDefaultValue`; add an `or False` branch to parameter extraction.
 
-**C++ 代码生成器**：`IsSupportedType` 加；`PascalTypeToCPPType` 加 `'bool'`；`PascalTypeToJsonSchemaType` 加 `'boolean'`；`PascalTypeToDefaultValue` 加 `'false'`。
+**C++ code generator**: add to `IsSupportedType`; add `'bool'` to `PascalTypeToCPPType`; add `'boolean'` to `PascalTypeToJsonSchemaType`; add `'false'` to `PascalTypeToDefaultValue`.
 
-**三个 README 生成器**：**无需修改**——它们自动反映新的类型映射（因为使用了相同的映射函数）。
+**The three README generators**: **no modification needed** — they automatically reflect the new type mapping (because they use the same mapping functions).
 
-**同步**：更新 `pascal_code_mcp_rule.md` / `C_code_mcp_rule.md` / `MCP_API_Contract.md`。
+**Synchronize**: update `pascal_code_mcp_rule.md` / `C_code_mcp_rule.md` / `MCP_API_Contract.md`.
 
-### 15.3 修改 `MakeApiName` 为白名单过滤
+### 15.3 Changing `MakeApiName` to Whitelist Filtering
 
-**当前实现**（有缺陷）：
+**Current implementation** (flawed):
 
 ```pascal
 function MakeApiName(const FuncName: TP_String): TP_String;
@@ -1891,7 +1892,7 @@ begin
 end;
 ```
 
-**修正实现**：
+**Corrected implementation**:
 
 ```pascal
 function MakeApiName(const FuncName: TP_String): TP_String;
@@ -1914,25 +1915,25 @@ begin
 end;
 ```
 
-**同步**：Python 与 C++ 侧的 `MakeApiName` / `MakePythonIdentifier` 已是白名单实现。
+**Synchronize**: the Python and C++ sides of `MakeApiName` / `MakePythonIdentifier` already use whitelist filtering.
 
-### 15.4 修复 Python 生成器输出扩展名
+### 15.4 Fixing the Python Generator Output Extension
 
-在 `code_decl_to_mcp_frm.pas` 的 `Button6Click` 中：
+In `code_decl_to_mcp_frm.pas`'s `Button6Click`:
 
 ```pascal
-SaveCode(func_model.UnitName + '_tool_provider.pas');  // ← 改为 .py
+SaveCode(func_model.UnitName + '_tool_provider.pas');  // ← change to .py
 ```
 
-改为：
+Change it to:
 
 ```pascal
 SaveCode(func_model.UnitName + '_tool_provider.py');
 ```
 
-### 15.5 集成 README 生成到 GUI（v5.0 新增）
+### 15.5 Integrating README Generation into the GUI (new in v5.0)
 
-在 `Button6Click` 中，在**每个代码生成后**追加：
+In `Button6Click`, **after each code generation**, append:
 
 ```pascal
 // Pascal README
@@ -1960,9 +1961,9 @@ begin
 end;
 ```
 
-### 15.6 添加新输出语言（以 JavaScript 为例）
+### 15.6 Adding a New Output Language (using JavaScript as an example)
 
-**新建** `js_mcp_generator_tool.pas`：
+**New file** `js_mcp_generator_tool.pas`:
 
 ```pascal
 unit js_mcp_generator_tool;
@@ -1978,204 +1979,204 @@ function GenerateJavaScriptCode(Model: TPascal_Func_Model): TPascalStringList;
 function GenerateJavaScriptReadme(Model: TPascal_Func_Model): TPascalStringList;
 
 implementation
-// 参照 py_mcp_generator_tool.pas 结构
-// 遵守以下契约：
-//   输入: TPascal_Func_Model
-//   输出: TPascalStringList
-//   类型白名单与现有生成器一致
-//   JSON 序列化必须 ensure_ascii=False
-//   协议层：result / status / error 三字段
-//   NUL 结尾
-//   回调签名与 C ABI 兼容
-//   README 遵守十节骨架
+// Model on py_mcp_generator_tool.pas structure
+// Follow this contract:
+//   input:  TPascal_Func_Model
+//   output: TPascalStringList
+//   type whitelist matches the existing generators
+//   JSON serialization must use ensure_ascii=False
+//   protocol layer: result / status / error, three fields
+//   NUL-terminated
+//   callback signature C ABI compatible
+//   README follows the ten-section skeleton
 end.
 ```
 
-**修改 GUI**：加 `js_TabSheet` + `final_js_source_Edit`；`Button6Click` 中加调用；`code_decl_to_mcp.lpr` 的 `uses` 加入新单元。
+**Modify the GUI**: add `js_TabSheet` + `final_js_source_Edit`; add a call in `Button6Click`; add the new unit to `code_decl_to_mcp.lpr`'s `uses`.
 
-**修改 README 相关部分**：新 README 需包含 JavaScript 特有的依赖表、测试程序、构建命令、便携性说明。
+**Modify the README-related part**: the new README must contain JavaScript-specific dependency tables, test program, build commands, and portability notes.
 
 ---
 
-## 第 16 章 自查清单
+## Chapter 16  Self-Check Checklist
 
-### 16.1 修改代码生成器后
+### 16.1 After Modifying a Code Generator
 
-- [ ] `IsSupportedType` **三个生成器严格一致**。
-- [ ] `GetFullDescription` 语义一致（都提取非空、非 `@` 开头的行）。
-- [ ] 类型映射覆盖所有新增类型。
-- [ ] 参数提取代码覆盖所有新增类型。
-- [ ] 返回值处理覆盖所有新增类型。
-- [ ] **没有引入 `ensure_ascii=True`**。
-- [ ] `cdecl` / `@LFCallFunc` / `LF_CDECL` 未被删改。
-- [ ] **回归测试**：生成含中文注释和 emoji 的模型。
+- [ ] `IsSupportedType` is **strictly consistent across all three generators**.
+- [ ] `GetFullDescription` semantics are consistent (all extract non-empty lines not starting with `@`).
+- [ ] Type mappings cover every newly added type.
+- [ ] Parameter extraction code covers every newly added type.
+- [ ] Return-value handling covers every newly added type.
+- [ ] **No `ensure_ascii=True` has been introduced**.
+- [ ] `cdecl` / `@LFCallFunc` / `LF_CDECL` have not been removed or altered.
+- [ ] **Regression test**: generate a model with Chinese comments and emoji.
 
-### 16.2 修改 README 生成器后（v5.0 新增）
+### 16.2 After Modifying a README Generator (new in v5.0)
 
-- [ ] **十节骨架** 完整（Overview / Architecture / Test / Build & Test / Tool Reference / JSON Schema / Troubleshoot / Portability / Resources）。
-- [ ] **全英文**（不出现中文正文；技术术语可保留）。
-- [ ] **Mermaid 图** 语法正确（可在 https://mermaid.live 验证）。
-- [ ] **测试程序** 可直接编译（Pascal `.lpr` / Python `.py` / C++ `main.cpp`）。
-- [ ] **依赖表** 与实际 runtime 一致（Pascal: ZCore + ZNetV2 + v3；Python: py-lingofuse 或 v3；C++: json + LingoFuse.h + lib）。
-- [ ] **占位符** 形式统一（`<xxx-repo-url>`），且**在章节开头明确提示用户替换**。
-- [ ] **边界情况**：`Model = nil` / `UnitName = ''` → 返回非 nil 降级文本。
-- [ ] **零 API** 的情况有明确警告。
-- [ ] **工具参考** 的 JSON 示例与实际 schema 一致。
-- [ ] **C++ 兜底 `LingoFuse.h`** 完整（`LF_CDECL` 宏 + 所有 `LF_*` 声明）。
-- [ ] **Python PYTHONPATH** 命令覆盖 cmd / PowerShell / bash 三种 shell。
-- [ ] **Pascal `.lpr`** 编译命令包含 `-Fu<ZCore> -Fu<ZNetV2>`。
-- [ ] **没有硬编码**任何真实仓库 URL。
+- [ ] The **ten-section skeleton** is complete (Overview / Architecture / Test / Build & Test / Tool Reference / JSON Schema / Troubleshoot / Portability / Resources).
+- [ ] **All English** (no Chinese body text; technical terms may be retained).
+- [ ] **Mermaid diagrams** are syntactically correct (verify at https://mermaid.live).
+- [ ] The **test program** compiles as-is (Pascal `.lpr` / Python `.py` / C++ `main.cpp`).
+- [ ] The **dependency table** matches the actual runtime (Pascal: ZCore + ZNetV2 + v3; Python: py-lingofuse or v3; C++: json + LingoFuse.h + lib).
+- [ ] **Placeholders** use a consistent form (`<xxx-repo-url>`) and there is an **explicit reminder to replace them** at the start of the section.
+- [ ] **Edge case**: `Model = nil` / `UnitName = ''` → returns non-nil degraded text.
+- [ ] The **zero-API** case has a clear warning.
+- [ ] The **tool reference** JSON examples match the actual schema.
+- [ ] The **C++ fallback `LingoFuse.h`** is complete (`LF_CDECL` macro + all `LF_*` declarations).
+- [ ] The **Python PYTHONPATH** commands cover cmd / PowerShell / bash.
+- [ ] The **Pascal `.lpr`** compile command includes `-Fu<ZCore> -Fu<ZNetV2>`.
+- [ ] **No real repository URL is hardcoded**.
 
-### 16.3 修改声明规范后
+### 16.3 After Modifying the Declaration Specification
 
-- [ ] `pascal_code_mcp_rule.md` 与生成器一致。
-- [ ] `C_code_mcp_rule.md` 与生成器一致。
-- [ ] `MCP_API_Contract.md` §2.1 的类型表已更新。
+- [ ] `pascal_code_mcp_rule.md` is consistent with the generator.
+- [ ] `C_code_mcp_rule.md` is consistent with the generator.
+- [ ] The type table in `MCP_API_Contract.md` §2.1 has been updated.
 
-### 16.4 修改环境常量后
+### 16.4 After Modifying Environment Constants
 
-- [ ] 三个代码生成器里的常量已改。
-- [ ] **三个 README 生成器** 里引用这些常量的位置已改。
-- [ ] `mcp_api_tool.py` 里的默认值已改。
-- [ ] 已部署的 Provider 已重新生成。
+- [ ] The constant has been changed in all three code generators.
+- [ ] **All three README generators** have been updated in the places that reference these constants.
+- [ ] The default value in `mcp_api_tool.py` has been changed.
+- [ ] Deployed providers have been regenerated.
 
-### 16.5 修改 LLM 服务端后
+### 16.5 After Modifying the LLM Server
 
-- [ ] 能力矩阵已更新。
-- [ ] `llm_proxy` / LTB 的 `set_system_message` 拒绝响应未被破坏。
-- [ ] LTB 的多轮循环上限未被破坏。
-- [ ] 预连接 middleware 的顺序未被破坏。
-- [ ] **回归测试**：单会话、多会话、工具调用、多模态。
+- [ ] The capability matrix has been updated.
+- [ ] The `set_system_message` rejection response in `llm_proxy` / LTB has not been broken.
+- [ ] The LTB multi-round loop limits have not been broken.
+- [ ] The pre-connect middleware ordering has not been broken.
+- [ ] **Regression test**: single session, multiple sessions, tool calls, multimodality.
 
-### 16.6 提交前最终自查
+### 16.6 Final Pre-Commit Self-Check
 
 ```mermaid
 flowchart TD
-    A["修改完成"] --> B{"业务逻辑 vs 契约?"}
-    B -- 业务逻辑 --> C["internal_call_* 内修改"]
-    B -- 契约 --> D["检查铁律"]
-    D --> E{"影响协议?"}
-    E -- 是 --> F["同步修改生成器 + 规范 + 文档"]
-    E -- 否 --> G["只改对应位置"]
-    C --> H["回归测试"]
+    A["Modification done"] --> B{"Business logic vs contract?"}
+    B -- Business logic --> C["Modify inside internal_call_*"]
+    B -- Contract --> D["Check the iron rules"]
+    D --> E{"Affects the protocol?"}
+    E -- Yes --> F["Modify generator + spec + docs together"]
+    E -- No --> G["Modify only the corresponding location"]
+    C --> H["Regression test"]
     F --> H
     G --> H
-    H --> I["提交"]
+    H --> I["Commit"]
 ```
 
-**特别注意**：**README 生成器与代码生成器共享映射函数**（`IsSupportedType` / `PascalTypeTo*` / `GetFullDescription` / `CollectValidFunctions`）。修改这些函数会**同时影响代码与文档**，必须一起回归。
+**Special note**: **README generators and code generators share mapping functions** (`IsSupportedType` / `PascalTypeTo*` / `GetFullDescription` / `CollectValidFunctions`). Modifying these functions **affects both the code and the documentation**, so both must be regression-tested together.
 
 ---
 
-## 第 17 章 自我审查验证（v5.0 新增）
+## Chapter 17  Self-Audit Verification (new in v5.0)
 
-> 本章的目的是：**证明本知识库自身可以被学习和使用**。方法是从头模拟实际编程场景，仅依赖本文件的内容完成任务。**无法完成即视为知识库不合格**。
+> The purpose of this chapter is to **prove that this knowledge base itself can be learned from and used**. The method is to simulate real programming scenarios from scratch, relying only on the content of this file. **Failure to complete a scenario means the knowledge base is inadequate.**
 
-### 17.1 验证方法
+### 17.1 Verification Method
 
-1. **遮蔽源码**：只读本知识库，不打开任何 `.pas` / `.py` 源文件。
-2. **场景测试**：执行下面 8 个场景。
-3. **通过判定**：每个场景能仅凭 KB 内容给出正确、可执行的操作步骤。
-4. **失败记录**：若某场景无法从 KB 得出答案，记录为**知识库缺陷**，并加入下一版的补充清单。
+1. **Cover the source**: read only this knowledge base; do not open any `.pas` / `.py` source file.
+2. **Scenario testing**: execute the 8 scenarios below.
+3. **Pass criteria**: for each scenario, the correct and executable steps must be derivable from the KB content alone.
+4. **Failure recording**: if a scenario cannot be answered from the KB, record it as a **knowledge-base defect** and add it to the next version's supplementary list.
 
-### 17.2 场景测试
+### 17.2 Scenario Tests
 
-#### 场景 1：调用 README 生成器
+#### Scenario 1: Calling a README generator
 
-**问题**：怎样生成 Pascal provider 的 README？
+**Question**: How do I generate the README for a Pascal provider?
 
-**期望答案**：调用 `GeneratePascalReadme(Model)`，得到 `TPascalStringList`，保存为 `<unit>_tool_provider_pascal.md`。**调用者负责释放**。
+**Expected answer**: call `GeneratePascalReadme(Model)`, obtain a `TPascalStringList`, save as `<unit>_tool_provider_pascal.md`. **The caller is responsible for releasing it.**
 
-**定位**：§3.1（函数签名）、§3.3（输出文件名）、§1.5（全景图）。
+**Locations**: §3.1 (function signature), §3.3 (output filename), §1.5 (panorama).
 
-**判定**：✅ 可从 §3.1 + §3.3 得出。
+**Verdict**: ✅ Derivable from §3.1 + §3.3.
 
-#### 场景 2：README 的依赖说明
+#### Scenario 2: README dependency notes
 
-**问题**：生成的 Pascal provider 需要哪些仓库？
+**Question**: Which repositories does the generated Pascal provider need?
 
-**期望答案**：
-- ZCore（`Z.Core` 单元）
-- ZNetV2（`lingofuse_import.pas` + `z_ipc_*.dll`）
-- LingoFuse-pasAgent-v3（信标 + MCP 网关 + 示例）
+**Expected answer**:
+- ZCore (the `Z.Core` units)
+- ZNetV2 (`lingofuse_import.pas` + `z_ipc_*.dll`)
+- LingoFuse-pasAgent-v3 (beacon + MCP gateway + examples)
 
-典型路径：`<workspace>/ZNetV2/ZCore/`、`<workspace>/ZNetV2/`、`<workspace>/LingoFuse-pasAgent-v3/src/`。
+Typical paths: `<workspace>/ZNetV2/ZCore/`, `<workspace>/ZNetV2/`, `<workspace>/LingoFuse-pasAgent-v3/src/`.
 
-**定位**：§0.6（三仓库依赖模型）。
+**Location**: §0.6 (three-repository dependency model).
 
-**判定**：✅ 可从 §0.6 得出。
+**Verdict**: ✅ Derivable from §0.6.
 
-#### 场景 3：编译 Pascal provider
+#### Scenario 3: Compiling the Pascal provider
 
-**问题**：怎样编译生成的 Pascal provider？
+**Question**: How do I compile the generated Pascal provider?
 
-**期望答案**：
+**Expected answer**:
 
 ```bash
 fpc -Fu<workspace>/ZNetV2/ZCore -Fu<workspace>/ZNetV2 <AppName>_provider.lpr
 ```
 
-或 Lazarus 打开 `.lpi` 按 F9。
+Or open the `.lpi` in Lazarus and press F9.
 
-**定位**：§3.3（Build & Test 编译命令）。
+**Location**: §3.3 (Build & Test compile command).
 
-**判定**：✅ 可从 §3.3 得出。
+**Verdict**: ✅ Derivable from §3.3.
 
-#### 场景 4：Python provider 的包来源
+#### Scenario 4: Python provider package source
 
-**问题**：生成的 Python provider 需要什么 Python 包？从哪里获得？
+**Question**: What Python package does the generated Python provider need, and where do I get it?
 
-**期望答案**：
-- 优先：`pip install py-lingofuse` 或 `git clone <py-lingofuse-repo-url>`。
-- 兜底：使用 `<v3>/src/lingofuse/`，设置 `PYTHONPATH`：
-  - cmd：`set PYTHONPATH=D:\...\src`
-  - PowerShell：`$env:PYTHONPATH = "D:\...\src"`
-  - bash：`export PYTHONPATH=/path/to/src`
+**Expected answer**:
+- Preferred: `pip install py-lingofuse` or `git clone <py-lingofuse-repo-url>`.
+- Fallback: use `<v3>/src/lingofuse/` and set `PYTHONPATH`:
+  - cmd: `set PYTHONPATH=D:\...\src`
+  - PowerShell: `$env:PYTHONPATH = "D:\...\src"`
+  - bash: `export PYTHONPATH=/path/to/src`
 
-**定位**：§3.4（包来源策略）、§12.14（PowerShell 语法）。
+**Locations**: §3.4 (package source strategy), §12.14 (PowerShell syntax).
 
-**判定**：✅ 可从 §3.4 得出。
+**Verdict**: ✅ Derivable from §3.4.
 
-#### 场景 5：C++ provider 的 `LingoFuse.h` 来源
+#### Scenario 5: C++ provider `LingoFuse.h` source
 
-**问题**：生成的 C++ provider 需要 `LingoFuse.h`，但 cppAgent 仓库没发布。怎么办？
+**Question**: The generated C++ provider needs `LingoFuse.h`, but the cppAgent repository has not been released. What do I do?
 
-**期望答案**：
-- cppAgent 仓库**尚未发布**。
-- 三条获取路径：
-  1. LingoFuse 运行时发行包（`LingoFuse.h` 通常与 `LingoFuse64.dll` 同目录）。
-  2. 从 `<v3>/src/lingofuse_import.pas` 手动翻译。
-  3. **C++ README §3.1 内置的最小兜底 header**——可直接复制使用。
+**Expected answer**:
+- The cppAgent repository **has not been released**.
+- Three paths to obtain it:
+  1. LingoFuse runtime distribution (`LingoFuse.h` is usually next to `LingoFuse64.dll`).
+  2. Manually translate from `<v3>/src/lingofuse_import.pas`.
+  3. **C++ README §3.1 embeds a minimal fallback header** — copy it directly.
 
-**定位**：§0.5（三份 README 速查）、§3.5（C++ README 细节）。
+**Locations**: §0.5 (three READMEs quick reference), §3.5 (C++ README details).
 
-**判定**：✅ 可从 §3.5 得出。
+**Verdict**: ✅ Derivable from §3.5.
 
-#### 场景 6：FPC 编译错误定位
+#### Scenario 6: Locating an FPC compilation error
 
-**问题**：FPC 3.2.2 报 `Error: Illegal expression` + `Syntax error, ";" expected`，怀疑是生成器源码问题。怎么办？
+**Question**: FPC 3.2.2 reports `Error: Illegal expression` + `Syntax error, ";" expected`; I suspect it is a generator source problem. What do I do?
 
-**期望答案**：检查是否在过程/函数体内使用了 `var` 声明。FPC 在 `{$mode delphi}` 下**不允许**过程体内 `var`。**所有局部变量必须移到函数 `var` 区**。
+**Expected answer**: check whether a `var` declaration has been used inside a procedure/function body. FPC under `{$mode delphi}` **does not allow** inline `var`. **All local variables must be moved into the function's `var` section**.
 
-**定位**：§2.6（FPC 编译约束）、§12.15（反例）。
+**Locations**: §2.6 (FPC compilation constraint), §12.15 (anti-pattern).
 
-**判定**：✅ 可从 §2.6 得出。
+**Verdict**: ✅ Derivable from §2.6.
 
-#### 场景 7：README 生成器的边界情况
+#### Scenario 7: README generator edge cases
 
-**问题**：`GeneratePascalReadme(nil)` 会返回什么？
+**Question**: What does `GeneratePascalReadme(nil)` return?
 
-**期望答案**：**返回非 nil 的降级文本**——顶部一行 `# README generation skipped` + 原因（"supplied `TPascal_Func_Model` is nil."）。这是为了避免产生空文件让用户困惑。
+**Expected answer**: **non-nil degraded text** — a single top line `# README generation skipped` + reason ("supplied `TPascal_Func_Model` is nil."). This is to avoid producing an empty file that confuses the user.
 
-**定位**：§3.1（公共契约）。
+**Location**: §3.1 (common contract).
 
-**判定**：✅ 可从 §3.1 得出。
+**Verdict**: ✅ Derivable from §3.1.
 
-#### 场景 8：GUI 集成 README 生成
+#### Scenario 8: GUI integration of README generation
 
-**问题**：在 `code_decl_to_mcp` GUI 里怎样把 README 生成接入？
+**Question**: In the `code_decl_to_mcp` GUI, how do I hook README generation in?
 
-**期望答案**：在 `Button6Click` 中，每个代码生成器调用之后追加对应的 README 生成调用：
+**Expected answer**: In `Button6Click`, after each code-generator call, append the corresponding README-generation call:
 
 ```pascal
 l := GeneratePascalReadme(func_model);
@@ -2185,17 +2186,17 @@ begin
   disposeObjectAndNil(l);
 end;
 
-// Python / C++ 同理
+// Python / C++ same pattern
 ```
 
-**定位**：§15.5（集成 README 生成到 GUI）。
+**Location**: §15.5 (integrating README generation into the GUI).
 
-**判定**：✅ 可从 §15.5 得出。
+**Verdict**: ✅ Derivable from §15.5.
 
-### 17.3 通过 / 失败判定
+### 17.3 Pass / Fail Verdict
 
-| 场景 | 通过 | 关键定位章节 |
-|:----:|:----:|------------|
+| Scenario | Pass | Key locating sections |
+|:--------:|:----:|-----------------------|
 | 1 | ✅ | §3.1 + §3.3 |
 | 2 | ✅ | §0.6 |
 | 3 | ✅ | §3.3 |
@@ -2205,43 +2206,43 @@ end;
 | 7 | ✅ | §3.1 |
 | 8 | ✅ | §15.5 |
 
-**结论**：**8/8 通过**。本知识库可被 AI 与人类仅凭自身内容完成 README 体系的调用、编译、故障排查、GUI 集成。
+**Conclusion**: **8/8 pass**. This knowledge base enables AI and humans to complete README-system calling, compiling, troubleshooting, and GUI integration using only its own content.
 
-### 17.4 已知弱点
+### 17.4 Known Weaknesses
 
-**即使 8/8 通过，本知识库仍存在以下不足**（诚实声明）：
+**Even at 8/8, this knowledge base still has the following shortcomings** (honest disclosure):
 
-1. **`GetFullDescription` 的 SystemString 隐患**（§12.11）——本知识库指出了问题，但**未给出可直接落地的修复代码**。修复需要改写 Pascal 侧的 `GetFullDescription`，读者仍需参考 Python 侧实现。
+1. **The `GetFullDescription` SystemString hazard** (§12.11) — this KB identifies the problem but **does not provide ready-to-apply fix code**. The fix requires rewriting the Pascal-side `GetFullDescription`; readers still need to reference the Python-side implementation.
 
-2. **`Translate_C_Typ_To_Pascal` 的完整规则**——本知识库说明它是 C→Pascal 类型映射，但**未列出完整的映射表**。若需要修改，需回查源码。
+2. **Complete rules for `Translate_C_Typ_To_Pascal`** — this KB states it is a C→Pascal type mapping but **does not list the complete mapping table**. Modifying it requires consulting the source.
 
-3. **`DetectSourceLanguage` 的评分算法**——本知识库说明"平局返回 `slUnknown`"，但**未列出完整评分规则**。若需要调整检测精度，需回查 `Z.Parsing`。
+3. **The scoring algorithm of `DetectSourceLanguage`** — this KB states "a tie returns `slUnknown`" but **does not list the complete scoring rules**. Adjusting detection accuracy requires consulting `Z.Parsing`.
 
-4. **`MAX_DESC_LEN` 是否应统一**——C++ 侧截断到 200，Pascal/Python 无截断。本知识库指出了不对称，但**未给出取舍建议**。
+4. **Whether `MAX_DESC_LEN` should be unified** — C++ truncates to 200, Pascal/Python do not truncate. This KB points out the asymmetry but **does not give a recommendation**.
 
-5. **README 生成器的详细内容契约**——本知识库给出了十节骨架和语言特化说明，但**未列出每一节的精确内容模板**（即不知道 emitter 内部的确切输出）。若需要精确到每一行，仍需阅读生成器源码。
+5. **Detailed content contract of the README generators** — this KB gives the ten-section skeleton and language-specific descriptions but **does not list the exact content template of each section** (i.e., the exact output of the emitter). Precise line-by-line requirements still need to read the generator source.
 
-**这 5 点是下一版（v6.0）应补的方向**。若 AI 遇到这些场景，应回到源码或询问人类——**不要从本知识库猜测**。
+**These 5 points are directions for the next version (v6.0)**. When AI encounters these scenarios, it should go back to the source or ask a human — **do not guess from this KB**.
 
 ---
 
-## 附录 A：配置参数速查
+## Appendix A: Configuration Parameter Quick Reference
 
 ### A.1 `code_decl_to_mcp` GUI
 
-无命令行参数。全局常量：
-- `GenerateCode_LogEnabled`（bool，默认 False）
+No command-line parameters. Global constant:
+- `GenerateCode_LogEnabled` (bool, default False)
 
 ### A.2 `llm_service.py`
 
-| 参数 | 默认 | 环境变量 |
-|------|------|----------|
-| `--model-path` | 内置 GGUF 路径 | `LLM_MODEL_PATH` |
+| Parameter | Default | Environment variable |
+|-----------|---------|----------------------|
+| `--model-path` | built-in GGUF path | `LLM_MODEL_PATH` |
 | `--context-size` | 0 | `LLM_CONTEXT_SIZE` |
 | `--max-tokens` | 4096 | `LLM_MAX_TOKENS` |
 | `--threads` | 6 | `LLM_THREADS` |
 | `--gpu-layers` | -1 | `LLM_GPU_LAYERS` |
-| `--system-message` | 长字符串 | `LLM_SYSTEM_MESSAGE` |
+| `--system-message` | long string | `LLM_SYSTEM_MESSAGE` |
 | `--thinking` / `--no-thinking` | False | `LLM_THINKING` |
 | `--endpoint` | `ipc:llm_service` | `LINGOFUSE_ENDPOINT` |
 | `--app-name` | `LLM_Service` | `LINGOFUSE_APP_NAME` |
@@ -2255,27 +2256,27 @@ end;
 
 ### A.3 `llm_proxy.py`
 
-| 参数 | 默认 | 环境变量 |
-|------|------|----------|
+| Parameter | Default | Environment variable |
+|-----------|---------|----------------------|
 | `--backend-url` | `http://127.0.0.1:12345/v1` | `LLM_PROXY_BACKEND_URL` |
-| `--backend-model` | 空 | `LLM_PROXY_BACKEND_MODEL` |
+| `--backend-model` | empty | `LLM_PROXY_BACKEND_MODEL` |
 | `--backend-key` | `lm-studio` | `LLM_PROXY_BACKEND_KEY` |
-| `--backend-key-file` | 空 | `LLM_PROXY_BACKEND_KEY_FILE` |
+| `--backend-key-file` | empty | `LLM_PROXY_BACKEND_KEY_FILE` |
 | `--backend-auth-header` | `Authorization` | `LLM_PROXY_BACKEND_AUTH_HEADER` |
 | `--backend-auth-scheme` | `Bearer` | `LLM_PROXY_BACKEND_AUTH_SCHEME` |
-| `--backend-extra-headers` | 空 | `LLM_PROXY_BACKEND_EXTRA_HEADERS` |
+| `--backend-extra-headers` | empty | `LLM_PROXY_BACKEND_EXTRA_HEADERS` |
 | `--backend-timeout` | 300 | `LLM_PROXY_BACKEND_TIMEOUT` |
-| `--vision` / `--no-vision` | 禁用 | `LLM_PROXY_VISION` |
+| `--vision` / `--no-vision` | disabled | `LLM_PROXY_VISION` |
 | `--max-history` | 512 | `LLM_PROXY_MAX_HISTORY` |
 | `--max-sessions` | 1024 | `LLM_PROXY_MAX_SESSIONS` |
 | `--session-timeout` | 1800 | `LLM_PROXY_SESSION_TIMEOUT` |
 | `--log-level` | INFO | `LLM_PROXY_LOG_LEVEL` |
 
-### A.4 `llm_proxy_tool.py` 独有
+### A.4 `llm_proxy_tool.py` Unique
 
-| 参数 | 默认 | 环境变量 |
-|------|------|----------|
-| `--enable-tools` / `--no-tools` | 启用 | `LLM_PROXY_ENABLE_TOOLS` |
+| Parameter | Default | Environment variable |
+|-----------|---------|----------------------|
+| `--enable-tools` / `--no-tools` | enabled | `LLM_PROXY_ENABLE_TOOLS` |
 | `--mcp-endpoint` | `ipc:agent` | `LLM_PROXY_MCP_ENDPOINT` |
 | `--mcp-timeout` | 5000 | `LLM_PROXY_MCP_TIMEOUT` |
 | `--mcp-reg-agent-app` | `llm_proxy_agent` | `LLM_PROXY_MCP_REG_AGENT_APP` |
@@ -2289,8 +2290,8 @@ end;
 
 ### A.5 `mcp_api_tool.py`
 
-| 参数 | 默认 | 环境变量 |
-|------|------|----------|
+| Parameter | Default | Environment variable |
+|-----------|---------|----------------------|
 | `--transport` | stdio | `MCP_TRANSPORT` |
 | `--host` | 0.0.0.0 | `MCP_HOST` |
 | `--port` | 8000 | `MCP_PORT` |
@@ -2301,169 +2302,169 @@ end;
 | `--agent-main-api` | `agent_main` | `LINGOFUSE_AGENT_MAIN_API` |
 | `--agent-log-api` | `agent_log` | `LINGOFUSE_AGENT_LOG_API` |
 | `--debug` | False | `MCP_DEBUG` |
-| `--log-file` | 无 | `MCP_LOG_FILE` |
-| `--proxy-path` | 自动检测 | `MCP_API_PROXY_PATH` |
+| `--log-file` | none | `MCP_LOG_FILE` |
+| `--proxy-path` | auto-detect | `MCP_API_PROXY_PATH` |
 
 ### A.6 `bridge.py`
 
-| 参数 | 默认 | 环境变量 |
-|------|------|----------|
+| Parameter | Default | Environment variable |
+|-----------|---------|----------------------|
 | `--host` | 0.0.0.0 | `LINGOFUSE_HOST` |
 | `--port` | 8081 | `LINGOFUSE_PORT` |
 | `--endpoint` | `ipc:lingofuse_bridge` | `LINGOFUSE_ENDPOINT` |
 | `--timeout` | 5000 | `LINGOFUSE_TIMEOUT` |
-| `--app` | 无 | `LINGOFUSE_APP` |
+| `--app` | none | `LINGOFUSE_APP` |
 | `--threaded` | True | `LINGOFUSE_THREADED` |
 | `--no-precheck` | False | `LINGOFUSE_NO_PRECHECK` |
 | `--no-normalize-json` | False | `LINGOFUSE_NORMALIZE_JSON` |
-| `--log-file` | 无 | `LINGOFUSE_LOG_FILE` |
+| `--log-file` | none | `LINGOFUSE_LOG_FILE` |
 
 ### A.7 `llm_test.py`
 
-| 参数 | 默认 | 环境变量 |
-|------|------|----------|
+| Parameter | Default | Environment variable |
+|-----------|---------|----------------------|
 | `--endpoint` | `ipc:llm_service` | `LINGOFUSE_ENDPOINT` |
 | `--server-app` | `LLM_Service` | `LLM_SERVER_APP` |
 | `--notify-api` | `llm_stream` | `LLM_NOTIFY_API` |
 | `--timeout` | 30000 | `LINGOFUSE_TIMEOUT` |
-| `--content` / `--prompt` / `--session-id` / `--keep` / `--thinking` | 空 | — |
-| `--text` / `--image` | 无 | — |
-| `--system-message` | 无 | — |
+| `--content` / `--prompt` / `--session-id` / `--keep` / `--thinking` | empty | — |
+| `--text` / `--image` | none | — |
+| `--system-message` | none | — |
 | `--debug` | False | `LLM_DEBUG` |
 
 ---
 
-## 附录 B：错误码与错误消息索引
+## Appendix B: Error Code and Error Message Index
 
-### B.1 `bridge.py` 错误码
+### B.1 `bridge.py` Error Codes
 
-| 错误码 | HTTP | 含义 |
-|--------|------|------|
-| `-1` | 200 | 远程调用失败 |
-| `-2` | 400 | 请求形状错误 |
-| `-3` | 200 | API 预检失败 |
+| Error code | HTTP | Meaning |
+|------------|------|---------|
+| `-1` | 200 | Remote call failed |
+| `-2` | 400 | Request shape error |
+| `-3` | 200 | API precheck failure |
 
-### B.2 流式 `finish` 的 `reason`
+### B.2 Streaming `finish` `reason`
 
-`stop` / `error` / `cancelled` / `timeout` / `client` / `shutdown` / `ephemeral` / `timeout+offline`。
+`stop` / `error` / `cancelled` / `timeout` / `client` / `shutdown` / `ephemeral` / `timeout+offline`.
 
-### B.3 常见错误消息
+### B.3 Common Error Messages
 
-| 错误消息 | 出处 | 章节 |
-|----------|------|------|
-| `no found app("...")` | 服务端日志 | §12.1 / §13.2 |
-| `LF_PrepareClient returned -1` | 多处 | §13.3 |
+| Error message | Source | Section |
+|---------------|--------|---------|
+| `no found app("...")` | Server log | §12.1 / §13.2 |
+| `LF_PrepareClient returned -1` | Multiple | §13.3 |
 | `repeat connection` | LingoFuse | §13.3 |
-| `LF_PrepareDone returned 0` | 多处 | §10.1 / §13.3 |
+| `LF_PrepareDone returned 0` | Multiple | §10.1 / §13.3 |
 | `Queue "..." is already occupied` | LingoFuse | §13.3 |
 | `LF_BindApp returned 0` | LingoFuse | §13.2 |
-| `Module not found: LingoFuse64.dll` | 加载器 | §13.3 |
+| `Module not found: LingoFuse64.dll` | Loader | §13.3 |
 | `Model file not found` | `llm_service` | §13.3 |
 | `3029 function header doesn't match` | FPC | §12.7 |
 | `Illegal expression` / `Syntax error` | FPC | §2.6 / §12.15 |
 | `Image attachments are not supported` | `llm_service` | §12.10 |
 | `set_system_message is not supported` | `llm_proxy` / LTB | §4.3 |
-| `fatal error: json.hpp: No such file` | C++ 编译 | §13.6 |
-| `fatal error: LingoFuse.h: No such file` | C++ 编译 | §13.6 |
-| `undefined reference to LF_*` | C++ 链接 | §13.6 |
+| `fatal error: json.hpp: No such file` | C++ compile | §13.6 |
+| `fatal error: LingoFuse.h: No such file` | C++ compile | §13.6 |
+| `undefined reference to LF_*` | C++ link | §13.6 |
 | `ModuleNotFoundError: lingofuse` | Python | §13.5 |
 | `cannot load library LingoFuse64.dll` | Python | §13.5 |
 
 ---
 
-## 附录 C：诚实的不确定清单
+## Appendix C: Honest Uncertainty List
 
-> 以下是从源码无法完全确定的点。若 AI 需要在这些场景下工作，必须回查源码或询问人类。
+> The following points cannot be fully determined from the source. If AI needs to work on these scenarios, it must consult the source or ask a human.
 
-1. **`Translate_C_Typ_To_Pascal` 的完整映射表** —— 只知大类映射，细节需回查。
-2. **`DetectSourceLanguage` 的完整评分算法** —— 只知平局返回 `slUnknown`。
-3. **`GetFullDescription`（Pascal 侧）的 SystemString 中转隐患** —— 只知存在隐患，修复细节需参照 Python 侧。
-4. **C++ `MAX_DESC_LEN = 200` 是否应统一** —— 已知不对称，取舍未定。
-5. **README 生成器每一节的精确输出模板** —— 只给骨架与语言特化，未给逐行模板。
-6. **`total_count` 在 `RegisterTools` 里的 fix 是否完整** —— 建议语法检查。
-7. **新语言生成器的最小契约** —— 参照 §15.6。
-8. **GUI 的 `SysTimer` 1ms 是否最优** —— 建议改为 10ms。
-9. **`MakeApiName` 的字符替换表** —— **已确认不完整**，建议白名单过滤。
-10. **声明规范与生成器的一致性维护** —— 建议 CI 检查。
-11. **`code_decl_to_mcp_knowledge_base.md` 与其他规范文档的同步** —— 建议人工核对。
-12. **`llm_service` 的本地 VLM 路径** —— 未实现。
-13. **LTB 的 `--vision` 与 `--no-tools` 组合** —— 多模态转发仍有效，但工具能力消失。
-14. **`bridge.py` 的 JSON 规范化对二进制的影响** —— 无法解析为 JSON 时原样转发。
-15. **`umlDeleteFile` 的 `_VerifyCheck=False`** —— 返回 True 不代表删除成功。
-16. **`umlBufferIsASCII` 的 `$80` 边界** —— 被当作 ASCII。
-17. **FPC 3.3+ 是否放开过程体内 `var`** —— 未验证，当前按 3.2.2 保守处理。
-
----
-
-## 附录 D：修订历史
-
-### v5.0（2026-09-22）
-
-**相对 v4.0 的改进**：
-
-1. **新增第 3 章（README 生成体系）**：
-   - 三语言 README 生成器的完整契约
-   - 十节骨架的统一规定
-   - 语言特化细节（Pascal 三仓库依赖 + `.lpr`；Python 两路包来源；C++ cppAgent 状态 + 兜底 header）
-   - GUI 集成方法
-
-2. **新增第 2.6 节（FPC 编译约束）**：
-   - `{$mode delphi}` 下不能内联 `var`
-   - 修正方法
-
-3. **新增第 0.5 / 0.6 节**：
-   - 三份 README 速查
-   - 三仓库依赖模型
-
-4. **新增第 1.5 节（输出文件全景图）**：
-   - 代码 + README 的 10 个输出文件
-
-5. **新增第 17 章（自我审查验证）**：
-   - 8 个场景测试证明 KB 可学习性
-   - 5 个已知弱点诚实声明
-
-6. **反例集新增**：
-   - §12.11 Pascal 侧 `GetFullDescription` 隐患
-   - §12.12 README 占位符未替换
-   - §12.13 C++ README 未提供 `LingoFuse.h` 兜底
-   - §12.14 Python PowerShell PYTHONPATH 语法
-   - §12.15 FPC 内联 `var`
-
-7. **故障排查树新增**：
-   - §13.4 Pascal provider 编译失败
-   - §13.5 Python provider 启动失败
-   - §13.6 C++ provider 编译失败
-
-8. **修改指引新增**：
-   - §15.5 集成 README 生成到 GUI
-   - §15.6 添加新输出语言的 README 契约
-
-9. **自查清单新增**：
-   - §16.2 修改 README 生成器后的 13 项检查
-
-10. **端到端示例新增**：
-    - §14.2 Python provider 快速起步
-    - §14.3 C++ provider 从零开始
-
-### v4.0（2026-09-22）
-
-- 补齐 API 签名、字段级数据结构、wire format、配置参数、状态机、错误码索引、端到端示例、故障排查树、修改指引。
-
-### v3.0（2026-09-22）
-
-- 整合 LLM 生态组件。
-
-### v2.0（2026-09-20）
-
-- 修正 9 处问题。
-
-### v1.0（2026-09-20）
-
-- 初版。
+1. **The complete mapping table for `Translate_C_Typ_To_Pascal`** — only the broad categories are known; details require consulting the source.
+2. **The complete scoring algorithm for `DetectSourceLanguage`** — only the tie-returns-`slUnknown` behavior is known.
+3. **The SystemString intermediary hazard in `GetFullDescription` (Pascal side)** — only the existence of the hazard is known; fix details require consulting the Python-side implementation.
+4. **Whether C++'s `MAX_DESC_LEN = 200` should be unified** — asymmetry is known; the trade-off is undecided.
+5. **The exact output template of each README generator section** — only the skeleton and language-specific descriptions are given; line-by-line templates are not.
+6. **Whether the `total_count` fix in `RegisterTools` is complete** — syntax checking is recommended.
+7. **The minimal contract for a new language generator** — see §15.6.
+8. **Whether the GUI's 1 ms `SysTimer` is optimal** — recommend changing to 10 ms.
+9. **The character replacement table in `MakeApiName`** — **confirmed incomplete**; whitelist filtering is recommended.
+10. **The consistency maintenance between the declaration spec and the generators** — CI checking is recommended.
+11. **The synchronization between `code_decl_to_mcp_knowledge_base.md` and other spec documents** — manual cross-checking is recommended.
+12. **The local VLM path for `llm_service`** — not implemented.
+13. **The `--vision` + `--no-tools` combination in LTB** — multimodal forwarding still works, but the tool capability disappears.
+14. **The effect of `bridge.py`'s JSON normalization on binary payloads** — if a payload cannot be parsed as JSON, it is forwarded as-is.
+15. **`umlDeleteFile`'s `_VerifyCheck=False`** — returning True does not mean the delete succeeded.
+16. **The `$80` boundary of `umlBufferIsASCII`** — treated as ASCII.
+17. **Whether FPC 3.3+ relaxes inline `var` in procedure bodies** — unverified; currently handled conservatively as FPC 3.2.2.
 
 ---
 
-**文档版本**：v5.0（README 体系完整版）
-**覆盖范围**：`code_decl_to_mcp` 工具链 + `llm*.py` + `mcp_api*.py` + `llm_common` + `lingofuse` Python 包 + **三语言 README 生成体系**
-**配套文档**：`pascal_code_mcp_rule.md`、`C_code_mcp_rule.md`、`MCP_API_Contract.md`、`code_generate_mcp.md`、`pascal_agent_api_ref_json.md`、`LingoFuse_LLM_Ecosystem_User_Guide.md`、`LingoFuse_Pascal_Complete_Guide.md`、`LingoFuse_LLM_Pitfalls_For_AI.md`
-**最后更新**：2026-09-22
+## Appendix D: Revision History
+
+### v5.0 (2026-09-22)
+
+**Improvements over v4.0**:
+
+1. **New Chapter 3 (README generation system)**:
+   - Complete contract for the three-language README generators
+   - Unified ten-section skeleton
+   - Language-specific details (Pascal's three-repository dependency + `.lpr`; Python's two package sources; C++ cppAgent status + fallback header)
+   - GUI integration method
+
+2. **New Section 2.6 (FPC compilation constraint)**:
+   - No inline `var` under `{$mode delphi}`
+   - Fix method
+
+3. **New Sections 0.5 / 0.6**:
+   - Three READMEs quick reference
+   - Three-repository dependency model
+
+4. **New Section 1.5 (output file panorama)**:
+   - The 10 output files (code + README)
+
+5. **New Chapter 17 (self-audit verification)**:
+   - 8 scenario tests proving the KB's learnability
+   - Honest disclosure of 5 known weaknesses
+
+6. **New anti-patterns**:
+   - §12.11 Pascal-side `GetFullDescription` hazard
+   - §12.12 README placeholders not replaced
+   - §12.13 C++ README without a `LingoFuse.h` fallback
+   - §12.14 Python PowerShell PYTHONPATH syntax
+   - §12.15 FPC inline `var`
+
+7. **New troubleshooting trees**:
+   - §13.4 Pascal provider compilation failure
+   - §13.5 Python provider startup failure
+   - §13.6 C++ provider compilation failure
+
+8. **New modification guide entries**:
+   - §15.5 Integrating README generation into the GUI
+   - §15.6 README contract for adding a new output language
+
+9. **New self-check entries**:
+   - §16.2 13 checks after modifying a README generator
+
+10. **New end-to-end examples**:
+    - §14.2 Python provider quick start
+    - §14.3 C++ provider from scratch
+
+### v4.0 (2026-09-22)
+
+- Completed API signatures, field-level data structures, wire format, configuration parameters, state machines, error code index, end-to-end examples, troubleshooting trees, and modification guide.
+
+### v3.0 (2026-09-22)
+
+- Integrated LLM ecosystem components.
+
+### v2.0 (2026-09-20)
+
+- Fixed 9 issues.
+
+### v1.0 (2026-09-20)
+
+- Initial version.
+
+---
+
+**Document version**: v5.0 (README-system complete edition)
+**Coverage**: `code_decl_to_mcp` toolchain + `llm*.py` + `mcp_api*.py` + `llm_common` + the `lingofuse` Python package + **the three-language README generation system**
+**Companion documents**: `pascal_code_mcp_rule.md`, `C_code_mcp_rule.md`, `MCP_API_Contract.md`, `code_generate_mcp.md`, `pascal_agent_api_ref_json.md`, `LingoFuse_LLM_Ecosystem_User_Guide.md`, `LingoFuse_Pascal_Complete_Guide.md`, `LingoFuse_LLM_Pitfalls_For_AI.md`
+**Last updated**: 2026-09-22
