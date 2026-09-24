@@ -1,55 +1,60 @@
-# code_decl_to_mcp 使用手册（V7.0）
+# code_decl_to_mcp User Manual (V8.0)
 
-> **版本**：V7.0（AI 友好版）
-> **最后更新**：2026-09-22
-> **适用工具**：`code_decl_to_mcp.exe`（LingoFuse-pasAgent 工具链）
+> **Version**: V8.0 (AI-friendly edition)
+> **Last updated**: 2026-09-24
+> **Applies to**: `code_decl_to_mcp.exe` (LingoFuse-pasAgent toolchain)
 >
-> **本版相对 V6.0 的核心变化**：
-> - **新增**第 3 章：命令行直转模式（无需 GUI）
-> - **新增**第 9 章：⚠️ 给 AI 写工具描述的坑（本版重点，来自真实事故复盘）
-> - **新增**第 13 章：本次工作总结（Pascal → 智能体接入全过程）
-> - **强化**第 11 章：故障排查新增 5 条 AI 相关条目
-> - 所有代码示例按 Console 子系统更新
+> **What's new in V8.0 over V7.0**:
+> - **New Chapter 3**: Command-line guide (full CLI reference)
+> - **New Chapter 4**: Agent MCP-API guide (how an agent drives the 11 MCP tools)
+> - **New Chapter 5**: GUI operation guide (tab-by-tab, control-by-control)
+> - **New Chapter 6**: Programmatic interface (embed the generator in your own tools)
+> - **New Chapter 7**: ⚠️ Read the generated `.md` files first (the real deliverable: test programs, interface code, **C++ CMake scripts**)
+> - **Chapter 10 (was Ch. 9 in V7.0)**: ⚠️ Writing tool descriptions for AI — **THE MOST IMPORTANT CHAPTER**
+> - All code examples are updated for the Console subsystem
+> - The description authoring rules are tightened: **comments are the key to MCP being called correctly**
 
 ---
 
-## 0. 这份文档教什么
+## 0. What This Document Teaches
 
-**把 Pascal/C 的函数声明变成 AI 能调用的工具，并接入智能体，全流程可跑通。**
+**Turn Pascal/C function declarations into AI-callable tools and wire them into an agent — the whole closed loop, end to end.**
 
-完整闭环只需 6 步：
+The complete loop takes **8 steps**:
 
 ```
-生成代码 → 建立工程 → 注册工具 → 启动 App → 启动智能体 → 验证接入
+Generate → Build → Register → Start beacon → Start provider → Start agent → Verify → Audit the AI descriptions
 ```
 
-生成代码有**两条路径**：
+Code generation has **three paths**:
 
-| 路径 | 适用场景 | 章节 |
-|------|---------|------|
-| **GUI** | 交互式使用，看得到中间过程 | §2 |
-| **命令行** | 脚本、CI、批量转换 | §3 |
+| Path | Use case | Chapter |
+|------|----------|---------|
+| **GUI** | Interactive use, see intermediate steps | §5 |
+| **CLI** | Scripts, CI, batch conversion | §3 |
+| **MCP-API** | Remote invocation by an AI agent | §4 |
 
-> **📌 关于成熟智能体流程**
+> **📌 About the mature agent workflow**
 >
-> 本文档描述的智能体流程已在 **[LingoFuse-pasAgent-v3](https://github.com/PassByYou888/LingoFuse-pasAgent-v3)** 中完整实现并经过验证。如果本文档中提到的工具接口不齐全，请直接到该仓库寻找——那里有**100% 可以闭环的智能体项目**，涵盖信标、工具提供者、MCP 网关、LLM 工具桥、Pascal 客户端 SDK、GUI 演示等全部组件。
+> The agent workflow described in this document is fully implemented and verified in **[LingoFuse-pasAgent-v3](https://github.com/PassByYou888/LingoFuse-pasAgent-v3)**. If any tool interface mentioned here is incomplete, look in that repository — it contains a **100% closed-loop agent project**, covering the beacon, tool providers, MCP gateway, LLM tool bridge, Pascal client SDK, GUI demos, and every other component.
 
 ---
 
-## 1. 全景图
+## 1. Overview
 
 ```mermaid
 flowchart LR
-    A["📄 Pascal/C 声明"] --> B["⚙️ code_decl_to_mcp"]
-    B --> C1["🅿️ Pascal 工具提供者"]
-    B --> C2["🐍 Python 工具提供者"]
-    B --> C3["➕ C++ 工具提供者"]
-    C1 --> D["📡 信标"]
+    A["📄 Pascal/C declaration"] --> B["⚙️ code_decl_to_mcp"]
+    B --> C1["🅿️ Pascal tool provider"]
+    B --> C2["🐍 Python tool provider"]
+    B --> C3["➕ C++ tool provider"]
+    B --> MD["📘 Generated .md companions<br/>(test code, interface code,<br/>CMake scripts)"]
+    C1 --> D["📡 Beacon"]
     C2 --> D
     C3 --> D
-    D --> E1["🌉 MCP 网关"]
-    D --> E2["🔴 LLM 工具桥"]
-    E1 --> F["🤖 AI 客户端"]
+    D --> E1["🌉 MCP gateway"]
+    D --> E2["🔴 LLM tool bridge"]
+    E1 --> F["🤖 AI client"]
     E2 --> F
 
     style A fill:#4A90E2,stroke:#1E3A8A,stroke-width:3px,color:#FFFFFF
@@ -57,104 +62,54 @@ flowchart LR
     style C1 fill:#F39C12,stroke:#B7791F,stroke-width:3px,color:#FFFFFF
     style C2 fill:#27AE60,stroke:#145A32,stroke-width:3px,color:#FFFFFF
     style C3 fill:#E67E22,stroke:#A04000,stroke-width:3px,color:#FFFFFF
+    style MD fill:#1A5490,stroke:#0D2F52,stroke-width:4px,color:#FFFFFF
     style D fill:#2ECC71,stroke:#1E8449,stroke-width:4px,color:#FFFFFF
     style E1 fill:#1ABC9C,stroke:#0E6251,stroke-width:3px,color:#FFFFFF
     style E2 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
     style F fill:#F5A623,stroke:#B7791F,stroke-width:3px,color:#FFFFFF
 ```
 
----
+Two things to internalize before going further:
 
-## 2. 第一步（GUI 路径）：生成代码
-
-### 2.1 打开 `code_decl_to_mcp.exe`
-
-### 2.2 粘贴声明
-
-在 **2-source** Tab 中粘贴你的 Pascal 函数声明。示例：
-
-```pascal
-unit calculator;
-
-interface
-
-(*
-  Computes the sum of two integers.
-
-  a: first addend
-  b: second addend
-
-  Return value: this function returns an Integer representing the sum.
-*)
-function Add(a: Integer; b: Integer): Integer;
-
-(*
-  Computes the difference of two integers.
-
-  a: minuend
-  b: subtrahend
-
-  Return value: this function returns an Integer representing a - b.
-*)
-function Sub(a: Integer; b: Integer): Integer;
-
-implementation
-
-function Add(a, b: Integer): Integer;
-begin
-  Result := a + b;
-end;
-
-function Sub(a, b: Integer): Integer;
-begin
-  Result := a - b;
-end;
-
-end.
-```
-
-> **注意**：注释写法必须遵守 `pascal_code_mcp_rule.md` 的规范。特别是：
-> - 用 `(* ... *)`，不要用 `{ ... }`（避免 `}` 冲突）
-> - 参数名必须在**行首**
-> - 返回类型必须写在签名里
-
-### 2.3 选择语言
-
-- 点击 `sel_lang_Label` 自动检测，或手动从下拉框选择 `Pascal` / `C`。
-
-### 2.4 走完 5 个 Tab
-
-依次点击：
-
-```
-下一步: pascal/c -> json → 下一步: json <-> model → 下一步: 生成源码
-```
-
-### 2.5 获取生成的文件
-
-在 **5-Final source** Tab 中：
-
-| 标签页 | 产物 | 保存为 |
-|--------|------|--------|
-| `pas_TabSheet` | Pascal 工具提供者单元 | `calculator_tool_provider_unit.pas` |
-| `Py_TabSheet` | Python 工具提供者模块 | `calculator_tool_provider.py` |
-| `Cpp_TabSheet` | C++ 头文件 + 实现 | `calculator_tool_provider.hpp` + `.cpp` |
-
-同时工具会自动落盘到 `<exe目录>/<UnitName>/` 下，包含 `source.pas`、`source.json`、`source_model.json` 和生成的文件。
+1. **The `.md` companions are the real deliverable for building the artifacts.** The generated `.pas` / `.py` / `.hpp` / `.cpp` are skeletons; the paired `.md` file tells you how to build, test, and deploy each one — including the **C++ CMake script**. See Chapter 7.
+2. **Comments are the key to MCP being called correctly.** An AI agent reads your comments (compressed into the tool `description` field) and decides whether to call your tool. If the description is ambiguous, the agent will stall, call the wrong tool, or pass wrong arguments. See Chapter 10.
 
 ---
 
-## 3. 第一步（命令行路径）：直转模式
+## 2. The 8-Step Workflow
 
-**V7.0 新增**。命令行直转功能**不需要打开 GUI**，直接从文件到文件，适合脚本、CI、批量转换。
+```
+Step 1  Generate code            ──── §3 (CLI) / §4 (MCP) / §5 (GUI)
+Step 2  Build the provider       ──── §6, using the generated .md
+Step 3  Fill in internal_call_*  ──── §6, using the generated .md
+Step 4  Register the tool        ──── automatic via Execute_And_Reg_all
+Step 5  Start the beacon         ──── pascal_agent_service.exe
+Step 6  Start the provider       ──── <your_provider>.exe
+Step 7  Start the agent          ──── mcp_api_tool.exe or llm_proxy_tool.exe
+Step 8  Audit AI descriptions    ──── §10 — THE MOST IMPORTANT STEP
+```
 
-### 3.1 查看帮助
+Step 8 is not optional. An agent that calls your tools incorrectly is almost always an agent that was given ambiguous descriptions.
+
+---
+
+## 3. Command-Line Guide
+
+The command-line mode **does not open the GUI**. It goes straight from file to file, suitable for scripts, CI, and batch conversion.
+
+### 3.1 Trigger
+
+- **No arguments** → the GUI launches.
+- **At least one argument** → the console subsystem takes over; no UI is created.
+
+### 3.2 Syntax
 
 ```bash
 code_decl_to_mcp.exe --help
+code_decl_to_mcp.exe <input> <output>
 ```
 
-输出：
+### 3.3 Help text
 
 ```
 code_decl_to_mcp - MCP tool provider code generator
@@ -196,37 +151,37 @@ EXIT CODES
   4  File I/O error.
 ```
 
-### 3.2 常用命令
+### 3.4 Common commands
 
 ```bash
-# C 头文件 → Python 工具提供者
+# C header → Python tool provider
 code_decl_to_mcp.exe ComplexTestUnit.h calculator_provider.py
 
-# Pascal 单元 → C++ 工具提供者（自动配对 .hpp + .cpp）
+# Pascal unit → C++ tool provider (auto-pairs .hpp + .cpp)
 code_decl_to_mcp.exe calculator.pas calculator_provider.hpp
 
-# Pascal 单元 → Pascal 工具提供者
+# Pascal unit → Pascal tool provider
 code_decl_to_mcp.exe calculator.pas calculator_provider.pas
 ```
 
-### 3.3 输出行为
+### 3.5 Output behavior
 
-- **C++ 目标自动配对**：命名 `.hpp` 或 `.cpp` 任意一个，两份文件都写出。
-- **README 自动跟随**：生成代码旁边总有 `<base>_readme.md`。
-- **无参数启动**：直接进入 GUI 模式，行为与 V6.0 一致。
-- **有参数启动**：走 Console 子系统，不创建任何 UI。
+- **C++ targets auto-pair**: naming either `.hpp` or `.cpp` causes both files to be written.
+- **README auto-follows**: `<base>_readme.md` is always written next to the generated code. **This is the file you need for the build/test details.** See Chapter 7.
+- **No arguments → GUI**: behavior identical to V6.0.
+- **With arguments → Console**: no UI is created.
 
-### 3.4 命令行模式的技术前提
+### 3.6 The technical requirements for CLI mode
 
-要让命令行功能正常工作，项目编译**必须**满足：
+For CLI mode to work correctly, the project build **must** satisfy:
 
-| 要求 | 配置 |
-|------|------|
-| 编译为 Console 子系统 | `{$apptype console}` 或 Lazarus 项目选项 "Win32 GUI application" **不勾选** |
-| 主程序先调用 `Process_CommandLine` | 见下方代码 |
-| 无参数时隐藏控制台窗口 | `ShowWindow(GetConsoleWindow, SW_HIDE)` |
+| Requirement | Configuration |
+|-------------|---------------|
+| Build as Console subsystem | `{$apptype console}`, or in Lazarus uncheck the "Win32 GUI application" project option |
+| Main program calls `Process_CommandLine` first | See the code below |
+| Hide the console window when there are no arguments | `ShowWindow(GetConsoleWindow, SW_HIDE)` |
 
-**主程序 `code_decl_to_mcp.lpr` 的标准写法**：
+**Standard `code_decl_to_mcp.lpr`**:
 
 ```pascal
 program code_decl_to_mcp;
@@ -269,21 +224,250 @@ begin
 end.
 ```
 
+### 3.7 CLI output
+
+In CLI mode, all `DoStatus` output goes to stdout via a **custom hook** (the default `DoStatus` path requires the LCL main loop, which does not exist in CLI mode):
+
+```pascal
+procedure CmdLine_DoStatus_Hook(Text_: SystemString; const ID: Integer);
+begin
+  WriteLn(Text_);
+end;
+```
+
+Typical output:
+
+```
+Reading: ComplexTestUnit.h (1234 chars)
+Output : calculator_provider.py
+Mode   : provider
+Unit   : ComplexTestUnit
+Funcs  : 28
+Saved  : calculator_provider.py
+Saved  : calculator_provider_readme.md
+Done.
+```
+
+On error, a diagnostic is printed and a non-zero exit code is returned.
+
+### 3.8 Exit codes
+
+| Exit code | Meaning |
+|:---------:|---------|
+| `0` | Conversion succeeded |
+| `1` | Missing or invalid arguments |
+| `2` | Source parsing failed |
+| `3` | Code generation failed |
+| `4` | File I/O error |
+
+### 3.9 What CLI mode does **not** do
+
+- **Does not start the beacon.**
+- **Does not start the tool provider.**
+- **Does not register any tools.**
+- **Does not open any network connection.**
+
+The CLI produces artifacts. Wiring them up is done in Chapter 6 (build), Chapter 8 (runtime), and Chapter 4 (agent).
+
 ---
 
-## 4. 第二步：建立工程
+## 4. Agent MCP-API Guide
 
-### 4.1 Pascal 路线
+An agent can drive the entire generator through the 11 MCP tools exposed by `code_decl_to_mcp_api_tool_provider_unit.pas`. This section documents those tools and how an agent should sequence them.
 
-#### 4.1.1 创建 Lazarus 工程
+### 4.1 Requirements
 
-新建一个 Console Application（或 GUI Application），将生成的 `calculator_tool_provider_unit.pas` 加入工程。
+- The GUI is running (the MCP provider lives inside the GUI's process).
+- A beacon service is online (`agent_main_app` by default).
+- Both use the same LingoFuse endpoint (`ipc:agent` by default).
 
-#### 4.1.2 填充业务实现
+### 4.2 The 11 tools
 
-打开生成的单元，找到每个 `internal_call_*` 桩函数。以 `Add` 为例：
+| Tool | Role | Prerequisite | Output |
+|------|------|-------------|--------|
+| `SetSourceCode` | Step 1 — store source and source language | none | `{"status":"ok"}` |
+| `ConvertToPascalMCP` | Step 2 — Pascal branch | `SetSourceCode` must have succeeded | `{"result":"<path>"}` |
+| `ConvertToPythonMCP` | Step 2 — Python branch | `SetSourceCode` must have succeeded | `{"result":"<path>"}` |
+| `ConvertToCppMCP` | Step 2 — C++ branch | `SetSourceCode` must have succeeded | `{"result":"<path>"}` |
+| `GetLastPascalCode` | Step 3 — read Pascal unit | `ConvertToPascalMCP` | full code text |
+| `GetLastPascalReadme` | Step 3 — read Pascal README | `ConvertToPascalMCP` | full README text |
+| `GetLastPythonCode` | Step 3 — read Python module | `ConvertToPythonMCP` | full code text |
+| `GetLastPythonReadme` | Step 3 — read Python README | `ConvertToPythonMCP` | full README text |
+| `GetLastCppHeader` | Step 3 — read C++ header | `ConvertToCppMCP` | header text |
+| `GetLastCppImpl` | Step 3 — read C++ implementation | `ConvertToCppMCP` | implementation text |
+| `GetLastCppReadme` | Step 3 — read C++ README | `ConvertToCppMCP` | README text |
 
-**生成的桩（占位）：**
+The three-step shape is uniform: **Step 1 stores state; Step 2 produces artifacts; Step 3 reads them.**
+
+### 4.3 Recommended call sequences
+
+**Minimum (Python service, then read the code and README)**:
+
+```
+1. SetSourceCode(Source=<the Pascal unit or C header text>, Language="pascal" | "c")
+2. ConvertToPythonMCP()
+3. GetLastPythonCode()
+4. GetLastPythonReadme()    ← ⚠️ read this first for build/run instructions
+```
+
+**One source, multiple targets**:
+
+```
+1. SetSourceCode(Source=<text>, Language="c")
+2. ConvertToPascalMCP()
+3. ConvertToPythonMCP()
+4. ConvertToCppMCP()
+5. GetLastPascalCode()      + GetLastPascalReadme()
+6. GetLastPythonCode()      + GetLastPythonReadme()
+7. GetLastCppHeader()       + GetLastCppImpl() + GetLastCppReadme()
+```
+
+**C++ only, minimal**:
+
+```
+1. SetSourceCode(<text>, "pascal")
+2. ConvertToCppMCP()
+3. GetLastCppHeader()
+4. GetLastCppImpl()
+5. GetLastCppReadme()       ← ⚠️ this one has the CMake script
+```
+
+### 4.4 Return value shapes
+
+`SetSourceCode` success:
+```json
+{"status":"ok"}
+```
+
+`SetSourceCode` failure:
+```json
+{"error":"<message>"}
+```
+
+`ConvertToXxxMCP` success:
+```json
+{"result":"<absolute path to the generated file>"}
+```
+
+`GetLastXxx` on success: the full text of the artifact.
+`GetLastXxx` on failure: an empty string.
+
+### 4.5 Agent notes
+
+1. **The order is mandatory**: Step 1 → Step 2 → Step 3.
+2. **`Language` accepts only `"pascal"` or `"c"`**. Do **not** pass `"python"`, `"cpp"`, or any other target name. The target language is chosen by *which* Step 2 tool you call, not by a parameter.
+3. **Do not alternate `SetSourceCode` and `ConvertToXxx` in a loop**. Store the source once, then fire all the conversions you need.
+4. **`GetLastXxx` is a pure reader.** It does not re-run any conversion and does not require re-calling `SetSourceCode`.
+5. **The GUI must be alive.** There is no headless MCP mode.
+6. **Point agents at the `.md` files.** After a successful `ConvertToXxxMCP`, the paired `GetLastXxxReadme` returns a `.md`. **That `.md` contains the test code, the interface code, and the CMake script for C++.** Chapter 7 covers this in detail.
+
+---
+
+## 5. GUI Operation Guide
+
+### 5.1 Launch
+
+Run `code_decl_to_mcp.exe` with **no arguments**. The GUI opens.
+
+The GUI has 5 top-level tabs, advancing left to right:
+
+```
+[1. Welcome] → [2. Source Code] → [3. Source <-> JSON] → [4. JSON <-> Model] → [5. Final Source]
+```
+
+Each tab has a row of "previous / next" buttons. A bottom panel shows live `DoStatus` output.
+
+### 5.2 Tab 1 — Welcome
+
+- Shows the tool's purpose, architecture diagram, and the workflow.
+- **Pascal rule doc** opens `pascal_code_mcp_rule.md`.
+- **C rule doc** opens `C_code_mcp_rule.md`.
+- **Next: Enter source code** jumps to Tab 2.
+
+### 5.3 Tab 2 — Source Code
+
+This is where you paste the declaration.
+
+**Top toolbar**:
+
+| Control | Effect |
+|---------|--------|
+| **Select Language label** | Click to auto-detect the source language. |
+| **Language Selector dropdown** | `Auto-detect` / `Pascal` / `C`, manual choice. |
+| **Format** | Keep only top-level declarations; rebuild a minimal declaration. |
+| **Empty unit** | Insert a minimal skeleton. |
+| **Test unit** | Insert a rich syntax sample (great for a first run). |
+| **Next: Pascal/C → JSON** | Parse the current source, produce LV0 JSON, jump to Tab 3. |
+
+**Steps**:
+
+1. Paste your Pascal unit or C header.
+2. Click **Select Language** to auto-detect, or pick the language manually.
+3. Verify the syntax highlighting matches the language.
+4. Click **Next: Pascal/C → JSON**.
+
+> **Before you paste, read Chapter 10.** The comments in this text are the ones the AI will see when it decides whether to call your tool. Short, unambiguous, workflow-aware comments are the difference between an agent that works and one that stalls.
+
+### 5.4 Tab 3 — Source ↔ JSON
+
+Shows the **LV0 JSON** (raw parser output).
+
+| Button | Effect |
+|--------|--------|
+| **Back: rebuild code from JSON** | Reverse-rebuild source from the current JSON, write it back to Tab 2. |
+| **Next: JSON ↔ Model** | Normalize LV0 into LV1, jump to Tab 4. |
+
+You may hand-edit the JSON. If the parser misclassified a type, fix it here and click **Next**. The **Back** button verifies the edit still rebuilds a legal source.
+
+### 5.5 Tab 4 — JSON ↔ Model
+
+Shows the **LV1 model JSON** — the sole input to all generators.
+
+| Button | Effect |
+|--------|--------|
+| **Back: JSON ↔ Model** | Reverse-restore LV1 to LV0, write back to Tab 3. |
+| **Next: generate source** | Run all generators, jump to Tab 5. |
+
+At this stage, **any routine with an unsupported type has already been dropped**. Supported families: integer, float, string. Everything else (`Boolean`, `Variant`, arrays, records, classes, interfaces, enums, sets, pointers, `Currency`, `TDateTime`) is silently discarded.
+
+### 5.6 Tab 5 — Final Source
+
+Each sub-tab shows the generated code **and its paired README**.
+
+| Sub-tab | Content |
+|---------|---------|
+| Pascal | Pascal provider unit + README |
+| Python | Python provider module + README |
+| C++ | C++ `.hpp` + `.cpp` + README |
+
+All files are written to disk during generation, under `<exe directory>/<UnitName>/`:
+
+```
+<UnitName>/source.pas              (or source.h)
+<UnitName>/source.json             (LV0)
+<UnitName>/source_model.json       (LV1)
+<UnitName>/<UnitName>_tool_provider_unit.pas   + _pascal.md
+<UnitName>/<UnitName>_tool_provider.py         + _python.md
+<UnitName>/<UnitName>_tool_provider.hpp / .cpp + _cpp.md
+```
+
+> **Read the `.md` sub-tab first.** The `.md` is where the real build instructions, test programs, and CMake scripts live. Chapter 7.
+
+### 5.7 Log panel
+
+Shows which file was just saved, which routines were dropped during normalization, and any generator errors. Clears itself when it exceeds 5000 lines.
+
+---
+
+## 6. Build and Programmatic Interface
+
+The generated code is a **skeleton**. Your job is to fill in the `internal_call_*` stubs and, if you want to drive the generator from your own program, call the generator functions directly.
+
+### 6.1 Building the Pascal provider
+
+**Step 1** — Create a Lazarus Console or GUI project, add the generated `calculator_tool_provider_unit.pas`.
+
+**Step 2** — Fill in each `internal_call_*` stub. The generator produces:
 
 ```pascal
 function internal_call_Add_Add(a: Int64; b: Int64): Int64;
@@ -293,7 +477,7 @@ begin
 end;
 ```
 
-**替换为真实实现：**
+Replace with the real implementation:
 
 ```pascal
 function internal_call_Add_Add(a: Int64; b: Int64): Int64;
@@ -302,11 +486,7 @@ begin
 end;
 ```
 
-对 `Sub` 同理。
-
-#### 4.1.3 在宿主程序中调用
-
-在 `program` 或主窗体中调用 `Execute_And_Reg_all()`：
+**Step 3** — Drive registration from your host program:
 
 ```pascal
 program calculator_provider;
@@ -327,93 +507,183 @@ begin
 end.
 ```
 
-#### 4.1.4 编译
+**Step 4** — Compile:
 
 ```bash
 lazbuild calculator_provider.lpi
 ```
 
-> **需要 `LingoFuse64.dll` 和 `z_ipc_64.dll` 在 EXE 同目录或 PATH 中。**
+> `LingoFuse64.dll` and `z_ipc_64.dll` must be next to the EXE or on PATH.
 
-### 4.2 Python 路线
+### 6.2 Building the Python provider
 
-#### 4.2.1 填充业务实现
-
-打开生成的 `.py` 文件，找到每个 `internal_call_*` 函数：
-
-**生成的桩：**
+**Step 1** — Fill in each `internal_call_*` function:
 
 ```python
 def internal_call_add(a: int, b: int) -> int:
-    """Wrapper for the original routine 'Add'.
-    TODO: replace this placeholder with the actual implementation.
-    """
-    if DEBUG_LOG:
-        print(f"[internal_call_add] called")
-    return 0
-```
-
-**替换为真实实现：**
-
-```python
-def internal_call_add(a: int, b: int) -> int:
-    """计算两个整数的和。"""
     return a + b
 ```
 
-#### 4.2.2 直接运行
+**Step 2** — Run:
 
 ```bash
 python calculator_tool_provider.py
 ```
 
-无需编译，无需 Lazarus，无需 FPC。
+No compiler, no Lazarus, no FPC.
 
----
+### 6.3 Building the C++ provider
 
-## 5. 第三步：注册工具
+**The C++ README contains the CMake script.** Read it. See Chapter 7 for details.
 
-工具注册由 `Execute_And_Reg_all()` 自动完成，该函数依次执行：
+The generated README's §4 has three command variants (g++, cl, MinGW-w64). Pick the one matching your toolchain, and the CMake snippet if you use CMake.
 
-1. **`RegisterAPIs()`** — 创建 LingoFuse 应用，把所有函数注册为 Call API。
-2. **`LF_PrepareClientEx(IPC_ENDPOINT, App)`** — 连接信标。
-3. **`LF_PrepareDone()`** — 等待连接就绪。
-4. **`RegisterTools()`** — 把每个 API 注册为工具（携带 JSON Schema）。
+### 6.4 The programmatic interface
 
-**注册的 JSON 格式：**
+If you want to embed the generator in your own tool, call the generator functions directly:
 
-```json
-{
-  "name": "add",
-  "description": "Computes the sum of two integers. a: first addend b: second addend Return value: this function returns an Integer representing the sum.",
-  "target_app": "calculator",
-  "target_api": "add",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "a": {"type": "integer", "description": "first addend"},
-      "b": {"type": "integer", "description": "second addend"}
-    },
-    "required": ["a", "b"]
-  }
-}
+```pascal
+function GeneratePascalCode(Model: TPascal_Func_Model): TPascalStringList;
+function GeneratePythonCode(Model: TPascal_Func_Model): TPascalStringList;
+function GenerateHPPCode(Model: TPascal_Func_Model): TPascalStringList;
+function GenerateCPPCode(Model: TPascal_Func_Model): TPascalStringList;
+
+function GeneratePascalReadme(Model: TPascal_Func_Model): TPascalStringList;
+function GeneratePythonReadme(Model: TPascal_Func_Model): TPascalStringList;
+function GenerateCPPReadme(Model: TPascal_Func_Model): TPascalStringList;
 ```
 
-> **注意**：`description` 字段是 AI 智能体在工具发现阶段唯一能看到的信息。它的质量直接决定了 AI 是否调用你的工具。详见 §9。
+Minimum viable embedding:
+
+```pascal
+var
+  Parser: tpascal_func_decl_tool;
+  Model: TPascal_Func_Model;
+  Code, Readme: TPascalStringList;
+begin
+  Parser := tpascal_func_decl_tool.CreateFrom_Pascal_Code(SourceText);
+  try
+    Model := TPascal_Func_Model.Create;
+    try
+      Model.Typ_Normalize_Func := tnf_Json;
+      Model.LoadFromParser(Parser, nil);
+
+      Code := GeneratePascalCode(Model);
+      try
+        if Code <> nil then Code.SaveToFile('MyUnit_tool_provider_unit.pas');
+      finally
+        Code.Free;
+      end;
+
+      Readme := GeneratePascalReadme(Model);
+      try
+        if Readme <> nil then Readme.SaveToFile('MyUnit_tool_provider_pascal.md');
+      finally
+        Readme.Free;
+      end;
+    finally
+      Model.Free;
+    end;
+  finally
+    Parser.Free;
+  end;
+end;
+```
+
+**Contract summary**:
+
+| Function family | Input | Output | Notes |
+|-----------------|-------|--------|-------|
+| `GenerateXxxCode` | `TPascal_Func_Model` in `tnf_Json` mode | `TPascalStringList` or `nil` | Caller disposes; `nil` on empty model |
+| `GenerateXxxReadme` | same | `TPascalStringList` (never `nil`) | Caller disposes; degraded text on empty model |
+| `CreateFrom_*` | source text | parser instance | Caller disposes |
+| `LoadFromParser` | parser + optional report | — | Applies the six filters |
+
+> **Always generate both the code and the README.** If you call only `GenerateXxxCode`, you produce a skeleton with no build instructions. **The `.md` is the deliverable.** Chapter 7.
 
 ---
 
-## 6. 第四步：启动 App
+## 7. ⚠️ Read the Generated `.md` Files First
 
-**先启动信标，再启动工具提供者。**
+Every generated code artifact is paired with a Markdown document. That `.md` is the file you actually need before you build, run, or debug anything.
 
-### 6.1 启动信标
+### 7.1 What the `.md` contains
+
+For each artifact, the paired `.md` contains:
+
+1. **A complete, copy-pasteable test program.**
+   - **Pascal**: a full `.lpr` you can compile as-is, plus the exact `fpc -Fu<...>` command line (search paths for `Z.Core`, `lingofuse_import.pas`, and the generated unit).
+   - **Python**: the generated `.py` already contains `if __name__ == "__main__":`, so the test program *is* the module. The `.md` tells you which environment variables to set.
+   - **C++**: a full `main.cpp`, **a CMake script**, and a raw compiler invocation (g++, cl, MinGW). A minimal fallback `LingoFuse.h` is embedded so you can compile even before the official C++ binding is available.
+   - **JavaScript** (when applicable): a self-contained HTML test page.
+
+2. **The full interface reference for that artifact.**
+   - Every API the artifact exposes.
+   - Its typed signature.
+   - The request layout and success response layout on the wire.
+   - A call example per API.
+
+3. **The build instructions for that language.**
+   - **C++ CMake script** — target name, sources, includes, libraries, C++ standard.
+   - **Pascal** — `lazbuild` project steps and `fpc -Fu<...>` command lines.
+   - **Python** — `pip install` / `PYTHONPATH` setup for cmd, PowerShell, and bash.
+
+4. **Deployment** — runtime directory expectations, startup order, shutdown order, environment variables.
+
+5. **Troubleshooting** — symptom → cause → fix, tuned to the target language.
+
+### 7.2 Why the `.md` is generated alongside the code
+
+The `.md` and the code are generated from the **same `TPascal_Func_Model` in the same pass**. This guarantees:
+
+- **They never drift apart.** Re-generate after editing the source; both are refreshed.
+- **The `.md` always describes the current code.**
+- **You can hand the `.md` to another engineer (or to an agent) and they can reproduce your build.**
+
+### 7.3 File naming
+
+Under the GUI: `<exe dir>/<UnitName>/<UnitName>_tool_provider_{pascal,python,cpp}.md`.
+
+Under the CLI: `<output basename>_readme.md`.
+
+Under MCP: the `readme` field returned by `ConvertToXxxMCP`, or the string returned by `GetLastXxxReadme`.
+
+### 7.4 Practical consequence for this guide
+
+This user guide deliberately does **not** reproduce every build command for every language. For any language-specific build, test, or CMake question, **the answer is in the generated `.md`, not here.**
+
+**Whenever you finish generating code, open the `.md` first.**
+
+---
+
+## 8. Complete Operation Checklist
+
+| Step | Operation | Command / configuration |
+|:----:|-----------|-------------------------|
+| 1 | Generate code (GUI) | `code_decl_to_mcp.exe` → 5 tabs |
+| 1' | Generate code (CLI) | `code_decl_to_mcp.exe input.pas output.py` |
+| 1" | Generate code (MCP) | `SetSourceCode` → `ConvertToXxxMCP` → `GetLastXxx*` |
+| 2 | Read the generated `.md` | Open `<output basename>_readme.md` |
+| 3 | Build the provider | Follow the `.md` (CMake for C++, `lazbuild` for Pascal, `pip` for Python) |
+| 4 | Fill in `internal_call_*` | Edit the generated unit/module |
+| 5 | Register the tool | Automatic, driven by `Execute_And_Reg_all()` |
+| 6 | Start the beacon | `pascal_agent_service.exe` |
+| 7 | Start the provider | `calculator_provider.exe` or `python calculator_tool_provider.py` |
+| 8 | Start the agent | Path A: `mcp_api_tool.exe` · Path B: `llm_proxy_tool.exe` |
+| 9 | Verify | LM Studio prompt, or `llm_test.exe --content "5+7"` |
+| **10** | **Audit AI descriptions** | **Run the checklist in §10.7** |
+
+---
+
+## 9. Starting the Runtime
+
+### 9.1 Start the beacon
 
 ```bash
 pascal_agent_service.exe
 ```
 
-看到以下输出即成功：
+Expected output:
 
 ```
 [MAIN] Application "agent_main_app" created.
@@ -421,21 +691,19 @@ pascal_agent_service.exe
 [MAIN] Service is running. Type "exit" to quit.
 ```
 
-### 6.2 启动工具提供者
+### 9.2 Start the tool provider
 
-**Pascal 路线：**
-
+Pascal:
 ```bash
 calculator_provider.exe
 ```
 
-**Python 路线：**
-
+Python:
 ```bash
 python calculator_tool_provider.py
 ```
 
-看到以下输出即成功：
+Expected output:
 
 ```
 === calculator tool provider ===
@@ -449,23 +717,17 @@ python calculator_tool_provider.py
 Ready. Type 'exit' and press Enter to quit.
 ```
 
-> **两个工具提供者可以同时运行**——它们注册到同一个信标，注册名不同，互不冲突。
+> Two tool providers can run simultaneously — they register to the same beacon with different names and do not conflict.
 
----
+### 9.3 Start the agent
 
-## 7. 第五步：启动智能体
-
-智能体有两条路径可选。
-
-### 7.1 路径 A：MCP 网关（客户端支持 MCP）
-
-启动 MCP 网关：
+**Path A — MCP gateway** (client is MCP-capable):
 
 ```bash
 mcp_api_tool.exe --transport stdio
 ```
 
-然后在 LM Studio 等 MCP 客户端中配置：
+Configure the client:
 
 ```json
 {
@@ -478,89 +740,67 @@ mcp_api_tool.exe --transport stdio
 }
 ```
 
-> **MCP 客户端在 `mcp_api_tool` 启动时自动创建，无需手动干预。**
-
-### 7.2 路径 B：LLM 工具桥（客户端不感知工具）
-
-启动 LLM 工具桥：
+**Path B — LLM tool bridge** (client is tool-unaware):
 
 ```bash
 llm_proxy_tool.exe --backend-url http://127.0.0.1:1234/v1
 ```
 
-客户端只需调用 `generate`，LTB 内部自动完成工具调用循环。
+The client just calls `generate`; LTB performs the multi-round tool-call loop internally.
 
-> **客户端零改动**——完全不知道工具体系的存在。
+### 9.4 Verify
 
----
-
-## 8. 第六步：验证接入
-
-### 8.1 路径 A 验证
-
-在 LM Studio 中提问：
+**Path A** — in LM Studio, ask:
 
 ```
-请帮我计算 5 + 7
+Please compute 5 + 7
 ```
 
-AI 会自动调用 `add` 工具并返回结果 `12`。
+The AI should call the `add` tool and return `12`.
 
-### 8.2 路径 B 验证
-
-用 `llm_test.py` 或 Pascal 客户端：
+**Path B** — via `llm_test.exe`:
 
 ```bash
-llm_test.exe --content "请帮我计算 5 + 7"
+llm_test.exe --content "Please compute 5 + 7"
 ```
 
-AI 返回 `5 + 7 = 12`，工具调用过程对客户端完全透明。
-
-### 8.3 直接调用工具验证
-
-用 `llm_test.exe` 的交互模式：
-
-```bash
-llm_test.exe
-```
-
-输入：
+**Direct tool call** — in the interactive `llm_test.exe` shell:
 
 ```
 /add a=5 b=7
 ```
 
-应返回 `{"result": 12}`。
+Should return `{"result": 12}`.
 
 ---
 
-## 9. ⚠️ 给 AI 写工具描述的坑（**本版重点**）
+## 10. ⚠️ Writing Tool Descriptions for AI — The Most Important Chapter
 
-> **本章来自真实事故复盘。作者做了一套完整的 RPC 工具，暴露给 AI 智能体。智能体只调用了第一个工具 `SetSourceCode`，就停下来反复问"接下来做什么"。连续三轮修改注释才让它正常工作。本节把这个坑讲清楚，避免后人重蹈覆辙。**
+> **This chapter is drawn from a real incident postmortem. The author built a complete RPC toolchain, exposed it to an AI agent, and the agent called only the first tool (`SetSourceCode`), then stalled, repeatedly asking "what should I do next?" Three rounds of comment rewriting were needed to make it work. This chapter explains the trap so future builders avoid it.**
 >
-> **如果你只读本文档的一章，请读这一章。**
+> **If you read only one chapter of this document, read this one.**
 
-### 9.1 事故经过
+### 10.1 The incident
 
-**工具设计**：三个工具组成的生成流水线。
+**Tool design**: a three-tool generation pipeline.
 
-| 工具 | 作用 |
-|------|------|
-| `SetSourceCode(Source, Language)` | 存储源码和语言 |
-| `ConvertToPythonMCP()` | 执行转换，返回生成文件路径 |
-| `GetLastPythonCode()` | 读取生成内容 |
+| Tool | Purpose |
+|------|---------|
+| `SetSourceCode(Source, Language)` | Store the source text and source language |
+| `ConvertToPythonMCP()` | Execute the conversion, return the generated file path |
+| `GetLastPythonCode()` | Read the generated content |
 
-**预期行为**：智能体依次调用三者。
+**Expected behavior**: the agent calls all three in sequence.
 
-**实际行为**：
+**Actual behavior**:
 
-- **第一轮**：智能体只调用 `SetSourceCode`，返回 `{"status":"ok"}` 后停下，说"源码已存储，请告诉我接下来做什么"。
-- **第二轮**：修复第一轮后，智能体调用了 `SetSourceCode` + `ConvertToCppMCP`，但**尝试用 `Language='python'` 调用 `SetSourceCode`**，理由是"要生成 Python 就要设置 Python 语言"。
-- **第三轮**：修复歧义后，智能体正确完成三步调用。
+- **Round 1**: the agent called only `SetSourceCode`, saw `{"status":"ok"}`, and stopped, saying "the source is stored, please tell me what to do next."
+- **Round 2**: after a fix, the agent called `SetSourceCode` + `ConvertToCppMCP`, but tried to pass `Language='python'` to `SetSourceCode`, reasoning that "to generate Python, I need to set the language to Python."
+- **Round 3**: after clarifying the ambiguity, the agent completed the three-step call correctly.
 
-**事故成本**：三轮反复修改注释，每轮都要重新生成 provider、重启信标、重新测试。
+**Cost**: three rounds of comment rewriting, each requiring re-generating the provider, restarting the beacon, and re-testing.
 
-### 9.2 根本原因：人和 AI 读注释的方式完全不同
+### 10.2 Root cause: humans and AI read comments in completely different ways
 
 ```mermaid
 flowchart TB
@@ -570,9 +810,9 @@ flowchart TB
     end
 
     subgraph AIReader["AI agent"]
-        A1["Reads tool description string"] --> A2["Sees only this one tool"]
+        A1["Reads the tool description string"] --> A2["Sees only this one tool"]
         A2 --> A3["Has no global picture"]
-        A3 --> A4["Stops after first tool that succeeds"]
+        A3 --> A4["Stops after the first tool that succeeds"]
     end
 
     style H2 fill:#e1ffe1
@@ -580,18 +820,18 @@ flowchart TB
     style A4 fill:#ffe1e1
 ```
 
-| 维度 | 人类读源码 | AI 读工具描述 |
-|------|-----------|--------------|
-| 阅读范围 | 整个单元，所有方法 | **一个工具的描述字符串** |
-| 上下文 | 有完整的类型、命名、注释 | **只有工具名 + 描述 + 参数 schema** |
-| 理解方式 | 从整体到局部 | **逐个工具独立判断** |
-| 决策依据 | "看起来这是一系列操作" | **"这个工具的目的是什么，它完成了吗？"** |
+| Dimension | Human reading source | AI reading the tool description |
+|-----------|---------------------|--------------------------------|
+| Scope | the whole unit, all methods | **one tool's description string** |
+| Context | full types, names, comments | **tool name + description + parameter schema only** |
+| Understanding | top-down, whole to part | **tool-by-tool, independently** |
+| Decision basis | "this looks like a sequence of operations" | **"what is this tool's purpose, and did it finish?"** |
 
-**关键事实**：**智能体在工具发现阶段读到的不是你的源码注释，而是 JSON 里的 `description` 字符串**——它是源码注释经过**压缩、去标签、截断到 200 字符**后的产物。
+**Key fact**: **what the agent reads during the tool-discovery phase is not your source comment — it is the `description` string in the JSON.** It is your source comment after being **compressed, de-tagged, and truncated to 200 characters**.
 
-### 9.3 坑一：注释没写清"我是工作流的第几步"
+### 10.3 Trap 1: the comment does not say "which step of the workflow I am"
 
-**错误示例**（真实事故的原始注释）：
+**Wrong** (from the real incident):
 
 ```pascal
 (*
@@ -601,9 +841,9 @@ flowchart TB
 function SetSourceCode(Source: string; Language: string): string;
 ```
 
-**为什么失败**："for the next conversion" 只暗示"后面还有事情"，但**没有说明后面是哪一个工具**，也没有说明"不调用它会发生什么"。
+**Why it fails**: "for the next conversion" only *hints* that something else happens; it never says **which** tool comes next, nor what happens if it is not called.
 
-**正确示例**（修复后）：
+**Correct** (after the fix):
 
 ```pascal
 (*
@@ -626,19 +866,19 @@ function SetSourceCode(Source: string; Language: string): string;
 function SetSourceCode(Source: string; Language: string): string;
 ```
 
-**关键改动**：
+**Key changes**:
 
-| 新增内容 | 作用 |
-|---------|------|
-| `IMPORTANT: ... does NOT perform any conversion` | 明确工具边界，让 AI 知道"我还没完" |
-| `you MUST invoke one of the conversion tools` | 直接给出下一步的命令 |
-| 完整的三步序列示例 | 让 AI 一眼看到全貌 |
+| Added text | Purpose |
+|------------|---------|
+| `IMPORTANT: ... does NOT perform any conversion` | Draw the tool's boundary; the AI now knows it is not done |
+| `you MUST invoke one of the conversion tools` | Name the next step directly |
+| A complete three-step sequence example | Give the AI the whole picture at a glance |
 
-### 9.4 坑二：参数名有歧义，AI 当成相反的语义
+### 10.4 Trap 2: the parameter name is ambiguous and the AI reads it backwards
 
-**错误示例**：`SetSourceCode(Source, Language)` 的 `Language` 参数。AI 把 `Language` 理解为**目标语言**，尝试传 `Language='python'`。
+**Wrong**: `SetSourceCode(Source, Language)`. The AI interpreted `Language` as the **target** language and tried `Language='python'`.
 
-**正确示例**（修复后）：
+**Correct**:
 
 ```pascal
 (*
@@ -655,49 +895,49 @@ function SetSourceCode(Source: string; Language: string): string;
 function SetSourceCode(Source: string; Language: string): string;
 ```
 
-**通用规则**：
+**General rules**:
 
-1. **参数名带歧义时，在参数描述的第一句就消除歧义**。
-2. **给出完整的合法值列表，并明确列出非法值示例**。
-3. **指出哪个工具负责"相反语义"**。
+1. **When a parameter name is ambiguous, disambiguate it in the first sentence of its description.**
+2. **List all legal values, and explicitly list one example of an illegal value.**
+3. **Point out which tool is responsible for the "opposite" semantic.**
 
-### 9.5 坑三：多处歧义会让 AI 跑偏一整轮
+### 10.5 Trap 3: one ambiguity costs the AI a whole round
 
-**教训**：注释升级是**多层认知**的过程。
+**Lesson**: comment upgrades proceed through **multiple layers of cognition**.
 
-| 层级 | 认知 | 对应修复 |
-|:----:|------|---------|
-| 第一层 | 让 AI 知道"还有下一步" | 加 WORKFLOW OVERVIEW |
-| 第二层 | 让 AI 知道"每一步的具体工具名" | 加决策表 |
-| 第三层 | 让 AI 知道"哪个参数是源语言、哪个是目标语言" | 加参数歧义消除 + 反例表 |
+| Layer | Cognition | Fix |
+|:-----:|-----------|-----|
+| 1 | The AI learns "there is a next step" | Add a WORKFLOW OVERVIEW |
+| 2 | The AI learns "the specific next tool name" | Add a decision table |
+| 3 | The AI learns "which parameter is the source language and which is the target" | Add parameter disambiguation + a WRONG/RIGHT table |
 
-**每次认知升级都需要重新审视每一处描述**——一处歧义会让 AI 跑偏一整轮。
+**Every layer requires re-checking every description** — one ambiguity derails a whole round.
 
-### 9.6 给 AI 写工具描述的四件武器
+### 10.6 Four weapons for writing tool descriptions for AI
 
-#### 武器 1：每个工具都独立回答三个问题
+#### Weapon 1: every tool independently answers three questions
 
 ```mermaid
 flowchart LR
-    Q1["Q1: 我在工作流中的角色是什么？"] --> Q2["Q2: 我的前置条件是什么？"]
-    Q2 --> Q3["Q3: 我的产出是什么？"]
+    Q1["Q1: What is my role in the workflow?"] --> Q2["Q2: What is my prerequisite?"]
+    Q2 --> Q3["Q3: What is my output?"]
 
     style Q1 fill:#e3f2fd
     style Q2 fill:#fff3e0
     style Q3 fill:#e8f5e9
 ```
 
-**示例**：
+**Example**:
 
-| 工具 | 角色 | 前置条件 | 产出 |
-|------|------|---------|------|
-| `SetSourceCode` | Step 1 存源码 | 无 | `{"status":"ok"}`，**不产生文件** |
-| `ConvertToPythonMCP` | Step 2 Python 分支 | **必须先 SetSourceCode** | `{"result":"<文件路径>"}` |
-| `GetLastPythonCode` | Step 3 读取内容 | **必须先 ConvertToPythonMCP** | 生成代码的完整文本 |
+| Tool | Role | Prerequisite | Output |
+|------|------|-------------|--------|
+| `SetSourceCode` | Step 1 — store source | none | `{"status":"ok"}`, **no file produced** |
+| `ConvertToPythonMCP` | Step 2 — Python branch | **`SetSourceCode` must have succeeded** | `{"result":"<path>"}` |
+| `GetLastPythonCode` | Step 3 — read content | **`ConvertToPythonMCP` must have succeeded** | full text of the generated code |
 
-#### 武器 2：决策表（让 AI 一眼看到"我要做什么"）
+#### Weapon 2: a decision table (so the AI sees "what do I want to do" at a glance)
 
-放在**单元头注释**里，AI 读单元文档时能看到全局视图：
+Put it in the **unit header comment**, where an AI reading the unit documentation will see the global view:
 
 ```pascal
 (*
@@ -718,7 +958,7 @@ flowchart LR
 *)
 ```
 
-#### 武器 3：反例表（把常见错误方案堵死）
+#### Weapon 3: a WRONG/RIGHT table (closing off the common wrong paths)
 
 ```pascal
 (*
@@ -738,50 +978,51 @@ flowchart LR
 *)
 ```
 
-**为什么有效**：AI 在做决策时，如果看到一个 "WRONG" 示例**恰好匹配它正在考虑的做法**，它会立即规避。**这比正面描述更直接**。
+**Why it works**: when the AI is deciding what to do next, and it sees a `WRONG` example that **matches what it was just about to try**, it immediately avoids it. **This is more direct than a positive description.**
 
-#### 武器 4：把关键信息放前 200 字符
+#### Weapon 4: put the key information in the first 200 characters
 
-`GetFullDescription(Comment)` 会**截断到 200 字符**。所以：
+`GetFullDescription(Comment)` **truncates to 200 characters**. Therefore:
 
-1. **源码注释的前 200 字符必须覆盖关键信息**——特别是"工作流角色"和"前置条件"。
-2. **`RegisterTools` 中的 `description` 字符串可以手工覆盖**——不被 200 字符限制。推荐在 provider 生成后手工调整，或用模板让生成器直接产出长描述。
-3. **把工作流决策表写进单元头注释**——这样即使单个工具的描述被截断，AI 读单元文档时也能拿到全局视图。
+1. **The first 200 characters of the source comment must cover the key information** — especially "workflow role" and "prerequisite."
+2. **The `description` string in `RegisterTools` can be manually overridden** — it is not subject to the 200-character limit. Recommended: adjust the provider after generation, or use a template so the generator emits a long description directly.
+3. **Put the workflow decision table in the unit header comment** — so even if individual tool descriptions get truncated, an AI reading the unit documentation gets the global view.
 
-### 9.7 智能体描述自检清单（10 项）
+### 10.7 Agent-description self-check (10 items)
 
-暴露工具给 AI 前，逐项核对：
+Before exposing tools to AI, run this checklist:
 
-| # | 检查项 | 不通过的动作 |
-|:-:|--------|--------------|
-| 1 | 单元头注释是否写出了完整工作流？ | 补一段 WORKFLOW OVERVIEW |
-| 2 | 每个工具描述是否独立回答"角色/前置/产出"三问？ | 补三角色标签 |
-| 3 | 多步工作流的每个工具是否都指明了"下一步工具名"？ | 在工具描述里写出下一步的工具名 |
-| 4 | 是否有一张"用户意图 → 工具链"决策表？ | 加决策表 |
-| 5 | 是否有 "COMMON MISTAKES TO AVOID" 反例表？ | 加反例表 |
-| 6 | 参数名有歧义时是否在参数描述第一句消除了歧义？ | 在参数描述里显式说明 |
-| 7 | 是否列出了合法值列表 + 非法值示例？ | 补全列表 |
-| 8 | 前 200 字符是否覆盖了最关键的信息？ | 把关键信息前移 |
-| 9 | `RegisterTools` 中的 `description` 是否比 200 字符更长？（如果必要） | 手工覆盖为长描述 |
-| 10 | 测试用例是否包含"让 AI 从零完成一次完整工作流"？ | 补测试用例 |
+| # | Check | Action if failing |
+|:-:|-------|-------------------|
+| 1 | Does the unit header comment describe the complete workflow? | Add a WORKFLOW OVERVIEW section |
+| 2 | Does each tool description independently answer role / prerequisite / output? | Add the three role labels |
+| 3 | For a multi-step workflow, does each tool name the next tool? | Write the next tool's name into the description |
+| 4 | Is there a "user intent → tool chain" decision table? | Add the decision table |
+| 5 | Is there a "COMMON MISTAKES TO AVOID" table? | Add the WRONG/RIGHT table |
+| 6 | Is an ambiguous parameter disambiguated in the first sentence of its description? | Disambiguate explicitly |
+| 7 | Are the legal values listed, plus one example of an illegal value? | Complete the list |
+| 8 | Do the first 200 characters cover the most critical information? | Move the critical information earlier |
+| 9 | Is `RegisterTools`'s `description` longer than 200 characters (when necessary)? | Override it manually or emit it from a template |
+| 10 | Does the test case include "let the AI complete a full workflow from scratch"? | Add the test case |
 
-**如果全部通过**，AI 应该能独立完成整个工作流。
+**If everything passes**, the AI should be able to complete the entire workflow on its own.
 
-### 9.8 智能体友好型注释模板（单元头）
+### 10.8 An agent-friendly comment template (unit header)
 
 ```pascal
 (*
   <UnitName>
 
-  <一段话说明这个单元的作用>
+  <One paragraph describing the purpose of this unit.>
 
   WORKFLOW OVERVIEW
   -----------------
-  <描述这个单元暴露的工具之间存在什么关系，例如"三步工作流">
+  <Describe how the tools exposed by this unit relate to each other,
+   e.g. "a three-step workflow">
 
-      Step 1  <ToolA>   <作用>
-      Step 2  <ToolB>   <作用>
-      Step 3  <ToolC>   <作用>
+      Step 1  <ToolA>   <purpose>
+      Step 2  <ToolB>   <purpose>
+      Step 3  <ToolC>   <purpose>
 
   WHAT YOU WANT  ->  WHICH TOOLS TO CALL
   --------------------------------------
@@ -790,36 +1031,36 @@ flowchart LR
 
   COMMON MISTAKES TO AVOID
   ------------------------
-      WRONG   <错误方案>
-      RIGHT   <正确方案>
+      WRONG   <wrong approach>
+      RIGHT   <right approach>
 *)
 unit <UnitName>;
 
 interface
 
 (*
-  Step 1 of the workflow. <作用>
+  Step 1 of the workflow. <purpose>
 
-  IMPORTANT: this call does NOT <副作用>. After this call succeeds you
+  IMPORTANT: this call does NOT <side effect>. After this call succeeds you
   MUST invoke <ToolB> or <ToolC>.
 
   Prerequisite: None.
 
-  <参数说明>
+  <Parameter description>
 
-  Return value: <返回结构>
+  Return value: <return shape>
 *)
 function <ToolA>(...): string;
 
 (*
-  Step 2 of the workflow. <作用>.
+  Step 2 of the workflow. <purpose>.
 
   Prerequisite: <ToolA> must have been called successfully in the same
   session. If not, this call returns an error.
 
-  <参数说明>
+  <Parameter description>
 
-  Return value: <返回结构>
+  Return value: <return shape>
 *)
 function <ToolB>: string;
 
@@ -830,7 +1071,7 @@ function <ToolB>: string;
 
   Prerequisite: <ToolB> must have been called successfully.
 
-  Return value: <返回结构>
+  Return value: <return shape>
 *)
 function <ToolC>: string;
 
@@ -838,190 +1079,176 @@ implementation
 ...
 ```
 
-### 9.9 结语
+### 10.9 Closing thought
 
-> **给人类写注释和给 AI 写注释是两种技能。** 人类能读源码、能跳转、能理解上下文；AI 读的是一个**孤立的描述字符串**。**只有把完整的上下文塞进每一条描述，AI 才能正确工作。**
+> **Writing comments for humans and writing comments for AI are two different skills.** A human can read the source, jump around, and understand the context; an AI reads **an isolated description string**. **Only by packing the entire context into every description can the AI work correctly.**
 >
-> 本次事故的三轮修复分别对应三层认知：
+> The three rounds of fixing in this incident correspond to three layers of cognition:
 >
-> 1. **第一层**：让 AI 知道"还有下一步"。
-> 2. **第二层**：让 AI 知道"每一步的具体工具名"。
-> 3. **第三层**：让 AI 知道"哪个参数是源语言、哪个是目标语言"，并给出正反例对照。
+> 1. **Layer 1**: let the AI know "there is a next step."
+> 2. **Layer 2**: let the AI know "the specific next tool's name."
+> 3. **Layer 3**: let the AI know "which parameter is the source language and which is the target," with WRONG/RIGHT examples.
 >
-> 每次认知升级都需要**重新审视每一处描述**——一处歧义会让 AI 跑偏一整轮。
+> **Every cognitive upgrade requires re-checking every description** — one ambiguity derails a whole round.
+>
+> **Comments are the key to MCP being called correctly.** Get them right and the agent works. Get them wrong and no amount of backend plumbing will save you.
 
 ---
 
-## 10. 完整操作清单
+## 11. Troubleshooting
 
-| 步骤 | 操作 | 命令/配置 |
-|:----:|------|-----------|
-| 1 | 生成代码（GUI） | `code_decl_to_mcp.exe` → 5 个 Tab |
-| 1' | 生成代码（命令行） | `code_decl_to_mcp.exe input.pas output.py` |
-| 2 | 建立工程 | Pascal: 创建 Lazarus 工程 + 填充 `internal_call_*`<br>Python: 填充 `internal_call_*` |
-| 3 | 注册工具 | 自动完成，由 `Execute_And_Reg_all()` 驱动 |
-| 4 | 启动信标 | `pascal_agent_service.exe` |
-| 5 | 启动工具提供者 | `calculator_provider.exe` 或 `python calculator_tool_provider.py` |
-| 6 | 启动智能体 | 路径 A: `mcp_api_tool.exe`<br>路径 B: `llm_proxy_tool.exe` |
-| 7 | 验证 | LM Studio 提问 或 `llm_test.exe --content "5+7"` |
-| **8** | **AI 描述审查** | **对照 §9.7 清单逐项核对** |
+### 11.1 General issues
 
----
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `RegisterTool` reports `Beacon not available` | Beacon not running | Start `pascal_agent_service.exe` first |
+| `LF_PrepareDone returned 0` | Called twice | Check initialization order; ensure it is called only once |
+| AI does not call tools (Path A) | Wrong MCP configuration | Check `mcp.json`'s `command` and `args` |
+| AI does not call tools (Path B) | `--enable-tools` not enabled | Remove `--no-tools` |
+| Tool is skipped | Unsupported type | Ensure parameters are `int64` / `double` / `string` |
+| Python raises `UnboundLocalError` | Old generator version | Upgrade `code_decl_to_mcp.exe` |
+| Chinese characters become `?` | Old generator version | Upgrade `code_decl_to_mcp.exe` |
 
-## 11. 故障排查
+### 11.2 AI-related issues
 
-### 11.1 常规问题
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| **AI calls only the first tool then stops** | **Tool description does not say "which step of the workflow I am"** | §10.3 |
+| **AI tries a wrong argument value (e.g. `Language='python'`)** | **Ambiguous parameter name; the comment does not disambiguate** | §10.4 |
+| **AI repeatedly calls the same tool** | **Tool description does not state the prerequisite** | §10.6, Weapon 1 |
+| **AI does not know what to generate and keeps asking the user** | **No decision table** | §10.6, Weapon 2 |
+| **AI sees the error but keeps doing the wrong thing** | **No WRONG/RIGHT table** | §10.6, Weapon 3 |
+| **Editing comments has no effect on AI behavior** | **`RegisterTools`'s `description` is a hardcoded string, not read live from the comment** | Re-run the provider generator, or hand-edit `RegisterTools` |
+| **`description` truncated at 200 characters, key info lost** | **`GetFullDescription` hard limit** | Move the key info earlier, or hand-override `RegisterTools`'s description |
 
-| 现象 | 原因 | 解决 |
-|------|------|------|
-| `RegisterTool` 报 `Beacon not available` | 信标未启动 | 先启动 `pascal_agent_service.exe` |
-| `LF_PrepareDone returned 0` | 二次调用 | 检查初始化顺序，确保只调用一次 |
-| AI 不调工具（路径 A） | MCP 配置错误 | 检查 `mcp.json` 的 `command` 和 `args` |
-| AI 不调工具（路径 B） | `--enable-tools` 未开 | 移除 `--no-tools` |
-| 工具被跳过 | 类型不支持 | 确认参数类型是 `int64` / `double` / `string` |
-| Python 报 `UnboundLocalError` | 使用了旧版生成器 | 升级 `code_decl_to_mcp.exe` |
-| 中文变 `?` | 使用了旧版生成器 | 升级 `code_decl_to_mcp.exe` |
+### 11.3 Command-line issues
 
-### 11.2 AI 相关问题（V7.0 新增）
-
-| 现象 | 原因 | 解决 |
-|------|------|------|
-| **AI 只调用第一个工具就停下** | **工具描述没写清"我是工作流第几步"** | 见 §9.3 |
-| **AI 尝试用错误的参数值（如 `Language='python'`）** | **参数名有歧义，注释未消除** | 见 §9.4 |
-| **AI 反复调用同一个工具** | **工具描述没写清前置条件** | 见 §9.6 武器 1 |
-| **AI 不知道要生成什么，反复问用户** | **缺决策表** | 见 §9.6 武器 2 |
-| **AI 明明看到错误提示却继续做错** | **缺反例表** | 见 §9.6 武器 3 |
-| **修改注释后 AI 行为没变** | **`RegisterTools` 里的 `description` 是硬编码字符串，不是从注释动态取的** | 重新运行 provider 生成器，或手工修改 `RegisterTools` |
-| **`description` 被截断到 200 字符，关键信息丢失** | **`GetFullDescription` 的硬性限制** | 把关键信息前移，或手工覆盖 `RegisterTools` 的 description |
-
-### 11.3 命令行问题（V7.0 新增）
-
-| 现象 | 原因 | 解决 |
-|------|------|------|
-| **`--help` 后需要敲回车才退出** | **项目编译为 GUI 子系统** | 加 `{$apptype console}`，或 Lazarus 项目选项取消勾选 "Win32 GUI application" |
-| **命令行模式下什么都不输出** | **`DoStatus` 走队列，无主循环** | 替换 `OnDoStatusHook` 为直接写 stdout 的钩子 |
-| **双击 exe 时闪黑窗** | **Console 子系统启动时分配控制台** | 无参数时调 `ShowWindow(GetConsoleWindow, SW_HIDE)` |
-| **`echo $LASTEXITCODE` 拿不到退出码** | **进程异步退出** | Console 子系统下进程同步退出，退出码正常 |
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| **`--help` requires pressing Enter to exit** | **Project compiled as GUI subsystem** | Add `{$apptype console}`, or uncheck "Win32 GUI application" in Lazarus project options |
+| **No output at all in CLI mode** | **`DoStatus` uses the queue; no main loop is running** | Replace `OnDoStatusHook` with a hook that writes directly to stdout |
+| **Black window flashes when double-clicking the exe** | **Console subsystem allocates a console at startup** | Call `ShowWindow(GetConsoleWindow, SW_HIDE)` when there are no arguments |
+| **`echo $LASTEXITCODE` returns nothing** | **Process exits asynchronously** | With the Console subsystem the process exits synchronously; exit codes are normal |
 
 ---
 
-## 12. 相关文档
+## 12. Related Documents
 
-| 文档 | 说明 |
-|------|------|
-| `pascal_code_mcp_rule.md` | Pascal 声明规范（含 §12 AI 工具描述规范） |
-| `C_code_mcp_rule.md` | C 声明规范 |
-| `MCP_API_Contract.md` | 接口契约 |
-| `code_decl_to_mcp_knowledge_base.md` | 工具链知识库 |
-| `LingoFuse_LLM_Ecosystem_User_Guide.md` | 生态总览 |
-| `LingoFuse_LLM_Proxy_Tool_CLI_Guide.md` | LTB 命令行手册 |
+| Document | Purpose |
+|----------|---------|
+| `pascal_code_mcp_rule.md` | Pascal declaration rules (including the AI tool-description rules) |
+| `C_code_mcp_rule.md` | C declaration rules |
+| `MCP_API_Contract.md` | API contract |
+| `code_decl_to_mcp_knowledge_base.md` | Toolchain knowledge base |
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | Ecosystem overview |
+| `LingoFuse_LLM_Proxy_Tool_CLI_Guide.md` | LTB command-line manual |
 
 ---
 
-## 13. 附录：本次工作总结（Pascal → 智能体接入全过程）
+## 13. Appendix: Real-World Postmortem (Pascal → Agent Integration, End-to-End)
 
-> **本章记录 2026-09-22 一次完整接入的全过程。包括：做了什么、遇到什么坑、怎么解决、有什么可复用的经验。供后人参考。**
+> **This appendix records one complete integration on 2026-09-22: what was done, what traps were hit, how they were solved, and which lessons are reusable.**
 
-### 13.1 工作目标
+### 13.1 Goal
 
-把 `code_decl_to_mcp` 的代码生成能力，通过 LingoFuse + MCP 暴露给 AI 智能体，同时提供命令行直转接口。
+Expose `code_decl_to_mcp`'s code-generation capability to an AI agent via LingoFuse + MCP, and provide a command-line direct-conversion interface.
 
-### 13.2 交付物
+### 13.2 Deliverables
 
-| 文件 | 类型 | 说明 |
+| File | Type | Note |
 |------|------|------|
-| `code_decl_to_mcp_api.pas` | 声明 | MCP 工具 API 契约（11 个工具） |
-| `code_decl_to_mcp_api_tool_provider_unit.pas` | 生成 | 由声明自动生成的 provider |
-| `code_decl_to_mcp_cmdline.pas` | 实现 | 命令行前端 |
-| `code_decl_to_mcp.lpr` | 主程序 | Console 子系统，支持 GUI/CLI 双模 |
-| `pascal_code_mcp_rule.md` v9.0 | 文档 | 声明规范（含 AI 工具描述规范） |
-| `code_generate_mcp.md` v7.0 | 文档 | 本手册 |
+| `code_decl_to_mcp_api.pas` | Declaration | MCP tool API contract (11 tools) |
+| `code_decl_to_mcp_api_tool_provider_unit.pas` | Generated | Provider auto-generated from the declaration |
+| `code_decl_to_mcp_cmdline.pas` | Implementation | Command-line frontend |
+| `code_decl_to_mcp.lpr` | Main program | Console subsystem, dual GUI/CLI mode |
+| `pascal_code_mcp_rule.md` v9.0 | Document | Declaration rules (including AI tool-description rules) |
+| `code_generate_mcp.md` v8.0 | Document | This manual |
 
-### 13.3 暴露的 11 个 MCP 工具
+### 13.3 The 11 MCP tools exposed
 
-| 工具 | 角色 | 前置条件 | 产出 |
-|------|------|---------|------|
-| `SetSourceCode` | Step 1 | 无 | `{"status":"ok"}` |
-| `ConvertToPascalMCP` | Step 2 (Pascal) | SetSourceCode | `{"result":"<路径>"}` |
-| `ConvertToPythonMCP` | Step 2 (Python) | SetSourceCode | `{"result":"<路径>"}` |
-| `ConvertToCppMCP` | Step 2 (C++) | SetSourceCode | `{"result":"<路径>"}` |
-| `GetLastPascalCode` | Step 3 | ConvertToPascalMCP | 代码全文 |
-| `GetLastPascalReadme` | Step 3 | ConvertToPascalMCP | README 全文 |
-| `GetLastPythonCode` | Step 3 | ConvertToPythonMCP | 代码全文 |
-| `GetLastPythonReadme` | Step 3 | ConvertToPythonMCP | README 全文 |
-| `GetLastCppHeader` | Step 3 | ConvertToCppMCP | 头文件全文 |
-| `GetLastCppImpl` | Step 3 | ConvertToCppMCP | 实现全文 |
-| `GetLastCppReadme` | Step 3 | ConvertToCppMCP | README 全文 |
+| Tool | Role | Prerequisite | Output |
+|------|------|--------------|--------|
+| `SetSourceCode` | Step 1 | none | `{"status":"ok"}` |
+| `ConvertToPascalMCP` | Step 2 (Pascal) | SetSourceCode | `{"result":"<path>"}` |
+| `ConvertToPythonMCP` | Step 2 (Python) | SetSourceCode | `{"result":"<path>"}` |
+| `ConvertToCppMCP` | Step 2 (C++) | SetSourceCode | `{"result":"<path>"}` |
+| `GetLastPascalCode` | Step 3 | ConvertToPascalMCP | full code |
+| `GetLastPascalReadme` | Step 3 | ConvertToPascalMCP | full README |
+| `GetLastPythonCode` | Step 3 | ConvertToPythonMCP | full code |
+| `GetLastPythonReadme` | Step 3 | ConvertToPythonMCP | full README |
+| `GetLastCppHeader` | Step 3 | ConvertToCppMCP | full header |
+| `GetLastCppImpl` | Step 3 | ConvertToCppMCP | full implementation |
+| `GetLastCppReadme` | Step 3 | ConvertToCppMCP | full README |
 
-### 13.4 遇到的坑与解决
+### 13.4 Traps hit and how they were solved
 
-#### 坑一：AI 只调用 `SetSourceCode` 就停下
+#### Trap 1: AI calls only `SetSourceCode` and stops
 
-**症状**：AI 只调用 `SetSourceCode`，返回 `{"status":"ok"}` 后就停下，说"源码已存储，请告诉我接下来做什么"。
+**Symptom**: the AI called only `SetSourceCode`, saw `{"status":"ok"}`, and stopped, saying "the source is stored, please tell me what to do next."
 
-**根因**：`SetSourceCode` 描述太简短——只说"设置源码，供下次转换使用"，没有明确指出：
-- 这是一个三步工作流的第一步
-- 后续必须调用 `ConvertToXxxMCP`
-- 它自己不产生任何输出文件
+**Root cause**: `SetSourceCode`'s description was too short — it only said "set the source for the next conversion," never clarifying:
+- This is Step 1 of a three-step workflow.
+- `ConvertToXxxMCP` must be called next.
+- It does not produce any output file on its own.
 
-**修复**：在 `SetSourceCode` 注释里加 `IMPORTANT: does NOT perform any conversion. You MUST invoke one of the conversion tools.`，并给出完整的三步序列示例。
+**Fix**: add to the `SetSourceCode` comment: `IMPORTANT: does NOT perform any conversion. You MUST invoke one of the conversion tools.` and give a complete three-step sequence example.
 
-**教训**：**给 AI 的工具描述必须让每个工具"自解释"——单独看它就能理解"我在工作流中的角色、前置条件、产出"。**
+**Lesson**: **every tool's description must be self-explanatory — read in isolation it must convey "my role in the workflow, my prerequisite, my output."**
 
-#### 坑二：AI 把 `Language` 当成目标语言
+#### Trap 2: AI treats `Language` as the target language
 
-**症状**：修复坑一后，AI 开始调用 `ConvertToCppMCP`，但同时尝试用 `Language='python'` 调用 `SetSourceCode`。
+**Symptom**: after fixing Trap 1, the AI started calling `ConvertToCppMCP` but also tried to pass `Language='python'` to `SetSourceCode`.
 
-**根因**：`SetSourceCode(Source, Language)` 的 `Language` 参数**有歧义**。
+**Root cause**: the `Language` parameter of `SetSourceCode(Source, Language)` is **ambiguous**.
 
-**修复**：
-1. 参数描述第一句明确："`Language` is the SOURCE language"
-2. 列出合法值 `pascal` / `c`，并指出 `python` 不是合法值
-3. 加 WHAT YOU WANT 决策表
-4. 加 COMMON MISTAKES 反例表
+**Fix**:
+1. First sentence of the parameter description: "`Language` is the SOURCE language."
+2. List legal values `pascal` / `c` and state that `python` is not legal.
+3. Add the WHAT YOU WANT decision table.
+4. Add the COMMON MISTAKES WRONG/RIGHT table.
 
-**教训**：**参数名有歧义时，在参数描述第一句就消除歧义，并给出正反例对照。**
+**Lesson**: **when a parameter name is ambiguous, disambiguate it in the first sentence and give WRONG/RIGHT examples.**
 
-#### 坑三：命令行模式 `--help` 需要敲回车
+#### Trap 3: CLI mode `--help` requires pressing Enter
 
-**症状**：`code_decl_to_mcp.exe --help` 在 PowerShell 里输出后，需要按一次回车才返回提示符。
+**Symptom**: in PowerShell, `code_decl_to_mcp.exe --help` prints output but the prompt does not return until Enter is pressed.
 
-**根因**：项目是 GUI 子系统程序，Windows 启动后立即让父 shell 返回，PowerShell 抢在输出前就打印了下一个提示符。
+**Root cause**: the project was a GUI-subsystem program; Windows returned control to the parent shell immediately on startup, and PowerShell printed the next prompt before the output completed.
 
-**修复**：
-1. 把项目改成 **Console 子系统**（`{$apptype console}`）
-2. 无参数时用 `ShowWindow(GetConsoleWindow, SW_HIDE)` 隐藏黑窗
-3. 命令行模式下所有输出走 `WriteLn`
+**Fix**:
+1. Switch the project to the **Console subsystem** (`{$apptype console}`).
+2. When there are no arguments, use `ShowWindow(GetConsoleWindow, SW_HIDE)` to hide the console.
+3. In CLI mode, all output goes through `WriteLn`.
 
-**教训**：**GUI+CLI 双模程序必须编译为 Console 子系统，无参数启动时手动隐藏控制台窗口。**
+**Lesson**: **a GUI+CLI dual-mode program must be built as a Console subsystem; when launched without arguments, hide the console window manually.**
 
-#### 坑四：`DoStatus` 在命令行模式下不输出
+#### Trap 4: `DoStatus` produces no output in CLI mode
 
-**症状**：把 `WriteLn` 改成 `DoStatus` 后，命令行模式下什么都不输出。
+**Symptom**: after switching `WriteLn` to `DoStatus`, CLI mode produced no output at all.
 
-**根因**：`DoStatus` 默认走"入队 + 主线程 CheckDoStatus"路径，需要 LCL 主循环驱动。
+**Root cause**: `DoStatus` defaults to the "enqueue + main-thread CheckDoStatus" path, which requires the LCL main loop.
 
-**修复**：在 `Process_CommandLine` 里替换 `OnDoStatusHook` 为直接写 stdout 的钩子：
+**Fix**: in `Process_CommandLine`, replace `OnDoStatusHook` with a hook that writes directly to stdout:
 
 ```pascal
 OnDoStatusHook := @CmdLine_DoStatus_Hook;
 ```
 
-**教训**：**`DoStatus` 依赖主循环，命令行模式下必须替换 hook。**
+**Lesson**: **`DoStatus` depends on the main loop; CLI mode must replace the hook.**
 
-#### 坑五：`internal_call_*` 的线程同步
+#### Trap 5: Thread synchronization in `internal_call_*`
 
-**症状**：直接调用 `CodeDeclToMcpForm.ParseSourceToLv0Json` 会崩溃。
+**Symptom**: calling `CodeDeclToMcpForm.ParseSourceToLv0Json` directly crashed.
 
-**根因**：MCP 回调运行在 C4 后台线程，操作 LCL 控件必须在主线程。
+**Root cause**: MCP callbacks run on the C4 background thread; manipulating LCL controls must happen on the main thread.
 
-**修复**：用 `TCompute.Sync` 把 UI 操作排队到主线程：
+**Fix**: use `TCompute.Sync` to queue UI operations onto the main thread:
 
 ```pascal
 {$IFDEF FPC}
   procedure Do_Sync___();
   begin
-    Result := ...;  // FPC 直接修改外层 Result
+    Result := ...;  // FPC can write directly to the outer Result
   end;
 begin
   TCompute.Sync(Do_Sync___);
@@ -1030,47 +1257,47 @@ var temp_: string;
 begin
   TCompute.Sync(procedure()
   begin
-    temp_ := ...;  // Delphi 需要 temp_ 中转
+    temp_ := ...;  // Delphi needs temp_ as an intermediary
   end);
   Result := temp_;
 {$ENDIF FPC}
 ```
 
-**教训**：**FPC 的嵌套过程能直接访问外层 `Result`，Delphi 的匿名过程不能——需要用 `temp_` 中转。**
+**Lesson**: **FPC's nested procedures can access the outer `Result` directly; Delphi's anonymous procedures cannot — use `temp_` as an intermediary.**
 
-### 13.5 可复用的经验
+### 13.5 Reusable lessons
 
-#### 给 AI 写工具描述的通用规则
+#### General rules for writing tool descriptions for AI
 
-1. **每个工具独立回答三问**：角色 / 前置 / 产出
-2. **多步工作流的每个工具都写出下一步工具名**
-3. **加决策表**：用户意图 → 工具链
-4. **加反例表**：WRONG / RIGHT 对照
-5. **参数名有歧义时第一句消除歧义**
-6. **列出合法值和非法值示例**
-7. **关键信息前移到前 200 字符**
-8. **测试用例覆盖"从零完成一次完整工作流"**
+1. **Each tool independently answers three questions**: role / prerequisite / output.
+2. **In a multi-step workflow, each tool names the next tool.**
+3. **Add a decision table**: user intent → tool chain.
+4. **Add a WRONG/RIGHT table.**
+5. **When a parameter name is ambiguous, disambiguate in the first sentence.**
+6. **List legal values and give an example of an illegal value.**
+7. **Move key information into the first 200 characters.**
+8. **Test cases must cover "complete a full workflow from scratch."**
 
-#### GUI+CLI 双模程序的关键配置
+#### Key configurations for a GUI+CLI dual-mode program
 
-1. **`{$apptype console}`** —— 编译为 Console 子系统
-2. **无参数时 `ShowWindow(GetConsoleWindow, SW_HIDE)`**
-3. **`Process_CommandLine` 返回 `True`/`False` 决定走向**
-4. **命令行模式下用 `Flush(Output)` 保证输出完整**
+1. **`{$apptype console}`** — build as Console subsystem.
+2. **`ShowWindow(GetConsoleWindow, SW_HIDE)`** when there are no arguments.
+3. **`Process_CommandLine` returns `True`/`False`** to decide the path.
+4. **In CLI mode, use `Flush(Output)`** to ensure output is complete.
 
-#### MCP 回调的线程安全
+#### Thread safety of MCP callbacks
 
-1. **回调运行在 C4 后台线程**
-2. **UI 操作必须 `TCompute.Sync` 到主线程**
-3. **FPC 用嵌套过程，Delphi 用匿名过程 + `temp_`**
-4. **回调不释放 `_In` / `_Out`**
+1. **Callbacks run on the C4 background thread.**
+2. **UI operations must go through `TCompute.Sync` to the main thread.**
+3. **FPC uses a nested procedure; Delphi uses an anonymous procedure + `temp_`.**
+4. **Callbacks must not release `_In` / `_Out`.**
 
-### 13.6 一句话总结
+### 13.6 One-sentence summary
 
-> **给 AI 写工具描述，是"把整个工作流压缩成 200 字符"的艺术。每个工具都必须独立回答"我在哪、我之前应该做什么、我之后应该做什么"。一处歧义会让 AI 跑偏一整轮。这是本次工作最大的收获，也是 V7.0 手册 §9 的核心价值。**
+> **Writing tool descriptions for AI is the art of "compressing the entire workflow into 200 characters." Each tool must independently answer "where am I, what should I have done before, what should I do next." One ambiguity derails a whole round. This is the biggest lesson from this work, and the core value of Chapter 10 in the V8.0 manual.**
 
 ---
 
-**文档版本**：V7.0（AI 友好版）
-**维护者**：LingoFuse-pasAgent 团队
-**反馈**：问题提 Issue，急事加 Q（600585）
+**Document version**: V8.0 (AI-friendly, complete edition)
+**Maintainer**: LingoFuse-pasAgent team
+**Feedback**: file an issue; for urgent matters, reach out on Q (600585)
