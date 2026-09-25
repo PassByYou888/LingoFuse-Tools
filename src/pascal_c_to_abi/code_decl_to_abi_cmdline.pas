@@ -73,10 +73,40 @@ unit code_decl_to_abi_cmdline;
   direction (service or call) is controlled by the --call flag; the
   default is service.
 
-  Every successful run produces the generated code file plus a
-  companion Markdown README describing the artefact. When the target
-  is C++, two files are produced (a header and an implementation), and
-  the README describes the pair as a single unit.
+  C++ OUTPUT NAMING (v2)
+  ----------------------
+
+  For the C++ target the tool additionally produces a CMakeLists.txt
+  and two runnable test programs (one for the service side and one for
+  the call side). The CMake script references the generated .hpp/.cpp
+  files by a name derived from the source unit name. To keep that
+  reference valid, the CLI adopts the same naming rule as the GUI:
+
+      Service side writes:
+          <UnitName>_abi_service.hpp
+          <UnitName>_abi_service.cpp
+          <UnitName>_abi_service_cpp.md
+      Call side writes:
+          <UnitName>_abi_call.hpp
+          <UnitName>_abi_call.cpp
+          <UnitName>_abi_call_cpp.md
+
+  Both sides additionally write:
+
+      CMakeLists.txt
+      <UnitName>_abi_service_main.cpp
+      <UnitName>_abi_call_main.cpp
+
+  The directory part of the <output_file> argument is respected; the
+  file name itself is replaced with the canonical name above. The
+  generator emits the CMake script and the two test programs in both
+  modes, so running the CLI twice (once for the service side, once for
+  the call side) leaves a consistent, buildable directory.
+
+  Every successful run also produces a companion Markdown README
+  describing the generated artefacts. The READMEs are the real
+  build/deploy guides for the generated code and should be read before
+  writing any build script.
 *)
 
 interface
@@ -123,7 +153,8 @@ uses
   py_abi_service_generator_tool,
   py_abi_call_generator_tool,
   cpp_abi_service_generator_tool,
-  cpp_abi_call_generator_tool;
+  cpp_abi_call_generator_tool,
+  cpp_abi_cmake_generator_tool;
 
 const
   EXIT_OK           = 0;
@@ -174,29 +205,46 @@ begin
   DoStatus('TARGET LANGUAGE (detected from the output file extension)');
   DoStatus('  .pas .pp .p                   Pascal ABI unit');
   DoStatus('  .py                           Python ABI module');
-  DoStatus('  .hpp .hh .h                   C++ ABI header');
+  DoStatus('  .hpp .hh .h                   C++ ABI header (service or call pair)');
   DoStatus('  .cpp .cc .cxx .c              C++ ABI implementation');
   DoStatus('');
   DoStatus('TARGET DIRECTION (selected by the --call flag)');
   DoStatus('  (default)                     Service side: exposes the routines.');
   DoStatus('  --call                        Call side: invokes the routines.');
   DoStatus('');
-  DoStatus('C++ PAIRING');
-  DoStatus('  When the target is C++, two files are written together: the');
-  DoStatus('  header and the implementation. Naming either one causes the');
-  DoStatus('  other to be written next to it under the same base name.');
+  DoStatus('OUTPUT NAMING');
+  DoStatus('  Pascal / Python: the file name you provide is used as-is.');
+  DoStatus('  C++: the file name is derived from the source unit name, because');
+  DoStatus('  the generated CMakeLists.txt references the .hpp/.cpp files by');
+  DoStatus('  that name. The directory part of your output argument is kept.');
+  DoStatus('');
+  DoStatus('C++ ARTEFACTS');
+  DoStatus('  Service side writes:');
+  DoStatus('      <UnitName>_abi_service.hpp');
+  DoStatus('      <UnitName>_abi_service.cpp');
+  DoStatus('      <UnitName>_abi_service_cpp.md');
+  DoStatus('  Call side writes:');
+  DoStatus('      <UnitName>_abi_call.hpp');
+  DoStatus('      <UnitName>_abi_call.cpp');
+  DoStatus('      <UnitName>_abi_call_cpp.md');
+  DoStatus('  Both sides additionally write:');
+  DoStatus('      CMakeLists.txt');
+  DoStatus('      <UnitName>_abi_service_main.cpp');
+  DoStatus('      <UnitName>_abi_call_main.cpp');
   DoStatus('');
   DoStatus('README');
-  DoStatus('  A Markdown user guide is written next to the generated code');
-  DoStatus('  file. Its name is the output base name plus "_readme.md".');
+  DoStatus('  A Markdown user guide is written next to the generated code.');
+  DoStatus('  The README is the build/deployment guide for the artefact:');
+  DoStatus('  it contains the compile commands, the CMake script for C++,');
+  DoStatus('  the runnable test program, and a troubleshooting table.');
   DoStatus('');
   DoStatus('EXAMPLES');
   DoStatus('  code_decl_to_abi calculator.pas calculator_service.pas');
   DoStatus('  code_decl_to_abi --call calculator.pas calculator_call.pas');
   DoStatus('  code_decl_to_abi ComplexTestUnit.h calculator_service.py');
   DoStatus('  code_decl_to_abi --call ComplexTestUnit.h calculator_call.py');
-  DoStatus('  code_decl_to_abi ComplexTestUnit.h calculator_service.hpp');
-  DoStatus('  code_decl_to_abi --call ComplexTestUnit.h calculator_call.hpp');
+  DoStatus('  code_decl_to_abi ComplexTestUnit.h out/ComplexTestUnit_abi_service.hpp');
+  DoStatus('  code_decl_to_abi --call ComplexTestUnit.h out/ComplexTestUnit_abi_call.hpp');
   DoStatus('');
   DoStatus('EXIT CODES');
   DoStatus('  0  Conversion succeeded.');
@@ -287,16 +335,6 @@ begin
   Dir := ExtractFileDir(OutputFile);
   Base := ChangeFileExt(ExtractFileName(OutputFile), '');
   Result := IncludeTrailingPathDelimiter(Dir) + Base + '_readme.md';
-end;
-
-procedure Cpp_Paths_From_Output(const OutputFile: string; out HppPath, CppPath: string);
-var
-  Dir, Base: string;
-begin
-  Dir := ExtractFileDir(OutputFile);
-  Base := ChangeFileExt(ExtractFileName(OutputFile), '');
-  HppPath := IncludeTrailingPathDelimiter(Dir) + Base + '.hpp';
-  CppPath := IncludeTrailingPathDelimiter(Dir) + Base + '.cpp';
 end;
 
 (* ------------------------------------------------------------------------ *)
@@ -391,67 +429,117 @@ begin
   end;
 end;
 
+(*
+  Write one TPascalStringList produced by a generator to disk.
+
+  Returns True on success. Emits a single "Wrote  : <path>" status line
+  on success, or an "Error: cannot write" line on failure. This mirrors
+  the behaviour of the Pascal and Python branches.
+*)
+function Emit_List(const Path: string; L: TPascalStringList): Boolean;
+begin
+  Result := False;
+  if L = nil then
+    Exit;
+  try
+    if Write_Text_List(Path, L) then
+    begin
+      DoStatus('Wrote  : %s', [Path]);
+      Result := True;
+    end
+    else
+      DoStatus('Error: cannot write "%s".', [Path]);
+  finally
+    L.Free;
+  end;
+end;
+
 function Generate_Cpp(const Model: TPascal_Func_Model;
   const Mode: TTargetMode;
   const OutputFile: string): Integer;
 var
-  CodeList, ReadmeList: TPascalStringList;
-  HppPath, CppPath, ReadmePath: string;
+  UnitName, OutDir: string;
+  ServiceHpp, ServiceCpp, ServiceReadme: string;
+  CallHpp, CallCpp, CallReadme: string;
+  CmakePath, ServiceMainPath, CallMainPath: string;
+  Tmp: TPascalStringList;
 begin
   Result := EXIT_OK;
 
-  Cpp_Paths_From_Output(OutputFile, HppPath, CppPath);
-
-  if Mode = tmService then
-    CodeList := GenerateABIServiceHppCode(Model)
-  else
-    CodeList := GenerateABICallHppCode(Model);
-
-  try
-    if (CodeList = nil) or (not Write_Text_List(HppPath, CodeList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [HppPath]);
-      Exit(EXIT_GEN_FAILED);
-    end;
-    DoStatus('Wrote  : %s', [HppPath]);
-  finally
-    CodeList.Free;
-    CodeList := nil;
-  end;
-
-  if Mode = tmService then
-    CodeList := GenerateABIServiceCppCode(Model)
-  else
-    CodeList := GenerateABICallCppCode(Model);
-
-  try
-    if (CodeList = nil) or (not Write_Text_List(CppPath, CodeList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [CppPath]);
-      Exit(EXIT_GEN_FAILED);
-    end;
-    DoStatus('Wrote  : %s', [CppPath]);
-  finally
-    CodeList.Free;
-    CodeList := nil;
-  end;
-
-  if Mode = tmService then
-    ReadmeList := GenerateABIServiceCppReadme(Model)
-  else
-    ReadmeList := GenerateABICallCppReadme(Model);
-
-  if ReadmeList <> nil then
+  UnitName := Model.UnitName.Text;
+  if UnitName = '' then
   begin
-    try
-      ReadmePath := Companion_Readme_Path(HppPath);
-      if Write_Text_List(ReadmePath, ReadmeList) then
-        DoStatus('Wrote  : %s', [ReadmePath]);
-    finally
-      ReadmeList.Free;
-      ReadmeList := nil;
-    end;
+    DoStatus('Error: model UnitName is empty, cannot derive C++ output file names.');
+    Exit(EXIT_GEN_FAILED);
   end;
+
+  // The directory part of the caller's output argument is respected;
+  // the file name itself is replaced with the canonical name derived
+  // from the source unit name. This is required because the generated
+  // CMakeLists.txt references the .hpp / .cpp files by that name.
+  OutDir := ExtractFileDir(OutputFile);
+  if OutDir = '' then
+    OutDir := '.';
+
+  if Mode = tmService then
+  begin
+    // ---- Service side: header, implementation, README ----
+    ServiceHpp    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service.hpp';
+    ServiceCpp    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service.cpp';
+    ServiceReadme := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service_cpp.md';
+
+    Tmp := GenerateABIServiceHppCode(Model);
+    if (Tmp = nil) or (not Emit_List(ServiceHpp, Tmp)) then
+      Exit(EXIT_GEN_FAILED);
+
+    Tmp := GenerateABIServiceCppCode(Model);
+    if (Tmp = nil) or (not Emit_List(ServiceCpp, Tmp)) then
+      Exit(EXIT_GEN_FAILED);
+
+    Tmp := GenerateABIServiceCppReadme(Model);
+    if Tmp <> nil then
+      Emit_List(ServiceReadme, Tmp);
+  end
+  else
+  begin
+    // ---- Call side: header, implementation, README ----
+    CallHpp    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call.hpp';
+    CallCpp    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call.cpp';
+    CallReadme := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call_cpp.md';
+
+    Tmp := GenerateABICallHppCode(Model);
+    if (Tmp = nil) or (not Emit_List(CallHpp, Tmp)) then
+      Exit(EXIT_GEN_FAILED);
+
+    Tmp := GenerateABICallCppCode(Model);
+    if (Tmp = nil) or (not Emit_List(CallCpp, Tmp)) then
+      Exit(EXIT_GEN_FAILED);
+
+    Tmp := GenerateABICallCppReadme(Model);
+    if Tmp <> nil then
+      Emit_List(CallReadme, Tmp);
+  end;
+
+  // ---- CMake script and runnable test programs ----
+  //
+  // Both modes emit these files. Generation is idempotent: running the
+  // CLI once for the service side and once for the call side leaves a
+  // consistent, buildable directory.
+  CmakePath       := IncludeTrailingPathDelimiter(OutDir) + 'CMakeLists.txt';
+  ServiceMainPath := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service_main.cpp';
+  CallMainPath    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call_main.cpp';
+
+  Tmp := GenerateABICmakeScript(Model);
+  if Tmp <> nil then
+    Emit_List(CmakePath, Tmp);
+
+  Tmp := GenerateABIServiceTestProgram(Model);
+  if Tmp <> nil then
+    Emit_List(ServiceMainPath, Tmp);
+
+  Tmp := GenerateABICallTestProgram(Model);
+  if Tmp <> nil then
+    Emit_List(CallMainPath, Tmp);
 end;
 
 function Execute_Conversion(const InputFile, OutputFile: string;
