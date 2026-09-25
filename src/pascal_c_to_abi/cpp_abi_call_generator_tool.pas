@@ -1434,13 +1434,13 @@ var
     L.Add('#include <string>');
     L.Add('');
     L.Add('int main() {');
-    L.Add('    std::printf("=== ' + UnitName + ' ABI client ===\\n");');
+    L.Add('    std::printf("=== ' + UnitName + ' ABI client ===\n");');
     L.Add('');
     L.Add('    LF_ResetPrepare();');
     L.Add('    LF_PrepareClient("ipc:' + TargetAppName + '", nullptr);');
     L.Add('');
     L.Add('    if (LF_PrepareDone() != 1) {');
-    L.Add('        std::fprintf(stderr, "[FATAL] LF_PrepareDone failed\\n");');
+    L.Add('        std::fprintf(stderr, "[FATAL] LF_PrepareDone failed\n");');
     L.Add('        return 1;');
     L.Add('    }');
     L.Add('');
@@ -1448,9 +1448,9 @@ var
     L.Add('        // Replace with actual calls to the generated functions.');
     L.Add('        // Example:');
     L.Add('        //     auto r = ' + NsName + '::<ApiName>(3, 4);');
-    L.Add('        //     std::printf("result = %s\\n", std::to_string(r).c_str());');
+    L.Add('        //     std::printf("result = %s\n", std::to_string(r).c_str());');
     L.Add('    } catch (const ' + NsName + '::EABI_RemoteError& e) {');
-    L.Add('        std::fprintf(stderr, "[ERROR] %s\\n", e.what());');
+    L.Add('        std::fprintf(stderr, "[ERROR] %s\n", e.what());');
     L.Add('    }');
     L.Add('');
     L.Add('    LF_ExitMainThread();');
@@ -1657,7 +1657,7 @@ var
         L.Add('    ' + NsName + '::' + CallExpr + ';');
       L.Add('} catch (const ' + NsName + '::EABI_RemoteError& e) {');
       L.Add('    // Handle the failure.');
-      L.Add('    std::fprintf(stderr, "Call failed: %s\\n", e.what());');
+      L.Add('    std::fprintf(stderr, "Call failed: %s\n", e.what());');
       L.Add('}');
       L.Add('```');
       L.Add('');
@@ -1699,10 +1699,10 @@ var
     L.Add('');
     L.Add('```cpp');
     L.Add('if (LF_CheckMainThread() == 0) {');
-    L.Add('    std::fprintf(stderr, "Main thread is not running\\n");');
+    L.Add('    std::fprintf(stderr, "Main thread is not running\n");');
     L.Add('}');
     L.Add('if (LF_CheckApp("' + TargetAppName + '") == 0) {');
-    L.Add('    std::fprintf(stderr, "Target service is not registered\\n");');
+    L.Add('    std::fprintf(stderr, "Target service is not registered\n");');
     L.Add('}');
     L.Add('```');
     L.Add('');
@@ -1719,7 +1719,7 @@ var
     L.Add('for (std::int64_t i = 0; i < sz; ++i) {');
     L.Add('    std::printf("%02X ", p[i]);');
     L.Add('}');
-    L.Add('std::printf("\\n");');
+    L.Add('std::printf("\n");');
     L.Add('```');
     L.Add('');
     L.Add('### 10.4 Adjusting the timeout');
