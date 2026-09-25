@@ -79,13 +79,22 @@ function internal_call_CodeDeclToJsonAbi_GetLastCppServiceReadme_CodeDeclToJsonA
 function internal_call_CodeDeclToJsonAbi_GetLastCppCallHeader_CodeDeclToJsonAbi_GetLastCppCallHeader(): string;
 function internal_call_CodeDeclToJsonAbi_GetLastCppCallImpl_CodeDeclToJsonAbi_GetLastCppCallImpl(): string;
 function internal_call_CodeDeclToJsonAbi_GetLastCppCallReadme_CodeDeclToJsonAbi_GetLastCppCallReadme(): string;
+function internal_call_CodeDeclToJsonAbi_GetLastCMakeScript_CodeDeclToJsonAbi_GetLastCMakeScript(): string;
+function internal_call_CodeDeclToJsonAbi_GetLastTestMainCpp_CodeDeclToJsonAbi_GetLastTestMainCpp(): string;
 
 implementation
 
 uses
   Z.Core, Z.Json, Z.PascalStrings, Z.UPascalStrings, Z.Status, Z.UnicodeMixedLib, Z.ListEngine,
-  code_decl_to_abi_json_frm;   // 用于访问全局 GUI 表单实例 code_decl_to_abi_json_form
+  Z.Pascal_Func_Model,
+  code_decl_to_abi_json_frm,     // drives the GUI form instance
+  http_cmake_generator_tool;     // for the two CMake artifacts
 
+var
+  // The GUI does not expose CMake artifacts in dedicated editors, so they
+  // are cached here for GetLastCMakeScript / GetLastTestMainCpp.
+  FSessionCMakeScript: string;
+  FSessionTestMainCpp: string;
 
 // Forward declarations for all API callbacks
 function RegisterTool(const ToolDef: TZ_JsonObject): boolean; forward;
@@ -111,10 +120,11 @@ procedure Callback_CodeDeclToJsonAbi_GetLastCppServiceReadme_CodeDeclToJsonAbi_G
 procedure Callback_CodeDeclToJsonAbi_GetLastCppCallHeader_CodeDeclToJsonAbi_GetLastCppCallHeader(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
 procedure Callback_CodeDeclToJsonAbi_GetLastCppCallImpl_CodeDeclToJsonAbi_GetLastCppCallImpl(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
 procedure Callback_CodeDeclToJsonAbi_GetLastCppCallReadme_CodeDeclToJsonAbi_GetLastCppCallReadme(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-
+procedure Callback_CodeDeclToJsonAbi_GetLastCMakeScript_CodeDeclToJsonAbi_GetLastCMakeScript(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
+procedure Callback_CodeDeclToJsonAbi_GetLastTestMainCpp_CodeDeclToJsonAbi_GetLastTestMainCpp(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
 
 // =============================================================================
-// JSON 辅助
+// JSON helpers
 // =============================================================================
 
 function JsonStatusOk: string;
@@ -149,9 +159,12 @@ begin
   end;
 end;
 
-
 // =============================================================================
-// internal_call_CodeDeclToJsonAbi_SetSourceCode_...
+// Internal wrapper for CodeDeclToJsonAbi_SetSourceCode
+//
+// Stores the source text and its SOURCE language into the GUI form. The
+// call is synchronised onto the main thread because TSynEdit must be
+// touched there. A new source text invalidates the CMake cache.
 // =============================================================================
 function internal_call_CodeDeclToJsonAbi_SetSourceCode_CodeDeclToJsonAbi_SetSourceCode(Source: string; Language: string): string;
 {$IFDEF FPC}
@@ -164,18 +177,19 @@ function internal_call_CodeDeclToJsonAbi_SetSourceCode_CodeDeclToJsonAbi_SetSour
       Result := JsonError('Form not available');
       Exit;
     end;
+
     lang := LowerCase(Trim(Language));
     if lang = 'pascal' then
     begin
-      // Simulate: switch to Pascal language (combo item 1 -> slPascal).
       code_decl_to_abi_json_form.LanguageSelectorComboBox.ItemIndex := 1;
-      code_decl_to_abi_json_form.LanguageSelectorChange(code_decl_to_abi_json_form.LanguageSelectorComboBox);
+      code_decl_to_abi_json_form.LanguageSelectorChange(
+        code_decl_to_abi_json_form.LanguageSelectorComboBox);
     end
     else if lang = 'c' then
     begin
-      // Simulate: switch to C language (combo item 2 -> slC).
       code_decl_to_abi_json_form.LanguageSelectorComboBox.ItemIndex := 2;
-      code_decl_to_abi_json_form.LanguageSelectorChange(code_decl_to_abi_json_form.LanguageSelectorComboBox);
+      code_decl_to_abi_json_form.LanguageSelectorChange(
+        code_decl_to_abi_json_form.LanguageSelectorComboBox);
     end
     else
     begin
@@ -183,11 +197,12 @@ function internal_call_CodeDeclToJsonAbi_SetSourceCode_CodeDeclToJsonAbi_SetSour
       Exit;
     end;
 
-    // Simulate: fill the source editor with the supplied Source text.
     code_decl_to_abi_json_form.SourceCodeEditor.Text := Source;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.SourceCodeTabSheet;
 
-    // Simulate: switch the UI to the source-code tab.
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.SourceCodeTabSheet;
+    FSessionCMakeScript := '';
+    FSessionTestMainCpp := '';
 
     Result := JsonStatusOk;
   end;
@@ -208,24 +223,33 @@ begin
       temp_ := JsonError('Form not available');
       Exit;
     end;
+
     lang := LowerCase(Trim(Language));
     if lang = 'pascal' then
     begin
       code_decl_to_abi_json_form.LanguageSelectorComboBox.ItemIndex := 1;
-      code_decl_to_abi_json_form.LanguageSelectorChange(code_decl_to_abi_json_form.LanguageSelectorComboBox);
+      code_decl_to_abi_json_form.LanguageSelectorChange(
+        code_decl_to_abi_json_form.LanguageSelectorComboBox);
     end
     else if lang = 'c' then
     begin
       code_decl_to_abi_json_form.LanguageSelectorComboBox.ItemIndex := 2;
-      code_decl_to_abi_json_form.LanguageSelectorChange(code_decl_to_abi_json_form.LanguageSelectorComboBox);
+      code_decl_to_abi_json_form.LanguageSelectorChange(
+        code_decl_to_abi_json_form.LanguageSelectorComboBox);
     end
     else
     begin
       temp_ := JsonError('Unsupported language. Use pascal or c.');
       Exit;
     end;
+
     code_decl_to_abi_json_form.SourceCodeEditor.Text := Source;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.SourceCodeTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.SourceCodeTabSheet;
+
+    FSessionCMakeScript := '';
+    FSessionTestMainCpp := '';
+
     temp_ := JsonStatusOk;
   end);
   Result := temp_;
@@ -233,7 +257,9 @@ begin
 end;
 
 // =============================================================================
-// internal_call_CodeDeclToJsonAbi_SetModelJson_...
+// Internal wrapper for CodeDeclToJsonAbi_SetModelJson
+//
+// Stores an LV1 model JSON directly into the GUI form's model editor.
 // =============================================================================
 function internal_call_CodeDeclToJsonAbi_SetModelJson_CodeDeclToJsonAbi_SetModelJson(ModelJson: string): string;
 {$IFDEF FPC}
@@ -247,13 +273,13 @@ function internal_call_CodeDeclToJsonAbi_SetModelJson_CodeDeclToJsonAbi_SetModel
       Result := JsonError('Form not available');
       Exit;
     end;
+
     if Trim(ModelJson) = '' then
     begin
       Result := JsonError('Empty model JSON');
       Exit;
     end;
 
-    // Validate that the incoming JSON is a well-formed object.
     jo := TZ_JsonObject.Create;
     try
       if not jo.ParseText(ModelJson) then
@@ -266,11 +292,13 @@ function internal_call_CodeDeclToJsonAbi_SetModelJson_CodeDeclToJsonAbi_SetModel
       jo.Free;
     end;
 
-    // Simulate: fill the model-JSON editor.
+    code_decl_to_abi_json_form.SourceCodeEditor.Text := '';
     code_decl_to_abi_json_form.ModelJsonEditor.Text := ModelJson;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.ModelJsonTabSheet;
 
-    // Simulate: switch the UI to the model-JSON tab.
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.ModelJsonTabSheet;
+    FSessionCMakeScript := '';
+    FSessionTestMainCpp := '';
 
     Result := JsonStatusOkWithUnit(unitName);
   end;
@@ -292,11 +320,13 @@ begin
       temp_ := JsonError('Form not available');
       Exit;
     end;
+
     if Trim(ModelJson) = '' then
     begin
       temp_ := JsonError('Empty model JSON');
       Exit;
     end;
+
     jo := TZ_JsonObject.Create;
     try
       if not jo.ParseText(ModelJson) then
@@ -308,8 +338,15 @@ begin
     finally
       jo.Free;
     end;
+
+    code_decl_to_abi_json_form.SourceCodeEditor.Text := '';
     code_decl_to_abi_json_form.ModelJsonEditor.Text := ModelJson;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.ModelJsonTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.ModelJsonTabSheet;
+
+    FSessionCMakeScript := '';
+    FSessionTestMainCpp := '';
+
     temp_ := JsonStatusOkWithUnit(unitName);
   end);
   Result := temp_;
@@ -317,7 +354,7 @@ begin
 end;
 
 // =============================================================================
-// internal_call_CodeDeclToJsonAbi_GetSourceJson_...
+// Internal wrapper for CodeDeclToJsonAbi_GetSourceJson
 // =============================================================================
 function internal_call_CodeDeclToJsonAbi_GetSourceJson_CodeDeclToJsonAbi_GetSourceJson(): string;
 {$IFDEF FPC}
@@ -328,8 +365,7 @@ function internal_call_CodeDeclToJsonAbi_GetSourceJson_CodeDeclToJsonAbi_GetSour
       Result := '';
       Exit;
     end;
-    // Simulate: read the source-JSON editor.
-    Result := code_decl_to_abi_json_form.SourceJsonEditor.Text;
+    Result := code_decl_to_abi_json_form.SourceJsonEditor.Lines.Text;
   end;
 {$ELSE FPC}
 var
@@ -346,14 +382,14 @@ begin
       temp_ := '';
       Exit;
     end;
-    temp_ := code_decl_to_abi_json_form.SourceJsonEditor.Text;
+    temp_ := code_decl_to_abi_json_form.SourceJsonEditor.Lines.Text;
   end);
   Result := temp_;
 {$ENDIF FPC}
 end;
 
 // =============================================================================
-// internal_call_CodeDeclToJsonAbi_GetModelJson_...
+// Internal wrapper for CodeDeclToJsonAbi_GetModelJson
 // =============================================================================
 function internal_call_CodeDeclToJsonAbi_GetModelJson_CodeDeclToJsonAbi_GetModelJson(): string;
 {$IFDEF FPC}
@@ -364,8 +400,7 @@ function internal_call_CodeDeclToJsonAbi_GetModelJson_CodeDeclToJsonAbi_GetModel
       Result := '';
       Exit;
     end;
-    // Simulate: read the model-JSON editor.
-    Result := code_decl_to_abi_json_form.ModelJsonEditor.Text;
+    Result := code_decl_to_abi_json_form.ModelJsonEditor.Lines.Text;
   end;
 {$ELSE FPC}
 var
@@ -382,20 +417,18 @@ begin
       temp_ := '';
       Exit;
     end;
-    temp_ := code_decl_to_abi_json_form.ModelJsonEditor.Text;
+    temp_ := code_decl_to_abi_json_form.ModelJsonEditor.Lines.Text;
   end);
   Result := temp_;
 {$ENDIF FPC}
 end;
 
 // =============================================================================
-// internal_call_CodeDeclToJsonAbi_GenerateAll_...
+// Internal wrapper for CodeDeclToJsonAbi_GenerateAll
 //
-// Simulated click sequence:
-//   1) ParseSourceToJsonClick   (source   -> source JSON)
-//   2) NormalizeJsonToModelClick (source JSON -> model JSON)
-//   3) GenerateAllSourcesClick  (model JSON  -> 17 artifacts)
-// After each step the UI is switched to the corresponding tab sheet.
+// Drives the three GUI button handlers in sequence (Parse -> Normalize ->
+// GenerateAll), then invokes http_cmake_generator_tool directly to produce
+// the two CMake artifacts that the GUI does not yet expose.
 // =============================================================================
 function internal_call_CodeDeclToJsonAbi_GenerateAll_CodeDeclToJsonAbi_GenerateAll(): string;
 {$IFDEF FPC}
@@ -403,7 +436,10 @@ function internal_call_CodeDeclToJsonAbi_GenerateAll_CodeDeclToJsonAbi_GenerateA
   var
     modelJo: TZ_JsonObject;
     unitName: string;
-    files: TZ_JsonObject;
+    filesJson: string;
+    model: TPascal_Func_Model;
+    l: TPascalStringList;
+    hasSource, hasModelJson: Boolean;
   begin
     if code_decl_to_abi_json_form = nil then
     begin
@@ -411,75 +447,107 @@ function internal_call_CodeDeclToJsonAbi_GenerateAll_CodeDeclToJsonAbi_GenerateA
       Exit;
     end;
 
-    // Require at least source text or model JSON to begin.
-    if (Trim(code_decl_to_abi_json_form.SourceCodeEditor.Text) = '')
-       and (Trim(code_decl_to_abi_json_form.ModelJsonEditor.Text) = '') then
+    hasSource    := Trim(code_decl_to_abi_json_form.SourceCodeEditor.Text) <> '';
+    hasModelJson := Trim(code_decl_to_abi_json_form.ModelJsonEditor.Text) <> '';
+
+    if (not hasSource) and (not hasModelJson) then
     begin
-      Result := JsonError('No source text or model JSON in session. Call SetSourceCode or SetModelJson first.');
+      Result := JsonError('No source text or model JSON in session. ' +
+        'Call SetSourceCode or SetModelJson first.');
       Exit;
     end;
 
-    // Step 1: if the source editor is non-empty, simulate clicking ParseSourceToJson.
-    if Trim(code_decl_to_abi_json_form.SourceCodeEditor.Text) <> '' then
-    begin
-      code_decl_to_abi_json_form.ParseSourceToJsonClick(code_decl_to_abi_json_form.ParseSourceToJsonButton);
-      // ParseSourceToJsonClick internally switches MainPageControl to SourceJsonTabSheet.
-    end;
+    // Step A: source -> source JSON, via the GUI button handler.
+    if hasSource then
+      code_decl_to_abi_json_form.ParseSourceToJsonClick(
+        code_decl_to_abi_json_form.ParseSourceToJsonButton);
 
-    // Step 2: if the source-JSON editor is non-empty, simulate clicking NormalizeJsonToModel.
+    // Step B: source JSON -> model JSON, via the GUI button handler.
     if Trim(code_decl_to_abi_json_form.SourceJsonEditor.Text) <> '' then
-    begin
-      code_decl_to_abi_json_form.NormalizeJsonToModelClick(code_decl_to_abi_json_form.NormalizeJsonToModelButton);
-      // NormalizeJsonToModelClick internally switches MainPageControl to ModelJsonTabSheet.
-    end;
+      code_decl_to_abi_json_form.NormalizeJsonToModelClick(
+        code_decl_to_abi_json_form.NormalizeJsonToModelButton);
 
-    // Step 3: simulate clicking GenerateAllSources (emits all 17 artifacts into the final editors).
     if Trim(code_decl_to_abi_json_form.ModelJsonEditor.Text) = '' then
     begin
       Result := JsonError('Model JSON is empty. Cannot generate.');
       Exit;
     end;
 
-    code_decl_to_abi_json_form.GenerateAllSourcesClick(code_decl_to_abi_json_form.GenerateAllSourcesButton);
+    // Step C: model JSON -> the 17 GUI-managed artifacts.
+    code_decl_to_abi_json_form.GenerateAllSourcesClick(
+      code_decl_to_abi_json_form.GenerateAllSourcesButton);
 
-    // Extract UnitName from the model JSON, used to assemble the file manifest.
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+
+    unitName := '';
     modelJo := TZ_JsonObject.Create;
     try
-      unitName := '';
       if modelJo.ParseText(code_decl_to_abi_json_form.ModelJsonEditor.Text) then
         unitName := modelJo.S['UnitName'];
     finally
       modelJo.Free;
     end;
 
-    // Simulate: switch to FinalSourceTabSheet so the final artifacts are visible.
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
+    // Step D: produce the two CMake artifacts.
+    FSessionCMakeScript := '';
+    FSessionTestMainCpp := '';
+    model := TPascal_Func_Model.Create;
+    try
+      try
+        model.LoadFromJson(code_decl_to_abi_json_form.ModelJsonEditor.Text);
+
+        l := GenerateCMakeScript(model);
+        try
+          if l <> nil then
+            FSessionCMakeScript := l.Text;
+        finally
+          DisposeObject(l);
+        end;
+
+        l := GenerateTestMainCpp(model);
+        try
+          if l <> nil then
+            FSessionTestMainCpp := l.Text;
+        finally
+          DisposeObject(l);
+        end;
+      except
+        on E: Exception do
+        begin
+          if DEBUG_LOG then
+            DoStatus('[CodeDeclToJsonAbi_GenerateAll] CMake generation failed: %s',
+              [E.Message]);
+        end;
+      end;
+    finally
+      model.Free;
+    end;
 
     // Build the file manifest.
-    files := TZ_JsonObject.Create;
-    try
-      files.S['pascal_service_code']   := unitName + '_http_json_service_unit.pas';
-      files.S['pascal_service_readme'] := unitName + '_http_json_service_pascal.md';
-      files.S['pascal_call_code']      := unitName + '_http_json_call_unit.pas';
-      files.S['pascal_call_readme']    := unitName + '_http_json_call_pascal.md';
-      files.S['js_call_code']          := unitName + '_http_json_call.js';
-      files.S['js_call_readme']        := unitName + '_http_json_call_js.md';
-      files.S['js_test_html']          := unitName + '_http_json_call_test.html';
-      files.S['python_service_code']   := unitName + '_http_json_service.py';
-      files.S['python_service_readme'] := unitName + '_http_json_service_python.md';
-      files.S['python_call_code']      := unitName + '_http_json_call.py';
-      files.S['python_call_readme']    := unitName + '_http_json_call_python.md';
-      files.S['cpp_service_header']    := unitName + '_http_json_service.hpp';
-      files.S['cpp_service_impl']      := unitName + '_http_json_service.cpp';
-      files.S['cpp_service_readme']    := unitName + '_http_json_service_cpp.md';
-      files.S['cpp_call_header']       := unitName + '_http_json_call.hpp';
-      files.S['cpp_call_impl']         := unitName + '_http_json_call.cpp';
-      files.S['cpp_call_readme']       := unitName + '_http_json_call_cpp.md';
+    filesJson :=
+      '{"pascal_service_code":"'   + unitName + '_http_json_service_unit.pas"' +
+      ',"pascal_service_readme":"' + unitName + '_http_json_service_pascal.md"' +
+      ',"pascal_call_code":"'      + unitName + '_http_json_call_unit.pas"' +
+      ',"pascal_call_readme":"'    + unitName + '_http_json_call_pascal.md"' +
+      ',"js_call_code":"'          + unitName + '_http_json_call.js"' +
+      ',"js_call_readme":"'        + unitName + '_http_json_call_js.md"' +
+      ',"js_test_html":"'          + unitName + '_http_json_call_test.html"' +
+      ',"python_service_code":"'   + unitName + '_http_json_service.py"' +
+      ',"python_service_readme":"' + unitName + '_http_json_service_python.md"' +
+      ',"python_call_code":"'      + unitName + '_http_json_call.py"' +
+      ',"python_call_readme":"'    + unitName + '_http_json_call_python.md"' +
+      ',"cpp_service_header":"'    + unitName + '_http_json_service.hpp"' +
+      ',"cpp_service_impl":"'      + unitName + '_http_json_service.cpp"' +
+      ',"cpp_service_readme":"'    + unitName + '_http_json_service_cpp.md"' +
+      ',"cpp_call_header":"'       + unitName + '_http_json_call.hpp"' +
+      ',"cpp_call_impl":"'         + unitName + '_http_json_call.cpp"' +
+      ',"cpp_call_readme":"'       + unitName + '_http_json_call_cpp.md"' +
+      ',"cmake_script":"CMakeLists.txt"' +
+      ',"test_main_cpp":"test_main___.cpp"}';
 
-      Result := '{"status":"ok","unit_name":"' + unitName + '","files":' + files.ToJSONString(False) + '}';
-    finally
-      files.Free;
-    end;
+    Result := '{"status":"ok","unit_name":"' + unitName +
+      '","files":' + filesJson + '}';
   end;
 {$ELSE FPC}
 var
@@ -493,7 +561,10 @@ begin
   var
     modelJo: TZ_JsonObject;
     unitName: string;
-    files: TZ_JsonObject;
+    filesJson: string;
+    model: TPascal_Func_Model;
+    l: TPascalStringList;
+    hasSource, hasModelJson: Boolean;
   begin
     if code_decl_to_abi_json_form = nil then
     begin
@@ -501,18 +572,23 @@ begin
       Exit;
     end;
 
-    if (Trim(code_decl_to_abi_json_form.SourceCodeEditor.Text) = '')
-       and (Trim(code_decl_to_abi_json_form.ModelJsonEditor.Text) = '') then
+    hasSource    := Trim(code_decl_to_abi_json_form.SourceCodeEditor.Text) <> '';
+    hasModelJson := Trim(code_decl_to_abi_json_form.ModelJsonEditor.Text) <> '';
+
+    if (not hasSource) and (not hasModelJson) then
     begin
-      temp_ := JsonError('No source text or model JSON in session. Call SetSourceCode or SetModelJson first.');
+      temp_ := JsonError('No source text or model JSON in session. ' +
+        'Call SetSourceCode or SetModelJson first.');
       Exit;
     end;
 
-    if Trim(code_decl_to_abi_json_form.SourceCodeEditor.Text) <> '' then
-      code_decl_to_abi_json_form.ParseSourceToJsonClick(code_decl_to_abi_json_form.ParseSourceToJsonButton);
+    if hasSource then
+      code_decl_to_abi_json_form.ParseSourceToJsonClick(
+        code_decl_to_abi_json_form.ParseSourceToJsonButton);
 
     if Trim(code_decl_to_abi_json_form.SourceJsonEditor.Text) <> '' then
-      code_decl_to_abi_json_form.NormalizeJsonToModelClick(code_decl_to_abi_json_form.NormalizeJsonToModelButton);
+      code_decl_to_abi_json_form.NormalizeJsonToModelClick(
+        code_decl_to_abi_json_form.NormalizeJsonToModelButton);
 
     if Trim(code_decl_to_abi_json_form.ModelJsonEditor.Text) = '' then
     begin
@@ -520,52 +596,89 @@ begin
       Exit;
     end;
 
-    code_decl_to_abi_json_form.GenerateAllSourcesClick(code_decl_to_abi_json_form.GenerateAllSourcesButton);
+    code_decl_to_abi_json_form.GenerateAllSourcesClick(
+      code_decl_to_abi_json_form.GenerateAllSourcesButton);
 
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+
+    unitName := '';
     modelJo := TZ_JsonObject.Create;
     try
-      unitName := '';
       if modelJo.ParseText(code_decl_to_abi_json_form.ModelJsonEditor.Text) then
         unitName := modelJo.S['UnitName'];
     finally
       modelJo.Free;
     end;
 
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-
-    files := TZ_JsonObject.Create;
+    FSessionCMakeScript := '';
+    FSessionTestMainCpp := '';
+    model := TPascal_Func_Model.Create;
     try
-      files.S['pascal_service_code']   := unitName + '_http_json_service_unit.pas';
-      files.S['pascal_service_readme'] := unitName + '_http_json_service_pascal.md';
-      files.S['pascal_call_code']      := unitName + '_http_json_call_unit.pas';
-      files.S['pascal_call_readme']    := unitName + '_http_json_call_pascal.md';
-      files.S['js_call_code']          := unitName + '_http_json_call.js';
-      files.S['js_call_readme']        := unitName + '_http_json_call_js.md';
-      files.S['js_test_html']          := unitName + '_http_json_call_test.html';
-      files.S['python_service_code']   := unitName + '_http_json_service.py';
-      files.S['python_service_readme'] := unitName + '_http_json_service_python.md';
-      files.S['python_call_code']      := unitName + '_http_json_call.py';
-      files.S['python_call_readme']    := unitName + '_http_json_call_python.md';
-      files.S['cpp_service_header']    := unitName + '_http_json_service.hpp';
-      files.S['cpp_service_impl']      := unitName + '_http_json_service.cpp';
-      files.S['cpp_service_readme']    := unitName + '_http_json_service_cpp.md';
-      files.S['cpp_call_header']       := unitName + '_http_json_call.hpp';
-      files.S['cpp_call_impl']         := unitName + '_http_json_call.cpp';
-      files.S['cpp_call_readme']       := unitName + '_http_json_call_cpp.md';
+      try
+        model.LoadFromJson(code_decl_to_abi_json_form.ModelJsonEditor.Text);
 
-      temp_ := '{"status":"ok","unit_name":"' + unitName + '","files":' + files.ToJSONString(False) + '}';
+        l := GenerateCMakeScript(model);
+        try
+          if l <> nil then
+            FSessionCMakeScript := l.Text;
+        finally
+          DisposeObject(l);
+        end;
+
+        l := GenerateTestMainCpp(model);
+        try
+          if l <> nil then
+            FSessionTestMainCpp := l.Text;
+        finally
+          DisposeObject(l);
+        end;
+      except
+        on E: Exception do
+        begin
+          if DEBUG_LOG then
+            DoStatus('[CodeDeclToJsonAbi_GenerateAll] CMake generation failed: %s',
+              [E.Message]);
+        end;
+      end;
     finally
-      files.Free;
+      model.Free;
     end;
+
+    filesJson :=
+      '{"pascal_service_code":"'   + unitName + '_http_json_service_unit.pas"' +
+      ',"pascal_service_readme":"' + unitName + '_http_json_service_pascal.md"' +
+      ',"pascal_call_code":"'      + unitName + '_http_json_call_unit.pas"' +
+      ',"pascal_call_readme":"'    + unitName + '_http_json_call_pascal.md"' +
+      ',"js_call_code":"'          + unitName + '_http_json_call.js"' +
+      ',"js_call_readme":"'        + unitName + '_http_json_call_js.md"' +
+      ',"js_test_html":"'          + unitName + '_http_json_call_test.html"' +
+      ',"python_service_code":"'   + unitName + '_http_json_service.py"' +
+      ',"python_service_readme":"' + unitName + '_http_json_service_python.md"' +
+      ',"python_call_code":"'      + unitName + '_http_json_call.py"' +
+      ',"python_call_readme":"'    + unitName + '_http_json_call_python.md"' +
+      ',"cpp_service_header":"'    + unitName + '_http_json_service.hpp"' +
+      ',"cpp_service_impl":"'      + unitName + '_http_json_service.cpp"' +
+      ',"cpp_service_readme":"'    + unitName + '_http_json_service_cpp.md"' +
+      ',"cpp_call_header":"'       + unitName + '_http_json_call.hpp"' +
+      ',"cpp_call_impl":"'         + unitName + '_http_json_call.cpp"' +
+      ',"cpp_call_readme":"'       + unitName + '_http_json_call_cpp.md"' +
+      ',"cmake_script":"CMakeLists.txt"' +
+      ',"test_main_cpp":"test_main___.cpp"}';
+
+    temp_ := '{"status":"ok","unit_name":"' + unitName +
+      '","files":' + filesJson + '}';
   end);
   Result := temp_;
 {$ENDIF FPC}
 end;
 
 // =============================================================================
-// The 17 readers below simulate "read the corresponding final_*_Edit.Lines.Text".
-// Each reader switches to the corresponding tab sheet first, then reads the text,
-// so the visible UI state and the returned value stay consistent.
+// 17 artifact readers
+//
+// Each reader switches the GUI to the matching tab sheet and returns the
+// text of the matching TSynEdit. Tab switching keeps the visible UI state
+// consistent with the returned text.
 // =============================================================================
 
 // ---- Pascal service code ----
@@ -574,8 +687,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastPascalServiceCode_CodeDeclToJson
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPascalServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPascalServiceTabSheet;
     Result := code_decl_to_abi_json_form.PascalServiceCodeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -588,8 +703,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPascalServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPascalServiceTabSheet;
     temp_ := code_decl_to_abi_json_form.PascalServiceCodeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -602,8 +719,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastPascalServiceReadme_CodeDeclToJs
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPascalServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPascalServiceTabSheet;
     Result := code_decl_to_abi_json_form.PascalServiceReadmeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -616,8 +735,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPascalServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPascalServiceTabSheet;
     temp_ := code_decl_to_abi_json_form.PascalServiceReadmeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -630,8 +751,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastPascalCallCode_CodeDeclToJsonAbi
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPascalCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPascalCallTabSheet;
     Result := code_decl_to_abi_json_form.PascalCallCodeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -644,8 +767,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPascalCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPascalCallTabSheet;
     temp_ := code_decl_to_abi_json_form.PascalCallCodeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -658,8 +783,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastPascalCallReadme_CodeDeclToJsonA
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPascalCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPascalCallTabSheet;
     Result := code_decl_to_abi_json_form.PascalCallReadmeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -672,8 +799,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPascalCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPascalCallTabSheet;
     temp_ := code_decl_to_abi_json_form.PascalCallReadmeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -686,8 +815,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastJsCallCode_CodeDeclToJsonAbi_Get
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpJavaScriptCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpJavaScriptCallTabSheet;
     Result := code_decl_to_abi_json_form.JavaScriptCallCodeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -700,8 +831,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpJavaScriptCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpJavaScriptCallTabSheet;
     temp_ := code_decl_to_abi_json_form.JavaScriptCallCodeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -714,8 +847,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastJsCallReadme_CodeDeclToJsonAbi_G
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpJavaScriptCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpJavaScriptCallTabSheet;
     Result := code_decl_to_abi_json_form.JavaScriptCallReadmeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -728,8 +863,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpJavaScriptCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpJavaScriptCallTabSheet;
     temp_ := code_decl_to_abi_json_form.JavaScriptCallReadmeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -742,8 +879,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastJsTestHtml_CodeDeclToJsonAbi_Get
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpJavaScriptTestTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpJavaScriptTestTabSheet;
     Result := code_decl_to_abi_json_form.JavaScriptTestHtmlEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -756,8 +895,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpJavaScriptTestTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpJavaScriptTestTabSheet;
     temp_ := code_decl_to_abi_json_form.JavaScriptTestHtmlEditor.Lines.Text;
   end);
   Result := temp_;
@@ -770,8 +911,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastPythonServiceCode_CodeDeclToJson
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPythonServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPythonServiceTabSheet;
     Result := code_decl_to_abi_json_form.PythonServiceCodeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -784,8 +927,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPythonServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPythonServiceTabSheet;
     temp_ := code_decl_to_abi_json_form.PythonServiceCodeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -798,8 +943,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastPythonServiceReadme_CodeDeclToJs
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPythonServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPythonServiceTabSheet;
     Result := code_decl_to_abi_json_form.PythonServiceReadmeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -812,8 +959,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPythonServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPythonServiceTabSheet;
     temp_ := code_decl_to_abi_json_form.PythonServiceReadmeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -826,8 +975,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastPythonCallCode_CodeDeclToJsonAbi
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPythonCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPythonCallTabSheet;
     Result := code_decl_to_abi_json_form.PythonCallCodeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -840,8 +991,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPythonCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPythonCallTabSheet;
     temp_ := code_decl_to_abi_json_form.PythonCallCodeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -854,8 +1007,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastPythonCallReadme_CodeDeclToJsonA
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPythonCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPythonCallTabSheet;
     Result := code_decl_to_abi_json_form.PythonCallReadmeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -868,8 +1023,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpPythonCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpPythonCallTabSheet;
     temp_ := code_decl_to_abi_json_form.PythonCallReadmeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -882,8 +1039,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastCppServiceHeader_CodeDeclToJsonA
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppServiceTabSheet;
     Result := code_decl_to_abi_json_form.CppServiceHeaderEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -896,8 +1055,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppServiceTabSheet;
     temp_ := code_decl_to_abi_json_form.CppServiceHeaderEditor.Lines.Text;
   end);
   Result := temp_;
@@ -910,8 +1071,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastCppServiceImpl_CodeDeclToJsonAbi
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppServiceTabSheet;
     Result := code_decl_to_abi_json_form.CppServiceImplEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -924,8 +1087,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppServiceTabSheet;
     temp_ := code_decl_to_abi_json_form.CppServiceImplEditor.Lines.Text;
   end);
   Result := temp_;
@@ -938,8 +1103,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastCppServiceReadme_CodeDeclToJsonA
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppServiceTabSheet;
     Result := code_decl_to_abi_json_form.CppServiceReadmeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -952,8 +1119,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppServiceTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppServiceTabSheet;
     temp_ := code_decl_to_abi_json_form.CppServiceReadmeEditor.Lines.Text;
   end);
   Result := temp_;
@@ -966,8 +1135,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastCppCallHeader_CodeDeclToJsonAbi_
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppCallTabSheet;
     Result := code_decl_to_abi_json_form.CppCallHeaderEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -980,8 +1151,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppCallTabSheet;
     temp_ := code_decl_to_abi_json_form.CppCallHeaderEditor.Lines.Text;
   end);
   Result := temp_;
@@ -994,8 +1167,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastCppCallImpl_CodeDeclToJsonAbi_Ge
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppCallTabSheet;
     Result := code_decl_to_abi_json_form.CppCallImplEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -1008,8 +1183,10 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppCallTabSheet;
     temp_ := code_decl_to_abi_json_form.CppCallImplEditor.Lines.Text;
   end);
   Result := temp_;
@@ -1022,8 +1199,10 @@ function internal_call_CodeDeclToJsonAbi_GetLastCppCallReadme_CodeDeclToJsonAbi_
   procedure Do_Sync___();
   begin
     if code_decl_to_abi_json_form = nil then begin Result := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppCallTabSheet;
     Result := code_decl_to_abi_json_form.CppCallReadmeEditor.Lines.Text;
   end;
 {$ELSE FPC}
@@ -1036,12 +1215,26 @@ begin
   TCompute.Sync(procedure()
   begin
     if code_decl_to_abi_json_form = nil then begin temp_ := ''; Exit; end;
-    code_decl_to_abi_json_form.MainPageControl.ActivePage := code_decl_to_abi_json_form.FinalSourceTabSheet;
-    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage := code_decl_to_abi_json_form.HttpCppCallTabSheet;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.FinalSourceTabSheet;
+    code_decl_to_abi_json_form.FinalSourcePageControl.ActivePage :=
+      code_decl_to_abi_json_form.HttpCppCallTabSheet;
     temp_ := code_decl_to_abi_json_form.CppCallReadmeEditor.Lines.Text;
   end);
   Result := temp_;
 {$ENDIF FPC}
+end;
+
+// ---- CMake script (cached, no GUI editor) ----
+function internal_call_CodeDeclToJsonAbi_GetLastCMakeScript_CodeDeclToJsonAbi_GetLastCMakeScript(): string;
+begin
+  Result := FSessionCMakeScript;
+end;
+
+// ---- CMake test driver (cached, no GUI editor) ----
+function internal_call_CodeDeclToJsonAbi_GetLastTestMainCpp_CodeDeclToJsonAbi_GetLastTestMainCpp(): string;
+begin
+  Result := FSessionTestMainCpp;
 end;
 
 {$Region 'internal_'}
@@ -2553,6 +2746,138 @@ begin
   jo.Free;
 end;
 
+// ---- CodeDeclToJsonAbi_GetLastCMakeScript (API: CodeDeclToJsonAbi_GetLastCMakeScript) ----
+procedure Callback_CodeDeclToJsonAbi_GetLastCMakeScript_CodeDeclToJsonAbi_GetLastCMakeScript(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
+var
+  jsonBytes: TBytes;
+  jo: TZ_JsonObject;
+  ret: string;
+  errMsg: string;
+begin
+  jo := TZ_JsonObject.Create;
+  try
+    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
+    if DEBUG_LOG then
+      DoStatus('[CodeDeclToJsonAbi_GetLastCMakeScript] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
+
+    if Length(jsonBytes) = 0 then
+    begin
+      errMsg := 'Empty input';
+      jo.Clear;
+      jo.S['error'] := errMsg;
+      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
+      if DEBUG_LOG then
+      begin
+        DoStatus('[CodeDeclToJsonAbi_GetLastCMakeScript] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToJsonAbi_GetLastCMakeScript] Error: ' + errMsg);
+      end;
+      Exit;
+    end;
+    if not jo.Parae(jsonBytes) then
+    begin
+      errMsg := 'Invalid JSON';
+      jo.Clear;
+      jo.S['error'] := errMsg;
+      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
+      if DEBUG_LOG then
+      begin
+        DoStatus('[CodeDeclToJsonAbi_GetLastCMakeScript] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToJsonAbi_GetLastCMakeScript] Error: ' + errMsg);
+      end;
+      Exit;
+    end;
+    // No parameters
+    ret := internal_call_CodeDeclToJsonAbi_GetLastCMakeScript_CodeDeclToJsonAbi_GetLastCMakeScript();
+    jo.Clear;
+    jo.S['result'] := ret;
+    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
+    if DEBUG_LOG then
+    begin
+      DoStatus('[CodeDeclToJsonAbi_GetLastCMakeScript] called (no params) -> result: %s', [ret2str(ret)]);
+      SendLogAsync('[CodeDeclToJsonAbi_GetLastCMakeScript] called (no params) -> result: ' + ret2str(ret));
+    end;
+  except
+    on E: Exception do
+    begin
+      jo.Clear;
+      jo.S['error'] := E.Message;
+      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
+      if DEBUG_LOG then
+      begin
+        DoStatus('[CodeDeclToJsonAbi_GetLastCMakeScript] Exception: %s', [E.Message]);
+        SendLogAsync('[CodeDeclToJsonAbi_GetLastCMakeScript] Exception: ' + E.Message);
+      end;
+    end;
+  end;
+  jo.Free;
+end;
+
+// ---- CodeDeclToJsonAbi_GetLastTestMainCpp (API: CodeDeclToJsonAbi_GetLastTestMainCpp) ----
+procedure Callback_CodeDeclToJsonAbi_GetLastTestMainCpp_CodeDeclToJsonAbi_GetLastTestMainCpp(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
+var
+  jsonBytes: TBytes;
+  jo: TZ_JsonObject;
+  ret: string;
+  errMsg: string;
+begin
+  jo := TZ_JsonObject.Create;
+  try
+    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
+    if DEBUG_LOG then
+      DoStatus('[CodeDeclToJsonAbi_GetLastTestMainCpp] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
+
+    if Length(jsonBytes) = 0 then
+    begin
+      errMsg := 'Empty input';
+      jo.Clear;
+      jo.S['error'] := errMsg;
+      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
+      if DEBUG_LOG then
+      begin
+        DoStatus('[CodeDeclToJsonAbi_GetLastTestMainCpp] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToJsonAbi_GetLastTestMainCpp] Error: ' + errMsg);
+      end;
+      Exit;
+    end;
+    if not jo.Parae(jsonBytes) then
+    begin
+      errMsg := 'Invalid JSON';
+      jo.Clear;
+      jo.S['error'] := errMsg;
+      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
+      if DEBUG_LOG then
+      begin
+        DoStatus('[CodeDeclToJsonAbi_GetLastTestMainCpp] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToJsonAbi_GetLastTestMainCpp] Error: ' + errMsg);
+      end;
+      Exit;
+    end;
+    // No parameters
+    ret := internal_call_CodeDeclToJsonAbi_GetLastTestMainCpp_CodeDeclToJsonAbi_GetLastTestMainCpp();
+    jo.Clear;
+    jo.S['result'] := ret;
+    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
+    if DEBUG_LOG then
+    begin
+      DoStatus('[CodeDeclToJsonAbi_GetLastTestMainCpp] called (no params) -> result: %s', [ret2str(ret)]);
+      SendLogAsync('[CodeDeclToJsonAbi_GetLastTestMainCpp] called (no params) -> result: ' + ret2str(ret));
+    end;
+  except
+    on E: Exception do
+    begin
+      jo.Clear;
+      jo.S['error'] := E.Message;
+      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
+      if DEBUG_LOG then
+      begin
+        DoStatus('[CodeDeclToJsonAbi_GetLastTestMainCpp] Exception: %s', [E.Message]);
+        SendLogAsync('[CodeDeclToJsonAbi_GetLastTestMainCpp] Exception: ' + E.Message);
+      end;
+    end;
+  end;
+  jo.Free;
+end;
+
 {$EndRegion 'callback_'}
 // -----------------------------------------------------------------------------
 // Register a single tool with the beacon via the register_agent API.
@@ -2737,7 +3062,7 @@ begin
     ToolDef := TZ_JsonObject.Create;
     try
       ToolDef.S['name'] := 'CodeDeclToJsonAbi_GenerateAll';
-      ToolDef.S['description'] := '(* [code_decl_to_json_abi] Step 2/3 - Generate all 17 artifacts. Runs the seven generators twice each (once for the code artifact(s), once for the README artifact) against the currently stored Model JSON, and caches all 17 results. After this call the Step-3 readers return the freshly generated text. Prerequisite: either CodeDeclToJsonAbi_SetSourceCode or CodeDeclToJsonAbi_SetModelJson must have succeeded earlier in this session. If neither has, this call returns an error. Calling GenerateAll multiple times is safe; each call re-runs the seven generators against the current Model JSON and replaces the cached outputs. This is also the correct way to refresh the cache after a second SetSourceCode / SetModelJson call. No parameters. Return value: JSON string describing the produced files. On success: {"status":"ok","unit_name":"<unit>", "files":{ "pascal_service_code":    "<...>.pas", "pascal_service_readme":  "<...>.md", "pascal_call_code":       "<...>.pas", "pascal_call_readme":     "<...>.md", "js_call_code":           "<...>.js", "js_call_readme":         "<...>.md", "js_test_html":           "<...>.html", "python_service_code":    "<...>.py", "python_service_readme":  "<...>.md", "python_call_code":       "<...>.py", "python_call_readme":     "<...>.md", "cpp_service_header":     "<...>.hpp", "cpp_service_impl":       "<...>.cpp", "cpp_service_readme":     "<...>.md", "cpp_call_header":        "<...>.hpp", "cpp_call_impl":          "<...>.cpp", "cpp_call_readme":        "<...>.md" }} On failure: {"error":"<message>"} )';
+      ToolDef.S['description'] := '(* [code_decl_to_json_abi] Step 2/3 - Generate all 19 artifacts. Runs the eight generators against the currently stored Model JSON and caches all 19 results. After this call the Step-3 readers return the freshly generated text. The eight generators are: http_pas_abi_service_generator_tool   (code + README) http_pas_abi_call_generator_tool      (code + README) http_js_abi_call_generator_tool       (code + README + HTML) http_py_abi_service_generator_tool    (code + README) http_py_abi_call_generator_tool       (code + README) http_cpp_abi_service_generator_tool   (header + impl + README) http_cpp_abi_call_generator_tool      (header + impl + README) http_cmake_generator_tool             (CMakeLists.txt + test_main) Prerequisite: either CodeDeclToJsonAbi_SetSourceCode or CodeDeclToJsonAbi_SetModelJson must have succeeded earlier in this session. If neither has, this call returns an error. Calling GenerateAll multiple times is safe; each call re-runs the eight generators against the current Model JSON and replaces the cached outputs. This is also the correct way to refresh the cache after a second SetSourceCode / SetModelJson call. No parameters. Return value: JSON string describing the produced files. On success: {"status":"ok","unit_name":"<unit>", "files":{ "pascal_service_code":    "<...>.pas", "pascal_service_readme":  "<...>.md", "pascal_call_code":       "<...>.pas", "pascal_call_readme":     "<...>.md", "js_call_code":           "<...>.js", "js_call_readme":         "<...>.md", "js_test_html":           "<...>.html", "python_service_code":    "<...>.py", "python_service_readme":  "<...>.md", "python_call_code":       "<...>.py", "python_call_readme":     "<...>.md", "cpp_service_header":     "<...>.hpp", "cpp_service_impl":       "<...>.cpp", "cpp_service_readme":     "<...>.md", "cpp_call_header":        "<...>.hpp", "cpp_call_impl":          "<...>.cpp", "cpp_call_readme":        "<...>.md", "cmake_script":           "CMakeLists.txt", "test_main_cpp":          "test_main___.cpp" }} On failure: {"error":"<message>"} )';
       ToolDef.S['target_app'] := MY_APP_NAME;
       ToolDef.S['target_api'] := 'CodeDeclToJsonAbi_GenerateAll';
 
@@ -3129,9 +3454,53 @@ begin
       ToolDef.Free;
     end;
 
-    Result := (regCount = 22);
+    // Tool: CodeDeclToJsonAbi_GetLastCMakeScript -> CodeDeclToJsonAbi_GetLastCMakeScript
+    ToolDef := TZ_JsonObject.Create;
+    try
+      ToolDef.S['name'] := 'CodeDeclToJsonAbi_GetLastCMakeScript';
+      ToolDef.S['description'] := '(* [code_decl_to_json_abi] Step 3/3 - CMake script reader. Returns the full text of the CMakeLists.txt produced by http_cmake_generator_tool. The script builds TWO executables in one CMake project: <Unit>_http_json_service        the C++ service executable <Unit>_http_json_call_test      the C++ call-side test executable The script expects the following files to be placed next to it in the same directory: <Unit>_http_json_service.hpp <Unit>_http_json_service.cpp <Unit>_http_json_call.hpp <Unit>_http_json_call.cpp test_main___.cpp                (from GetLastTestMainCpp) The path to the LingoFuse C++ library directory is supplied at configure time through the LINGOFUSE_CPP_LIB_DIR cache variable. The directory must contain LingoFuse.h, LingoFuse.c, LingoFuse.hpp, lf_io.hpp, lf_http_bridge_client.hpp, and json.hpp. The script does NOT stage any dynamic library. Where the DLLs live is a deployment concern. Pure reader. Returns '#39#39' if GenerateAll has not succeeded. No parameters. Return value: the CMakeLists.txt text, or an empty string. )';
+      ToolDef.S['target_app'] := MY_APP_NAME;
+      ToolDef.S['target_api'] := 'CodeDeclToJsonAbi_GetLastCMakeScript';
+
+      ParamsObj := ToolDef.O['parameters'];
+      ParamsObj.S['type'] := 'object';
+      PropsObj := ParamsObj.O['properties'];
+      Success := RegisterTool(ToolDef);
+      if Success then Inc(regCount);
+      if DEBUG_LOG then
+        if Success then
+          DoStatus('[RegisterTools] OK: CodeDeclToJsonAbi_GetLastCMakeScript')
+        else
+          DoStatus('[RegisterTools] FAIL: CodeDeclToJsonAbi_GetLastCMakeScript');
+    finally
+      ToolDef.Free;
+    end;
+
+    // Tool: CodeDeclToJsonAbi_GetLastTestMainCpp -> CodeDeclToJsonAbi_GetLastTestMainCpp
+    ToolDef := TZ_JsonObject.Create;
+    try
+      ToolDef.S['name'] := 'CodeDeclToJsonAbi_GetLastTestMainCpp';
+      ToolDef.S['description'] := '(* [code_decl_to_json_abi] Step 3/3 - CMake test driver reader. Returns the full text of test_main___.cpp produced by http_cmake_generator_tool. This is the companion driver that the CMake script compiles into the <Unit>_http_json_call_test executable. The driver: constructs a lingofuse::LibraryLoader as its first statement, prepares a client connection to ipc:<Unit>_http_json, sets HTTP_CALL_BASE_URL to http://127.0.0.1:8081/<Unit>, calls every supported wrapper function with default arguments, prints "OK" or "FAILED: <reason>" per call, returns 0 if every call succeeded, 1 otherwise. It uses the same naming rules as the C++ call generator, so the function names it references resolve to the call wrapper'#39's public API without any manual adjustment. Prerequisite for running it: bridge.py must be listening on the same endpoint, and the C++ service executable must be running. Pure reader. Returns '#39#39' if GenerateAll has not succeeded. No parameters. Return value: the test_main___.cpp text, or an empty string. )';
+      ToolDef.S['target_app'] := MY_APP_NAME;
+      ToolDef.S['target_api'] := 'CodeDeclToJsonAbi_GetLastTestMainCpp';
+
+      ParamsObj := ToolDef.O['parameters'];
+      ParamsObj.S['type'] := 'object';
+      PropsObj := ParamsObj.O['properties'];
+      Success := RegisterTool(ToolDef);
+      if Success then Inc(regCount);
+      if DEBUG_LOG then
+        if Success then
+          DoStatus('[RegisterTools] OK: CodeDeclToJsonAbi_GetLastTestMainCpp')
+        else
+          DoStatus('[RegisterTools] FAIL: CodeDeclToJsonAbi_GetLastTestMainCpp');
+    finally
+      ToolDef.Free;
+    end;
+
+    Result := (regCount = 24);
     if DEBUG_LOG then
-      DoStatus('[RegisterTools] Registered %d out of %d tools.', [regCount, 22]);
+      DoStatus('[RegisterTools] Registered %d out of %d tools.', [regCount, 24]);
   finally
   end;
 end;
@@ -3150,7 +3519,7 @@ begin
   LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_SetModelJson', '(* [code_decl_to_json_abi] Step 1/3 - Store an LV1 model JSON directly. Alternative to CodeDeclToJsonAbi_SetSourceCode for callers that already have the LV1 model JSON. Use this only if you produced the Model JSON yourself (for example, via CodeDeclToJsonAbi_GetModelJson in an earlier session, or via any other tool that emits the same shape). This bypasses both the source-text parser and the JSON normalizer. It does NOT generate any artifact; call GenerateAll afterwards. ModelJson: an LV1 model JSON document. Must be the output shape of TPascal_Func_Model.SaveToJson, as produced by CodeDeclToJsonAbi_GetModelJson. Return value: JSON string. On success: {"status":"ok","unit_name":"<unit name from model>"} On failure: {"error":"<message>"} )', nil, @Callback_CodeDeclToJsonAbi_SetModelJson_CodeDeclToJsonAbi_SetModelJson);  // Register API: CodeDeclToJsonAbi_SetModelJson -> CodeDeclToJsonAbi_SetModelJson
   LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetSourceJson', '(* [code_decl_to_json_abi] Step 3/3 - Inspect the Source JSON. Returns the Source JSON produced by the parser from the source text stored by the most recent successful CodeDeclToJsonAbi_SetSourceCode call. Pure reader: never triggers a new conversion. Returns '#39#39' if SetSourceCode has not been called successfully yet, or if the most recent Step-1 call was SetModelJson (which bypasses the parser and therefore does not produce a Source JSON). No parameters. Return value: the Source JSON text, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetSourceJson_CodeDeclToJsonAbi_GetSourceJson);  // Register API: CodeDeclToJsonAbi_GetSourceJson -> CodeDeclToJsonAbi_GetSourceJson
   LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetModelJson', '(* [code_decl_to_json_abi] Step 3/3 - Inspect the Model JSON. Returns the LV1 model JSON produced by the normalizer from the Source JSON. Pure reader: never triggers a new conversion. Returns '#39#39' if neither SetSourceCode nor SetModelJson has been called successfully yet. If SetModelJson was the most recent Step-1 call, this reader returns the exact JSON that was passed to SetModelJson. If SetSourceCode was the most recent Step-1 call, this reader returns the Model JSON that the normalizer produced from the parsed source. No parameters. Return value: the Model JSON text, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetModelJson_CodeDeclToJsonAbi_GetModelJson);  // Register API: CodeDeclToJsonAbi_GetModelJson -> CodeDeclToJsonAbi_GetModelJson
-  LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GenerateAll', '(* [code_decl_to_json_abi] Step 2/3 - Generate all 17 artifacts. Runs the seven generators twice each (once for the code artifact(s), once for the README artifact) against the currently stored Model JSON, and caches all 17 results. After this call the Step-3 readers return the freshly generated text. Prerequisite: either CodeDeclToJsonAbi_SetSourceCode or CodeDeclToJsonAbi_SetModelJson must have succeeded earlier in this session. If neither has, this call returns an error. Calling GenerateAll multiple times is safe; each call re-runs the seven generators against the current Model JSON and replaces the cached outputs. This is also the correct way to refresh the cache after a second SetSourceCode / SetModelJson call. No parameters. Return value: JSON string describing the produced files. On success: {"status":"ok","unit_name":"<unit>", "files":{ "pascal_service_code":    "<...>.pas", "pascal_service_readme":  "<...>.md", "pascal_call_code":       "<...>.pas", "pascal_call_readme":     "<...>.md", "js_call_code":           "<...>.js", "js_call_readme":         "<...>.md", "js_test_html":           "<...>.html", "python_service_code":    "<...>.py", "python_service_readme":  "<...>.md", "python_call_code":       "<...>.py", "python_call_readme":     "<...>.md", "cpp_service_header":     "<...>.hpp", "cpp_service_impl":       "<...>.cpp", "cpp_service_readme":     "<...>.md", "cpp_call_header":        "<...>.hpp", "cpp_call_impl":          "<...>.cpp", "cpp_call_readme":        "<...>.md" }} On failure: {"error":"<message>"} )', nil, @Callback_CodeDeclToJsonAbi_GenerateAll_CodeDeclToJsonAbi_GenerateAll);  // Register API: CodeDeclToJsonAbi_GenerateAll -> CodeDeclToJsonAbi_GenerateAll
+  LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GenerateAll', '(* [code_decl_to_json_abi] Step 2/3 - Generate all 19 artifacts. Runs the eight generators against the currently stored Model JSON and caches all 19 results. After this call the Step-3 readers return the freshly generated text. The eight generators are: http_pas_abi_service_generator_tool   (code + README) http_pas_abi_call_generator_tool      (code + README) http_js_abi_call_generator_tool       (code + README + HTML) http_py_abi_service_generator_tool    (code + README) http_py_abi_call_generator_tool       (code + README) http_cpp_abi_service_generator_tool   (header + impl + README) http_cpp_abi_call_generator_tool      (header + impl + README) http_cmake_generator_tool             (CMakeLists.txt + test_main) Prerequisite: either CodeDeclToJsonAbi_SetSourceCode or CodeDeclToJsonAbi_SetModelJson must have succeeded earlier in this session. If neither has, this call returns an error. Calling GenerateAll multiple times is safe; each call re-runs the eight generators against the current Model JSON and replaces the cached outputs. This is also the correct way to refresh the cache after a second SetSourceCode / SetModelJson call. No parameters. Return value: JSON string describing the produced files. On success: {"status":"ok","unit_name":"<unit>", "files":{ "pascal_service_code":    "<...>.pas", "pascal_service_readme":  "<...>.md", "pascal_call_code":       "<...>.pas", "pascal_call_readme":     "<...>.md", "js_call_code":           "<...>.js", "js_call_readme":         "<...>.md", "js_test_html":           "<...>.html", "python_service_code":    "<...>.py", "python_service_readme":  "<...>.md", "python_call_code":       "<...>.py", "python_call_readme":     "<...>.md", "cpp_service_header":     "<...>.hpp", "cpp_service_impl":       "<...>.cpp", "cpp_service_readme":     "<...>.md", "cpp_call_header":        "<...>.hpp", "cpp_call_impl":          "<...>.cpp", "cpp_call_readme":        "<...>.md", "cmake_script":           "CMakeLists.txt", "test_main_cpp":          "test_main___.cpp" }} On failure: {"error":"<message>"} )', nil, @Callback_CodeDeclToJsonAbi_GenerateAll_CodeDeclToJsonAbi_GenerateAll);  // Register API: CodeDeclToJsonAbi_GenerateAll -> CodeDeclToJsonAbi_GenerateAll
   LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetLastPascalServiceCode', '(* [code_decl_to_json_abi] Step 3/3 - Pascal service reader (code). Returns the full text of the Pascal HTTP/JSON service unit produced by the most recent successful GenerateAll. Pure reader: never triggers a new conversion, never requires calling SetSourceCode again. Prerequisite: GenerateAll must have succeeded first. If it has not, this returns an empty string. No parameters. Return value: the Pascal service unit text, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetLastPascalServiceCode_CodeDeclToJsonAbi_GetLastPascalServiceCode);  // Register API: CodeDeclToJsonAbi_GetLastPascalServiceCode -> CodeDeclToJsonAbi_GetLastPascalServiceCode
   LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetLastPascalServiceReadme', '(* [code_decl_to_json_abi] Step 3/3 - Pascal service reader (README). Returns the full text of the Markdown README paired with the Pascal service unit. Pure reader. Returns '#39#39' if GenerateAll has not succeeded. No parameters. Return value: the Markdown README, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetLastPascalServiceReadme_CodeDeclToJsonAbi_GetLastPascalServiceReadme);  // Register API: CodeDeclToJsonAbi_GetLastPascalServiceReadme -> CodeDeclToJsonAbi_GetLastPascalServiceReadme
   LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetLastPascalCallCode', '(* [code_decl_to_json_abi] Step 3/3 - Pascal call-side reader (code). Returns the full text of the Pascal HTTP/JSON call-side unit produced by the most recent successful GenerateAll. Pure reader. Returns '#39#39' if GenerateAll has not succeeded. No parameters. Return value: the Pascal call-side unit text, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetLastPascalCallCode_CodeDeclToJsonAbi_GetLastPascalCallCode);  // Register API: CodeDeclToJsonAbi_GetLastPascalCallCode -> CodeDeclToJsonAbi_GetLastPascalCallCode
@@ -3168,8 +3537,10 @@ begin
   LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetLastCppCallHeader', '(* [code_decl_to_json_abi] Step 3/3 - C++ call-side reader (header). Returns the full text of the C++ HTTP/JSON call-side header (.hpp) produced by the most recent successful GenerateAll. Pure reader. Returns '#39#39' if GenerateAll has not succeeded. No parameters. Return value: the header text, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetLastCppCallHeader_CodeDeclToJsonAbi_GetLastCppCallHeader);  // Register API: CodeDeclToJsonAbi_GetLastCppCallHeader -> CodeDeclToJsonAbi_GetLastCppCallHeader
   LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetLastCppCallImpl', '(* [code_decl_to_json_abi] Step 3/3 - C++ call-side reader (implementation). Returns the full text of the C++ HTTP/JSON call-side implementation (.cpp) produced by the most recent successful GenerateAll. Pure reader. Returns '#39#39' if GenerateAll has not succeeded. No parameters. Return value: the implementation text, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetLastCppCallImpl_CodeDeclToJsonAbi_GetLastCppCallImpl);  // Register API: CodeDeclToJsonAbi_GetLastCppCallImpl -> CodeDeclToJsonAbi_GetLastCppCallImpl
   LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetLastCppCallReadme', '(* [code_decl_to_json_abi] Step 3/3 - C++ call-side reader (README). Returns the full text of the Markdown README paired with the C++ call-side header and implementation. Pure reader. Returns '#39#39' if GenerateAll has not succeeded. No parameters. Return value: the Markdown README, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetLastCppCallReadme_CodeDeclToJsonAbi_GetLastCppCallReadme);  // Register API: CodeDeclToJsonAbi_GetLastCppCallReadme -> CodeDeclToJsonAbi_GetLastCppCallReadme
+  LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetLastCMakeScript', '(* [code_decl_to_json_abi] Step 3/3 - CMake script reader. Returns the full text of the CMakeLists.txt produced by http_cmake_generator_tool. The script builds TWO executables in one CMake project: <Unit>_http_json_service        the C++ service executable <Unit>_http_json_call_test      the C++ call-side test executable The script expects the following files to be placed next to it in the same directory: <Unit>_http_json_service.hpp <Unit>_http_json_service.cpp <Unit>_http_json_call.hpp <Unit>_http_json_call.cpp test_main___.cpp                (from GetLastTestMainCpp) The path to the LingoFuse C++ library directory is supplied at configure time through the LINGOFUSE_CPP_LIB_DIR cache variable. The directory must contain LingoFuse.h, LingoFuse.c, LingoFuse.hpp, lf_io.hpp, lf_http_bridge_client.hpp, and json.hpp. The script does NOT stage any dynamic library. Where the DLLs live is a deployment concern. Pure reader. Returns '#39#39' if GenerateAll has not succeeded. No parameters. Return value: the CMakeLists.txt text, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetLastCMakeScript_CodeDeclToJsonAbi_GetLastCMakeScript);  // Register API: CodeDeclToJsonAbi_GetLastCMakeScript -> CodeDeclToJsonAbi_GetLastCMakeScript
+  LF_RegisterCallEx(App, 'CodeDeclToJsonAbi_GetLastTestMainCpp', '(* [code_decl_to_json_abi] Step 3/3 - CMake test driver reader. Returns the full text of test_main___.cpp produced by http_cmake_generator_tool. This is the companion driver that the CMake script compiles into the <Unit>_http_json_call_test executable. The driver: constructs a lingofuse::LibraryLoader as its first statement, prepares a client connection to ipc:<Unit>_http_json, sets HTTP_CALL_BASE_URL to http://127.0.0.1:8081/<Unit>, calls every supported wrapper function with default arguments, prints "OK" or "FAILED: <reason>" per call, returns 0 if every call succeeded, 1 otherwise. It uses the same naming rules as the C++ call generator, so the function names it references resolve to the call wrapper'#39's public API without any manual adjustment. Prerequisite for running it: bridge.py must be listening on the same endpoint, and the C++ service executable must be running. Pure reader. Returns '#39#39' if GenerateAll has not succeeded. No parameters. Return value: the test_main___.cpp text, or an empty string. )', nil, @Callback_CodeDeclToJsonAbi_GetLastTestMainCpp_CodeDeclToJsonAbi_GetLastTestMainCpp);  // Register API: CodeDeclToJsonAbi_GetLastTestMainCpp -> CodeDeclToJsonAbi_GetLastTestMainCpp
   if DEBUG_LOG then
-    DoStatus('[RegisterAPIs] Registered APIs: 22 functions');
+    DoStatus('[RegisterAPIs] Registered APIs: 24 functions');
   Result := App;
 end;
 
