@@ -1,35 +1,34 @@
-# code_decl_to_json_abi Complete Knowledge Base
+# code_decl_to_json_abi Complete Knowledge Base (v2)
 
-> **Purpose**: This document is the **single authoritative reference** for the `code_decl_to_json_abi` toolchain. After reading this document, you should be able to correctly, without looking at any source code:
-> - Drive the entire generation workflow through the MCP API (22 tools);
-> - Understand the content and purpose of every artifact file;
-> - Determine whether a given Pascal / C function will be supported;
-> - Troubleshoot common failure scenarios.
+> **Purpose**: This document is the single authoritative reference for the `code_decl_to_json_abi` toolchain. After reading it, you should be able to correctly drive the entire generation workflow — GUI, CLI, or MCP — without reading any source code.
 >
-> **Promise**: Every statement in this document has been verified line-by-line against the source. Anything I cannot determine from the source is explicitly called out in the "Honest Uncertainty List" at the end.
+> **Promise**: Every statement has been verified against the current source. Anything I cannot determine is explicitly called out in the Honest Uncertainty List at the end.
 >
-> **Scope**: `code_decl_to_json_abi.lpr`, `code_decl_to_abi_json_frm.pas`, `code_decl_to_json_abi_mcp_api.pas`, `code_decl_to_json_abi_mcp_api_tool_provider_unit.pas`, and the 7 generator units.
+> **Version**: v2. This version supersedes v1 and reflects three additions: (a) the CMake generator tool and its two fixed-name artifacts, (b) the bootstrap → AI-fill architecture of the MCP tool provider unit, and (c) the growth of the MCP tool set from 22 to **24 tools**.
 >
-> **Document language**: English. **File names**: English.
+> **Scope**: `code_decl_to_json_abi.lpr`, `code_decl_to_abi_json_frm.pas`, `code_decl_to_json_abi_cmdline.pas`, `code_decl_to_json_abi_mcp_api_tool_provider_unit.pas`, `http_cmake_generator_tool.pas`, and the seven code generators.
+>
+> **Document language**: English.
 
 ---
 
 ## Table of Contents
 
-- [Chapter 0  Quick Orientation](#chapter-0-quick-orientation)
-- [Chapter 1  Core Concepts and Terminology](#chapter-1-core-concepts-and-terminology)
-- [Chapter 2  Three-Phase Workflow](#chapter-2-three-phase-workflow)
-- [Chapter 3  MCP API Complete Reference](#chapter-3-mcp-api-complete-reference)
-- [Chapter 4  All 22 Tools Quick Reference](#chapter-4-all-22-tools-quick-reference)
-- [Chapter 5  UI Controls Complete Reference](#chapter-5-ui-controls-complete-reference)
-- [Chapter 6  The 7 Generators in Detail](#chapter-6-the-7-generators-in-detail)
-- [Chapter 7  Type System and Mapping Rules](#chapter-7-type-system-and-mapping-rules)
-- [Chapter 8  HTTP/JSON Wire Protocol](#chapter-8-httpjson-wire-protocol)
-- [Chapter 9  Error Handling and Error Codes](#chapter-9-error-handling-and-error-codes)
-- [Chapter 10  Common Pitfalls and Anti-Patterns](#chapter-10-common-pitfalls-and-anti-patterns)
-- [Chapter 11  AI Agent Usage Rules and Decision Tree](#chapter-11-ai-agent-usage-rules-and-decision-tree)
-- [Chapter 12  Complete Usage Examples](#chapter-12-complete-usage-examples)
-- [Chapter 13  Honest Uncertainty List](#chapter-13-honest-uncertainty-list)
+- [Chapter 0  Quick Orientation](#chapter-0--quick-orientation)
+- [Chapter 1  The Bootstrap → AI-Fill Architecture](#chapter-1--the-bootstrap--ai-fill-architecture)
+- [Chapter 2  Three Frontends, One Source of Truth](#chapter-2--three-frontends-one-source-of-truth)
+- [Chapter 3  The CMake Sub-Toolchain](#chapter-3--the-cmake-sub-toolchain)
+- [Chapter 4  Three-Phase Workflow](#chapter-4--three-phase-workflow)
+- [Chapter 5  MCP API Complete Reference (24 Tools)](#chapter-5--mcp-api-complete-reference-24-tools)
+- [Chapter 6  The 8 Generators in Detail](#chapter-6--the-8-generators-in-detail)
+- [Chapter 7  Type System and Mapping Rules](#chapter-7--type-system-and-mapping-rules)
+- [Chapter 8  HTTP/JSON Wire Protocol](#chapter-8--httpjson-wire-protocol)
+- [Chapter 9  Error Handling and Error Codes](#chapter-9--error-handling-and-error-codes)
+- [Chapter 10  Complete Artifact Inventory](#chapter-10--complete-artifact-inventory)
+- [Chapter 11  Common Pitfalls and Anti-Patterns](#chapter-11--common-pitfalls-and-anti-patterns)
+- [Chapter 12  AI Agent Usage Rules and Decision Tree](#chapter-12--ai-agent-usage-rules-and-decision-tree)
+- [Chapter 13  Complete Usage Examples](#chapter-13--complete-usage-examples)
+- [Chapter 14  Honest Uncertainty List](#chapter-14--honest-uncertainty-list)
 
 ---
 
@@ -37,232 +36,507 @@
 
 ### 0.1 What This Project Is
 
-`code_decl_to_json_abi` is a **cross-language code generator**. It takes a **Pascal unit** or a **C header file** as input and automatically generates **LingoFuse service-side / call-side code targeting the HTTP/JSON protocol**, covering the following target languages:
+`code_decl_to_json_abi` is a **cross-language code generator**. It accepts a Pascal unit or a C header and produces LingoFuse service-side and call-side code targeting the HTTP/JSON protocol, for the following target languages:
 
 - **Pascal** (service + call)
 - **Python** (service + call)
-- **C++** (service + call)
-- **JavaScript** (call side + HTML test page only)
+- **C++** (service + call, plus a CMake build script and a C++ test driver)
+- **JavaScript** (call side + a self-contained HTML test page)
 
-**17 artifacts in total** (each artifact is paired with a Markdown usage document; READMEs count toward the artifact total).
+The output is a set of artifacts, each paired with a Markdown companion document that carries the language-specific build commands, CMake scripts, and test programs.
 
 ### 0.2 Three Public Frontends
 
-The same generation capability is exposed through three entry points:
+All three drive the **same underlying GUI form**. There is no parallel implementation of the generation logic; the CLI and the MCP provider both simulate the GUI's button clicks and edit-field writes.
 
-| Entry | File | Audience |
-|-------|------|----------|
-| **GUI** | `code_decl_to_json_abi.lpr` + `code_decl_to_abi_json_frm.pas` | Human engineers |
-| **MCP API (declarations)** | `code_decl_to_json_abi_mcp_api.pas` | Only for other units to `uses` |
-| **MCP API (implementation + registration)** | `code_decl_to_json_abi_mcp_api_tool_provider_unit.pas` | Discovered by the LingoFuse beacon |
-
-**All three behave identically**: the MCP path reuses the entire GUI logic by "simulating UI operations" on the main thread.
+| Entry point | Trigger | Audience |
+|-------------|---------|----------|
+| **GUI** | Launch with no arguments | Human engineers |
+| **CLI** | Launch with at least one argument | Build scripts, CI |
+| **MCP** | Automatic, after the GUI starts | AI agents, remote tools |
 
 ### 0.3 5-Second Cheat Sheet
 
 ```
 Step 1: SetSourceCode(Source, "pascal" | "c")     // or SetModelJson(ModelJson)
 Step 2: GenerateAll()
-Step 3: GetLast<Lang><Side><Artifact>()           // pick from the 17 readers
+Step 3: GetLast<Lang><Side><Artifact>()           // choose from 24 readers
 ```
 
-### 0.4 The 7 Most Important Rules
+### 0.4 The 8 Rules You Must Not Forget
 
-1. **The `Language` argument only accepts `"pascal"` or `"c"`**. `python` / `cpp` / `js` are *target* languages, **not** source languages.
-2. **After Step 1, you must call `GenerateAll`**. Otherwise all readers return empty strings.
-3. **Read is pure read** — it does not trigger new generation; to refresh the cache, call `GenerateAll` again.
-4. **A single `SetSourceCode` covers the entire session**. Switching target language does not require a new source.
-5. **Service and Call halves must come from the same source text** — do not mix them.
-6. **Arguments of type `Boolean` / `Variant` / array / record / class / interface / enum / set / generics / pointer / `Currency` / `Comp` / `TDateTime` cause the entire routine to be silently dropped**.
-7. **`int64` / `uint64` may lose precision on the JS client** (JS `Number` is IEEE-754 double).
+1. **The `Language` argument only accepts `"pascal"` or `"c"`**. `"python"`, `"cpp"`, and `"js"` are **target** languages, not **source** languages.
+2. **After Step 1, you must call `GenerateAll`**. Otherwise every reader returns an empty string.
+3. **Read is a pure read**. It never triggers a new generation; to refresh the cache, call `GenerateAll` again.
+4. **A single `SetSourceCode` covers the entire session**. Switching target language does not require re-feeding the source.
+5. **Service and Call halves must come from the same source text**.
+6. **Types outside the three ABI families cause the entire routine to be silently dropped** (see Chapter 7).
+7. **`int64` / `uint64` lose precision on the JS client** because JS `Number` is IEEE-754 double.
+8. **The bridge (`bridge.py` / `bridge.exe`) must always be running** for any generated Call artifact to work.
 
 ---
 
-## Chapter 1  Core Concepts and Terminology
+## Chapter 1  The Bootstrap → AI-Fill Architecture
 
-### 1.1 Glossary
+### 1.1 What a "Bootstrap Script" Is
 
-| Term | Definition |
-|------|------------|
-| **Source** | Input text: a Pascal unit or a C header file |
-| **Source Language** | The source language. **Only** `pascal` or `c` |
-| **Target Language** | The target language: `pascal` / `python` / `cpp` / `javascript` |
-| **Side** | Which side. `Service` / `Call` |
-| **Source JSON (LV0)** | Intermediate JSON produced by parsing the source text |
-| **Model JSON (LV1)** | Model JSON produced by normalizing Source JSON; the sole input to the generators |
-| **Service** | Service side: registers APIs, decodes requests, runs user implementations, encodes responses |
-| **Call** | Call side: exposes the same signatures as functions, serializes arguments, issues remote calls |
-| **Bridge** | The converter between HTTP/JSON and LingoFuse (`bridge.py`) |
-| **MCP API** | The 22 tool functions exposed to agents through the LingoFuse beacon |
-| **Beacon** | The LingoFuse application hosting all tool registration info (default name `agent_main_app`) |
-| **Tool Provider Unit** | The Pascal unit that registers MCP APIs with the beacon |
+The toolchain ships a **bootstrap script** whose sole job is to emit a **structurally complete but semantically empty** Pascal unit:
 
-### 1.2 Two Legal Forms of Source Text
+```
+code_decl_to_json_abi_mcp_api_tool_provider_unit.pas
+```
 
-#### 1.2.1 Pascal Unit (`Language = "pascal"`)
+The bootstrap script does not write any business logic. It writes:
 
-Must be a complete `.pas` file with this structure:
+1. **A unit skeleton** — the `unit` header, the `interface`, the `uses` clause, the exported global variables, the `TCompute`-based callback registration code.
+2. **24 cdecl callback shells** — one per MCP tool, each with the full `try/except` envelope already written, and each already wired to a matching `internal_call_<ToolName>` function.
+3. **24 `internal_call_*` function stubs** — the function signatures are correct; the bodies are empty.
+4. **24 tool-schema registrations** in `RegisterTools` — each tool's `name`, `description`, `target_app`, and `target_api` fields are filled in; the JSON `parameters` schema is pre-populated with the correct types and required-field lists.
+5. **The `RegisterAPIs` and `Execute_And_Reg_all` functions** — the LingoFuse App creation, the `LF_RegisterCallEx` calls, and the beacon connection logic.
+
+In short: the bootstrap script writes the **plumbing**; it does not write the **dispatch logic**.
+
+### 1.2 What the AI Fills In
+
+After the bootstrap script has produced the unit, an AI fills in the **body of each `internal_call_*` function**. Each body follows the same pattern:
 
 ```pascal
-unit MyUnit;
-
-interface
-
-uses
-  SysUtils, ...;
-
-// top-level function/procedure declarations
-function Add(a, b: Integer): Integer;
-procedure Log(msg: string);
-
-implementation
-
-// implementations (ignored)
-
-end.
+function internal_call_CodeDeclToJsonAbi_<ToolName>(...): string;
+{$IFDEF FPC}
+  procedure Do_Sync___();
+  begin
+    // ← the AI writes this block
+  end;
+{$ELSE FPC}
+var
+  temp_: string;
+{$ENDIF FPC}
+begin
+{$IFDEF FPC}
+  TCompute.Sync(Do_Sync___);
+{$ELSE FPC}
+  TCompute.Sync(procedure()
+  begin
+    // ← the AI writes this block (Delphi version)
+    temp_ := ...;
+  end);
+  Result := temp_;
+{$ENDIF FPC}
+end;
 ```
 
-**What the parser cares about**:
-- The `unit` declaration (extracts `UnitName`)
-- **Top-level** function / procedure declarations between `interface` and `implementation`
-- The comment immediately preceding a declaration (extracted as the description)
+The AI's job is to write the **nested `Do_Sync___` procedure body** (FPC) or the **anonymous procedure body** (Delphi). Everything else — the `TCompute.Sync` wrapper, the `{$IFDEF}` split, the exception envelope, the callback dispatch — is already in place from the bootstrap.
 
-**What the parser ignores**:
-- Everything after `implementation`
-- Declarations inside classes / records / interfaces (`NestLevel > 0`)
-- Unit lists in `uses` (recorded into `UsesList` but do not affect generation)
+### 1.3 Why the UI-Synchronization Pattern
 
-#### 1.2.2 C Header File (`Language = "c"`)
+The critical design decision: **the AI does not write new state management logic**. Every MCP tool body delegates to the GUI form. The chain of custody is:
 
-Must be a complete `.h` file with this structure:
-
-```c
-/* MyHeader.h */
-#ifndef MYHEADER_H
-#define MYHEADER_H
-
-/* top-level function prototypes */
-int Add(int a, int b);
-void Log(const char* msg);
-
-#endif /* MYHEADER_H */
+```
+MCP client
+    ↓ calls CodeDeclToJsonAbi_GenerateAll (LingoFuse Call)
+Callback_CodeDeclToJsonAbi_GenerateAll_..._GenerateAll (cdecl, worker thread)
+    ↓ calls internal_call_...
+internal_call_CodeDeclToJsonAbi_GenerateAll_..._GenerateAll
+    ↓ TCompute.Sync(Do_Sync___)
+Do_Sync___ (runs on the MAIN thread)
+    ↓ writes code_decl_to_abi_json_form.SourceCodeEditor.Text
+    ↓ calls code_decl_to_abi_json_form.ParseSourceToJsonClick
+    ↓ calls code_decl_to_abi_json_form.NormalizeJsonToModelClick
+    ↓ calls code_decl_to_abi_json_form.GenerateAllSourcesClick
+    ↓ reads code_decl_to_abi_json_form.PascalServiceCodeEditor.Lines.Text
+    ↓ returns to TCompute.Sync
+TCompute.Sync returns
+    ↓ internal_call_* returns the string
+Callback_* writes the string to the output DataHandle
+    ↓ LingoFuse returns to the MCP client
 ```
 
-**What the parser cares about**:
-- The `#ifndef` / `#define` include guard (extracts `UnitName`)
-- Top-level function prototypes
+Every arrow in that chain is **written once** by the bootstrap script, except the three lines inside `Do_Sync___` that touch the form.
 
-**What the parser ignores**:
-- Macro definitions (other than the guard)
-- `struct` / `enum` / `union` / `typedef`
-- Global variable declarations (with `=` initialization)
-- Function definitions (with `{ ... }` bodies)
-- Function-pointer parameters (containing `(*...)`)
+**Consequences of this design**:
 
-### 1.3 Three Type Families
+1. **The GUI is the single source of truth.** There is no parallel state. If the GUI shows a value, the MCP tool returns that value. If the GUI does not have it, the MCP tool returns an empty string.
+2. **Adding a new MCP tool is a purely mechanical operation.** Copy an existing `internal_call_*` pair (callback + internal), rename it, point it at a different form field or button click, and add the tool schema to `RegisterTools`.
+3. **The GUI's button-click handlers are effectively the MCP tool implementations.** The MCP layer is a thin remote-control veneer.
+4. **Thread-safety is inherited, not reinvented.** `TCompute.Sync` marshals the body onto the main thread, where the LCL is safe to touch. The AI never has to think about critical sections.
 
-All 7 generators only recognize these three **families** (members are listed in Chapter 7):
+### 1.4 What the AI Must Not Do
 
-- **String family**
-- **Float family**
-- **Integer family**
+- **Do not add new state fields to the form** for the sake of an MCP tool. If a value is needed, it must already exist as a form editor or a form field.
+- **Do not call UI methods from the worker thread.** Every UI touch must be inside `Do_Sync___` (or the anonymous procedure), which `TCompute.Sync` runs on the main thread.
+- **Do not bypass the callback envelope.** The `try/except` around the `internal_call_*` is written by the bootstrap; the AI's body should let exceptions propagate so the envelope can convert them into `{"error": "..."}`.
+- **Do not renumber or rename the tools.** Tool names are stable identifiers that external callers depend on.
 
-**Argument types outside these three families cause the entire routine to be silently dropped.**
+### 1.5 Worked Example — `SetSourceCode`
 
-### 1.4 Session State
+The bootstrap writes:
 
-- All state lives on the main form instance `code_decl_to_abi_json_form`.
-- **Not persisted** (the MCP path, per the source implementation, writes files to `<executable directory>/<UnitName>/`; see Chapter 5 for details).
-- There is no explicit reset tool; re-calling `SetSourceCode` / `SetModelJson` replaces everything.
-- Exiting the process discards all state.
+```pascal
+procedure Callback_CodeDeclToJsonAbi_SetSourceCode_CodeDeclToJsonAbi_SetSourceCode(
+  _Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
+var
+  jsonBytes: TBytes;
+  jo: TZ_JsonObject;
+  Source: string;
+  Language: string;
+  ret: string;
+  errMsg: string;
+begin
+  jo := TZ_JsonObject.Create;
+  try
+    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
+    // ... (envelope: empty check, JSON parse, error write-back) ...
+    Source   := jo.S['Source'];
+    Language := jo.S['Language'];
+
+    ret := internal_call_CodeDeclToJsonAbi_SetSourceCode_CodeDeclToJsonAbi_SetSourceCode(Source, Language);
+    jo.Clear;
+    jo.S['result'] := ret;
+    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
+    // ... (logging) ...
+  except
+    // ... (exception write-back) ...
+  end;
+  jo.Free;
+end;
+```
+
+The AI writes only:
+
+```pascal
+function internal_call_CodeDeclToJsonAbi_SetSourceCode_CodeDeclToJsonAbi_SetSourceCode(
+  Source: string; Language: string): string;
+{$IFDEF FPC}
+  procedure Do_Sync___();
+  var
+    lang: string;
+  begin
+    if code_decl_to_abi_json_form = nil then
+    begin
+      Result := JsonError('Form not available');
+      Exit;
+    end;
+
+    lang := LowerCase(Trim(Language));
+    if lang = 'pascal' then
+    begin
+      code_decl_to_abi_json_form.LanguageSelectorComboBox.ItemIndex := 1;
+      code_decl_to_abi_json_form.LanguageSelectorChange(
+        code_decl_to_abi_json_form.LanguageSelectorComboBox);
+    end
+    else if lang = 'c' then
+    begin
+      code_decl_to_abi_json_form.LanguageSelectorComboBox.ItemIndex := 2;
+      code_decl_to_abi_json_form.LanguageSelectorChange(
+        code_decl_to_abi_json_form.LanguageSelectorComboBox);
+    end
+    else
+    begin
+      Result := JsonError('Unsupported language. Use pascal or c.');
+      Exit;
+    end;
+
+    code_decl_to_abi_json_form.SourceCodeEditor.Text := Source;
+    code_decl_to_abi_json_form.MainPageControl.ActivePage :=
+      code_decl_to_abi_json_form.SourceCodeTabSheet;
+
+    FSessionCMakeScript := '';
+    FSessionTestMainCpp := '';
+
+    Result := JsonStatusOk;
+  end;
+{$ELSE FPC}
+var
+  temp_: string;
+{$ENDIF FPC}
+begin
+  // ... the TCompute.Sync wrapper as shown in §1.2 ...
+end;
+```
+
+The AI's contribution is exactly the **five UI touches** inside `Do_Sync___`: setting the combo box index, calling the combo box's change handler, writing the editor text, switching the page, and clearing the two session caches. Everything else is mechanical.
+
+### 1.6 Where the Pattern Extends
+
+The same pattern applies to **all 24 tools**, with three variations:
+
+- **Setter tools** (`SetSourceCode`, `SetModelJson`): write to an editor, switch to a tab, return a status JSON.
+- **Reader tools** (`GetSourceJson`, `GetModelJson`, and the 19 artifact readers): switch to the appropriate tab, return the corresponding editor's `.Lines.Text`.
+- **Driver tools** (`GenerateAll`): call a sequence of button-click handlers in the right order, then read the resulting JSON to build a file manifest.
+
+No tool does anything that the GUI cannot do by hand.
 
 ---
 
-## Chapter 2  Three-Phase Workflow
+## Chapter 2  Three Frontends, One Source of Truth
 
-### 2.1 Flow Diagram
+### 2.1 The GUI Form Is the State
+
+Every piece of state lives on the form instance `Tcode_decl_to_abi_json_form`. There is no global model. There is no separate MCP session. The form is the session.
+
+Fields that matter:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `SourceCodeEditor` | `TSynEdit` | source text |
+| `SourceJsonEditor` | `TSynEdit` | LV0 Source JSON |
+| `ModelJsonEditor` | `TSynEdit` | LV1 Model JSON |
+| `PascalServiceCodeEditor`, `PascalServiceReadmeEditor` | `TSynEdit` | Pascal service artifacts |
+| `PascalCallCodeEditor`, `PascalCallReadmeEditor` | `TSynEdit` | Pascal call artifacts |
+| `JavaScriptCallCodeEditor`, `JavaScriptCallReadmeEditor`, `JavaScriptTestHtmlEditor` | `TSynEdit` | JS artifacts |
+| `PythonServiceCodeEditor`, `PythonServiceReadmeEditor` | `TSynEdit` | Python service artifacts |
+| `PythonCallCodeEditor`, `PythonCallReadmeEditor` | `TSynEdit` | Python call artifacts |
+| `CppServiceHeaderEditor`, `CppServiceImplEditor`, `CppServiceReadmeEditor` | `TSynEdit` | C++ service artifacts |
+| `CppCallHeaderEditor`, `CppCallImplEditor`, `CppCallReadmeEditor` | `TSynEdit` | C++ call artifacts |
+| `CMakeEditor`, `CMake_TestMain_Editor` | `TSynEdit` | CMake artifacts (shown in GUI) |
+| `MainPageControl`, `FinalSourcePageControl` | `TPageControl` | which page is visible |
+
+**Session-only caches** (not visible to the user, but important for the MCP path):
+
+| Field | Purpose |
+|-------|---------|
+| `FSessionCMakeScript: string` | the CMake script text, cached for `GetLastCMakeScript` |
+| `FSessionTestMainCpp: string` | the test driver text, cached for `GetLastTestMainCpp` |
+
+These two caches exist because the CMake artifacts are not shown as first-class editors in the GUI's tab structure. They are written to disk during `GenerateAll`, and cached in memory so the readers can return them without re-reading the disk.
+
+### 2.2 The GUI Frontend
+
+**Trigger**: launch with zero arguments.
+
+**Behavior**: the LCL application starts, `Tcode_decl_to_abi_json_form` is created, and `Application.Run` enters the event loop. The user sees five tabs:
 
 ```
-┌───────────────────────────────┐
-│  Step 1: Input                │
-│  ─────────────────────────    │
-│  ① SetSourceCode(Source, Lang)│  ← source text + source language
-│  ② SetModelJson(ModelJson)    │  ← feed LV1 Model JSON directly
-└──────────────┬────────────────┘
-               │
-               ▼
-┌───────────────────────────────┐
-│  Step 2: Generate             │
-│  ─────────────────────────    │
-│  GenerateAll()                │  ← generate all 17 artifacts at once, cache them
-└──────────────┬────────────────┘
-               │
-               ▼
-┌───────────────────────────────┐
-│  Step 3: Read                 │
-│  ─────────────────────────    │
-│  17 GetLast* readers          │  ← read the artifacts you need, one by one
-└───────────────────────────────┘
+[Welcome] → [Source Code] → [Source ↔ JSON] → [JSON ↔ Model] → [Final Source]
 ```
 
-### 2.2 Step 1: Input
+At startup, the form's `Create` also calls `TCompute.RunM_NP(StartMcpService)`, which sets two LingoFuse options and calls `Execute_And_Reg_all`. This is the only thing the GUI does beyond its visible behavior.
 
-#### 2.2.1 `SetSourceCode(Source, Language)`
+### 2.3 The CLI Frontend
+
+**Trigger**: launch with at least one argument.
+
+**Behavior**: the LPR file calls `Process_CommandLine` **before** `Application.Initialize`. If the function returns `False`, the LPR exits with `CommandLine_ExitCode`; the LCL is never started.
+
+The CLI is fully independent of the GUI. It has its own `uses` clause, its own parsing logic (using the same `tpascal_func_decl_tool` and `TPascal_Func_Model`), and its own per-target dispatch. It does **not** touch the form.
+
+The consequence: **the CLI and the GUI share the generators, but not the session state**. Running the CLI does not populate the GUI's editors, and vice versa.
+
+### 2.4 The MCP Frontend
+
+**Trigger**: automatic, when the GUI is running.
+
+**Behavior**: the `StartMcpService` procedure starts a background thread that connects to the LingoFuse endpoint `ipc:agent` and registers the 24 MCP tools with the beacon at `agent_main_app.register_agent`.
+
+The MCP path shares state with the GUI because **every tool body delegates to the form**. This is the entire point of the bootstrap → AI-fill architecture described in Chapter 1.
+
+**Visibility consequence**: opening the GUI and watching it while an agent drives it, you will see the editors fill in, the tabs switch, and the log scroll — exactly as if a human had clicked the buttons.
+
+### 2.5 The Three Frontends in a Single Sentence Each
+
+- **GUI**: a human clicks buttons and edits text.
+- **CLI**: a shell script calls `Process_CommandLine`; the form is never created.
+- **MCP**: an agent calls LingoFuse tools; the tools click the same buttons a human would click.
+
+---
+
+## Chapter 3  The CMake Sub-Toolchain
+
+### 3.1 Why CMake Was Added
+
+The generated C++ artifacts are two code files (`.hpp` + `.cpp`) plus a README. The README's "Building – CMake" section presents a CMake script, and that script names two files by fixed name:
+
+- `CMakeLists.txt` — the build script itself.
+- `test_main___.cpp` — the call-side test driver.
+
+If the toolchain only emitted the `.hpp`/`.cpp` pair, a user following the README would have to hand-write both files. The CMake sub-toolchain closes that gap.
+
+### 3.2 The Two CMake Artifacts
+
+**`CMakeLists.txt`** — a complete, ready-to-configure CMake project. Key facts (all verified against `http_cmake_generator_tool.pas`):
+
+| Aspect | Value |
+|--------|-------|
+| Minimum CMake version | `3.15` |
+| Project language list | `C CXX` (both are required; see §3.4) |
+| C++ standard | `17`, required, extensions off |
+| Cache variable | `LINGOFUSE_CPP_LIB_DIR` |
+| CMake-gui label | "LingoFuse C++ library directory" |
+| Service target | `<Unit>_http_json_service` (executable) |
+| Call test target | `<Unit>_http_json_call_test` (executable) |
+| Sources per target | the generated `.cpp` + `LingoFuse.c` |
+| Windows link libraries | `ws2_32` |
+| macOS link libraries | `Threads::Threads` |
+| Linux link libraries | `Threads::Threads` + `${CMAKE_DL_LIBS}` |
+| Warnings on MSVC | `/W4 /permissive-` |
+| Warnings on GCC/Clang | `-Wall -Wextra` |
+| Runtime DLL staging | **none** — the script deliberately does not touch the DLLs |
+
+**`test_main___.cpp`** — a driver that:
+
+1. Constructs a `lingofuse::LibraryLoader` as its first statement.
+2. Calls `lingofuse::resetPrepare()`, `lingofuse::prepareClient("ipc:<Unit>_http_json", nullptr)`, `lingofuse::prepareDone()`.
+3. Sets `HTTP_CALL_BASE_URL = "http://127.0.0.1:8081/<Unit>"`.
+4. Calls every supported wrapper function with default arguments (`0`, `0.0`, `std::string()`).
+5. Prints `OK` or `FAILED: <reason>` per call.
+6. Returns 0 if every call succeeded, 1 otherwise.
+
+### 3.3 The Fixed File Names
+
+The two CMake artifacts are written to **fixed names**, not unit-prefixed names. This is deliberate:
+
+- `CMakeLists.txt` is the file CMake looks for by default; it cannot be renamed.
+- `test_main___.cpp` is referenced by that exact name in the generated CMake script.
+
+**Consequence**: generating two different units into the same directory will overwrite the previous CMake files. The intended workflow is one directory per unit.
+
+### 3.4 Why `project(... C CXX)` and Not `project(... CXX)`
+
+This was a real bug in an earlier revision. `LingoFuse.c` is a **C source file**. When a CMake project declares only `CXX` as its language, CMake cannot determine the link language for a target that contains a `.c` file, and configuration fails with:
+
+```
+Cannot determine link language for target "<target>"
+```
+
+Declaring `C CXX` lets CMake route the `.c` file to the C compiler and everything else to the C++ compiler. The generated script always uses `C CXX`.
+
+### 3.5 What the CMake Script Requires
+
+The directory pointed to by `LINGOFUSE_CPP_LIB_DIR` must contain:
+
+- `LingoFuse.h`
+- `LingoFuse.c`
+- `LingoFuse.hpp`
+- `lf_io.hpp`
+- `lf_http_bridge_client.hpp`
+- `json.hpp`
+
+If `LingoFuse.h` is missing, the script emits a `FATAL_ERROR` at configure time with a diagnostic that names the missing file and the current value of the cache variable.
+
+### 3.6 What the CMake Script Does NOT Do
+
+- **It does not stage any DLL.** Where the runtime DLLs live is a deployment concern. The README's deployment section covers it.
+- **It does not install anything.** No `install()` rules. No `CPack`.
+- **It does not configure a build type.** The user selects `-DCMAKE_BUILD_TYPE=Release` if desired.
+- **It does not locate LingoFuse automatically.** The path is supplied by the user via the cache variable.
+
+### 3.7 How to Drive the CMake Script
+
+```bash
+cmake -S . -B build -DLINGOFUSE_CPP_LIB_DIR=/path/to/lf
+cmake --build build
+```
+
+Or, in cmake-gui: fill in the "LingoFuse C++ library directory" field.
+
+### 3.8 Which Frontends Produce CMake Artifacts
+
+| Frontend | CMake artifacts | Where |
+|----------|:---------------:|-------|
+| **GUI** | ✅ | written to `<exe dir>/<UnitName>/`, and displayed in the GUI's CMake editors |
+| **CLI** | ✅ | written to the output file's directory, as `CMakeLists.txt` and `test_main___.cpp` |
+| **MCP** | ✅ | written to `<exe dir>/<UnitName>/`, and cached in `FSessionCMakeScript` / `FSessionTestMainCpp` for the two readers |
+
+All three write the same bytes because all three call the same two generator functions: `GenerateCMakeScript` and `GenerateTestMainCpp` from `http_cmake_generator_tool.pas`.
+
+### 3.9 The Two CMake Readers
+
+Two of the 24 MCP tools exist specifically to expose the CMake artifacts:
+
+- `CodeDeclToJsonAbi_GetLastCMakeScript` — returns the `CMakeLists.txt` text.
+- `CodeDeclToJsonAbi_GetLastTestMainCpp` — returns the `test_main___.cpp` text.
+
+Both are pure readers. Both return the cached string; neither reads the disk.
+
+---
+
+## Chapter 4  Three-Phase Workflow
+
+### 4.1 Flow Diagram
+
+```
+┌───────────────────────────────────┐
+│  Step 1: Input                    │
+│  ─────────────────────────        │
+│  ① SetSourceCode(Source, Lang)    │  source text + source language
+│  ② SetModelJson(ModelJson)        │  feed LV1 Model JSON directly
+└──────────────┬────────────────────┘
+               │
+               ▼
+┌───────────────────────────────────┐
+│  Step 2: Generate                 │
+│  ─────────────────────────        │
+│  GenerateAll()                    │  run all 8 generators + CMake
+└──────────────┬────────────────────┘
+               │
+               ▼
+┌───────────────────────────────────┐
+│  Step 3: Read                     │
+│  ─────────────────────────        │
+│  24 readers                       │  read the artifacts you need
+└───────────────────────────────────┘
+```
+
+### 4.2 Step 1 — Input
+
+#### `SetSourceCode(Source, Language)`
 
 | Parameter | Type | Required | Notes |
 |-----------|------|:--------:|-------|
-| `Source` | `string` | Yes | Full source text |
+| `Source` | `string` | Yes | full source text |
 | `Language` | `string` | Yes | `"pascal"` or `"c"`, case-insensitive |
 
-**Actions performed** (on the main thread):
-1. Set `Sel_Lang_ComboBox.ItemIndex` according to `Language` and call `Sel_Lang_ComboBoxChange`.
-2. Write `Source` into `source_edit`.
-3. Switch `MainPageControl.ActivePage` to `SourceTab`.
+**Actions performed on the main thread**:
+1. Set `LanguageSelectorComboBox.ItemIndex` and call `LanguageSelectorChange`.
+2. Write `Source` into `SourceCodeEditor`.
+3. Switch `MainPageControl.ActivePage` to `SourceCodeTabSheet`.
+4. Clear `FSessionCMakeScript` and `FSessionTestMainCpp`.
 
 **Does not parse, does not generate.**
 
-**Returns**:
-- `{"status":"ok"}` — success
-- `{"error":"<message>"}` — failure
+Returns `{"status":"ok"}` on success, `{"error":"<message>"}` on failure.
 
-#### 2.2.2 `SetModelJson(ModelJson)`
+#### `SetModelJson(ModelJson)`
 
 | Parameter | Type | Required | Notes |
 |-----------|------|:--------:|-------|
-| `ModelJson` | `string` | Yes | LV1 Model JSON (shape in §6.6) |
+| `ModelJson` | `string` | Yes | LV1 Model JSON (shape in §6.7) |
 
 **Actions performed**:
 1. Validate JSON well-formedness.
-2. Write `ModelJson` into `model_json_edit`.
-3. Switch `MainPageControl.ActivePage` to `ModelJsonTab`.
+2. Extract `UnitName` from the JSON.
+3. Write `ModelJson` into `ModelJsonEditor`.
+4. Switch `MainPageControl.ActivePage` to `ModelJsonTabSheet`.
+5. Clear the two CMake caches.
 
-**Does not generate.**
+Returns `{"status":"ok","unit_name":"<UnitName>"}` or `{"error":"<message>"}`.
 
-**Returns**:
-- `{"status":"ok","unit_name":"<UnitName>"}` — success
-- `{"error":"<message>"}` — failure
+#### Which One to Use
 
-### 2.3 Step 2: `GenerateAll()`
+Use `SetSourceCode` unless you already have an LV1 model JSON produced elsewhere (for example by a previous `GetModelJson` call, or by another tool that emits the same shape). In that case use `SetModelJson`, which bypasses both the parser and the normalizer.
 
-**Takes no arguments.**
+### 4.3 Step 2 — `GenerateAll()`
 
-**Actions performed** (in order, simulating clicks on the main thread):
+Takes no arguments.
 
-1. If `source_edit.Text` is non-empty → call `source_2_json_nex_ButtonClick`
-   - Parse source text → write into `source2json_edit`
-   - UI switches to `SourceJsonTab`
-2. If `source2json_edit.Text` is non-empty → call `JsonToModelButtonClick`
-   - LV0 JSON → normalize → write into `model_json_edit`
-   - UI switches to `ModelJsonTab`
-3. If `model_json_edit.Text` is non-empty → call `GenerateSourceButtonClick`
-   - Calls all 7 generators × 2 (code + README)
-   - Results go into the 17 `final_*_Edit` fields
-   - Results are also written to disk under `<executable directory>/<UnitName>/` (**the MCP path writes to disk too**)
-   - UI switches to `FinalSourceTab`
+**Actions performed (in order, on the main thread)**:
 
-**Preconditions**: at least one of `source_edit` or `model_json_edit` is non-empty.
+1. If `SourceCodeEditor.Text` is non-empty → call `ParseSourceToJsonClick`.
+2. If `SourceJsonEditor.Text` is non-empty → call `NormalizeJsonToModelClick`.
+3. If `ModelJsonEditor.Text` is non-empty → call `GenerateAllSourcesClick`.
+4. Additionally, if the model is present → invoke `GenerateCMakeScript` and `GenerateTestMainCpp` directly, caching the results in `FSessionCMakeScript` and `FSessionTestMainCpp`.
 
-**Returns** (success):
+`GenerateAllSourcesClick` internally:
+
+- Writes the three intermediate files to disk (`source.pas`/`source.h`, `source.json`, `source_model.json`) if their editors are non-empty.
+- Runs each of the seven code generators via a table-driven `Emit` helper.
+- Writes each artifact to disk under `<exe dir>/<UnitName>/`.
+- Writes `CMakeLists.txt` and `test_main___.cpp` under the same directory.
+- Mirrors the artifact text into the corresponding editor.
+- Switches `MainPageControl.ActivePage` to `FinalSourceTabSheet`.
+
+**Success return**:
+
 ```json
 {
   "status": "ok",
@@ -284,187 +558,176 @@ All 7 generators only recognize these three **families** (members are listed in 
     "cpp_service_readme":     "<UnitName>_http_json_service_cpp.md",
     "cpp_call_header":        "<UnitName>_http_json_call.hpp",
     "cpp_call_impl":          "<UnitName>_http_json_call.cpp",
-    "cpp_call_readme":        "<UnitName>_http_json_call_cpp.md"
+    "cpp_call_readme":        "<UnitName>_http_json_call_cpp.md",
+    "cmake_script":           "CMakeLists.txt",
+    "test_main_cpp":          "test_main___.cpp"
   }
 }
 ```
 
-**Returns** (failure):
-```json
-{"error":"<message>"}
-```
+**Failure return**: `{"error":"<message>"}`.
 
 **Failure scenarios**:
 - `"No source text or model JSON in session. Call SetSourceCode or SetModelJson first."`
 - `"Model JSON is empty. Cannot generate."`
 - `"Form not available"`
 
-### 2.4 Step 3: Reading
+### 4.4 Step 3 — Reading
 
-**All 19 readers take no arguments and return `string`.** See §3.3.
+All 24 readers take no arguments and return `string`. See Chapter 5.
 
 **Key conventions**:
-- **Pure read** — does not trigger any generation.
-- If the corresponding branch has never been generated → returns empty string `""`.
+- **Pure read** — no generation, no disk I/O.
+- If the corresponding branch has never been generated, the reader returns `""`.
 - Each `GenerateAll` refreshes all cached values.
 
-### 2.5 Session Behavior
+### 4.5 Session Behavior
 
 - **One source, many targets**: after a single `SetSourceCode`, any combination of readers may be called.
-- **Repeated `SetSourceCode`**: replaces the source text entirely; previously cached values are not automatically cleared, but the next `GenerateAll` will refill them.
-- **Repeated `GenerateAll`**: re-parses and refreshes all 17 cached values every time.
+- **Repeated `SetSourceCode`**: replaces the source text entirely; previously cached values are not cleared until the next `GenerateAll`.
+- **Repeated `GenerateAll`**: re-parses and refreshes all cached values every time; disk writes are overwritten.
 
 ---
 
-## Chapter 3  MCP API Complete Reference
+## Chapter 5  MCP API Complete Reference (24 Tools)
 
-### 3.1 Naming Convention
+### 5.1 Naming Convention
 
-Every function is prefixed with `CodeDeclToJsonAbi_`. Globally unique, to make beacon discovery easy.
+Every tool is prefixed with `CodeDeclToJsonAbi_`. This makes beacon discovery easy and avoids collisions with other tool providers.
 
-### 3.2 Tool Function Signatures (by Category)
+### 5.2 The 24 Tools at a Glance
 
-#### 3.2.1 Input Tools (2)
+| # | Tool | Category | Return type |
+|---|------|----------|-------------|
+| 1 | `CodeDeclToJsonAbi_SetSourceCode` | Step 1 | status JSON |
+| 2 | `CodeDeclToJsonAbi_SetModelJson` | Step 1 | status JSON |
+| 3 | `CodeDeclToJsonAbi_GetSourceJson` | intermediate read | LV0 JSON |
+| 4 | `CodeDeclToJsonAbi_GetModelJson` | intermediate read | LV1 JSON |
+| 5 | `CodeDeclToJsonAbi_GenerateAll` | Step 2 | file-manifest JSON |
+| 6 | `CodeDeclToJsonAbi_GetLastPascalServiceCode` | Step 3 | Pascal source |
+| 7 | `CodeDeclToJsonAbi_GetLastPascalServiceReadme` | Step 3 | Markdown |
+| 8 | `CodeDeclToJsonAbi_GetLastPascalCallCode` | Step 3 | Pascal source |
+| 9 | `CodeDeclToJsonAbi_GetLastPascalCallReadme` | Step 3 | Markdown |
+| 10 | `CodeDeclToJsonAbi_GetLastJsCallCode` | Step 3 | JavaScript |
+| 11 | `CodeDeclToJsonAbi_GetLastJsCallReadme` | Step 3 | Markdown |
+| 12 | `CodeDeclToJsonAbi_GetLastJsTestHtml` | Step 3 | HTML |
+| 13 | `CodeDeclToJsonAbi_GetLastPythonServiceCode` | Step 3 | Python source |
+| 14 | `CodeDeclToJsonAbi_GetLastPythonServiceReadme` | Step 3 | Markdown |
+| 15 | `CodeDeclToJsonAbi_GetLastPythonCallCode` | Step 3 | Python source |
+| 16 | `CodeDeclToJsonAbi_GetLastPythonCallReadme` | Step 3 | Markdown |
+| 17 | `CodeDeclToJsonAbi_GetLastCppServiceHeader` | Step 3 | C++ header |
+| 18 | `CodeDeclToJsonAbi_GetLastCppServiceImpl` | Step 3 | C++ impl |
+| 19 | `CodeDeclToJsonAbi_GetLastCppServiceReadme` | Step 3 | Markdown |
+| 20 | `CodeDeclToJsonAbi_GetLastCppCallHeader` | Step 3 | C++ header |
+| 21 | `CodeDeclToJsonAbi_GetLastCppCallImpl` | Step 3 | C++ impl |
+| 22 | `CodeDeclToJsonAbi_GetLastCppCallReadme` | Step 3 | Markdown |
+| 23 | `CodeDeclToJsonAbi_GetLastCMakeScript` | Step 3 | CMake script |
+| 24 | `CodeDeclToJsonAbi_GetLastTestMainCpp` | Step 3 | C++ source |
 
-| Function | Signature |
-|----------|-----------|
-| `CodeDeclToJsonAbi_SetSourceCode` | `function(Source: string; Language: string): string` |
-| `CodeDeclToJsonAbi_SetModelJson` | `function(ModelJson: string): string` |
+### 5.3 Tool Signatures by Category
 
-#### 3.2.2 Intermediate Readers (2)
+#### 5.3.1 Input Tools (2)
 
-| Function | Signature |
-|----------|-----------|
-| `CodeDeclToJsonAbi_GetSourceJson` | `function(): string` |
-| `CodeDeclToJsonAbi_GetModelJson` | `function(): string` |
+| Tool | Signature |
+|------|-----------|
+| `SetSourceCode` | `function(Source: string; Language: string): string` |
+| `SetModelJson` | `function(ModelJson: string): string` |
 
-#### 3.2.3 Generation Tool (1)
+#### 5.3.2 Intermediate Readers (2)
 
-| Function | Signature |
-|----------|-----------|
-| `CodeDeclToJsonAbi_GenerateAll` | `function(): string` |
+| Tool | Signature |
+|------|-----------|
+| `GetSourceJson` | `function(): string` |
+| `GetModelJson` | `function(): string` |
 
-#### 3.2.4 Artifact Readers (17)
+#### 5.3.3 Generation Tool (1)
 
-All are `function(): string`:
+| Tool | Signature |
+|------|-----------|
+| `GenerateAll` | `function(): string` |
 
-1. `CodeDeclToJsonAbi_GetLastPascalServiceCode`
-2. `CodeDeclToJsonAbi_GetLastPascalServiceReadme`
-3. `CodeDeclToJsonAbi_GetLastPascalCallCode`
-4. `CodeDeclToJsonAbi_GetLastPascalCallReadme`
-5. `CodeDeclToJsonAbi_GetLastJsCallCode`
-6. `CodeDeclToJsonAbi_GetLastJsCallReadme`
-7. `CodeDeclToJsonAbi_GetLastJsTestHtml`
-8. `CodeDeclToJsonAbi_GetLastPythonServiceCode`
-9. `CodeDeclToJsonAbi_GetLastPythonServiceReadme`
-10. `CodeDeclToJsonAbi_GetLastPythonCallCode`
-11. `CodeDeclToJsonAbi_GetLastPythonCallReadme`
-12. `CodeDeclToJsonAbi_GetLastCppServiceHeader`
-13. `CodeDeclToJsonAbi_GetLastCppServiceImpl`
-14. `CodeDeclToJsonAbi_GetLastCppServiceReadme`
-15. `CodeDeclToJsonAbi_GetLastCppCallHeader`
-16. `CodeDeclToJsonAbi_GetLastCppCallImpl`
-17. `CodeDeclToJsonAbi_GetLastCppCallReadme`
+#### 5.3.4 Artifact Readers (19)
 
-### 3.3 Input Tool Detailed Contracts
+All are `function(): string`. Fifteen of them mirror the fifteen code+README artifacts from the seven generators; four are the CMake pair plus the two remaining artifact readers. (Count: 4 Pascal + 3 JS + 4 Python + 6 C++ + 2 CMake = 19.)
 
-#### 3.3.1 `SetSourceCode`
+### 5.4 Input Tool Contracts
 
-**Success return**: `{"status":"ok"}`
+#### `SetSourceCode`
 
-**Failure returns**:
-- `{"error":"Unsupported language. Use pascal or c."}` — `Language` is not `pascal` / `c`
-- `{"error":"Form not available"}` — GUI not initialized
+**Success**: `{"status":"ok"}`
+
+**Failure**:
+- `{"error":"Unsupported language. Use pascal or c."}`
+- `{"error":"Form not available"}`
 
 **Notes**:
-- Empty `Source` **does not raise an error**; it simply writes empty text. A subsequent `GenerateAll` will fail due to parse failure.
-- **Synchronization mechanism**: `internal_call` uses `TCompute.Sync` internally to run UI operations on the main thread.
+- Empty `Source` does **not** raise an error; it writes empty text. A subsequent `GenerateAll` will fail with a parse error.
+- The `Language` comparison is case-insensitive after `Trim` and `LowerCase`.
 
-#### 3.3.2 `SetModelJson`
+#### `SetModelJson`
 
-**Success return**: `{"status":"ok","unit_name":"<UnitName>"}`
+**Success**: `{"status":"ok","unit_name":"<UnitName>"}`
 
-**Failure returns**:
+**Failure**:
 - `{"error":"Empty model JSON"}`
 - `{"error":"Invalid model JSON"}`
 - `{"error":"Form not available"}`
 
-### 3.4 Intermediate Reader Detailed Contracts
+### 5.5 Intermediate Reader Contracts
 
-#### 3.4.1 `GetSourceJson`
+#### `GetSourceJson`
 
-**Returns**: `source2json_edit.Text` or `""`.
+Returns `SourceJsonEditor.Lines.Text` or `""`.
 
-- If the most recent Step 1 was `SetModelJson`, **returns an empty string** (that path does not produce LV0 JSON).
-- If the most recent Step 1 was `SetSourceCode` but `GenerateAll` has not yet been called, still `""`.
-- After a successful `GenerateAll`, it is filled in.
+- If the most recent Step 1 was `SetModelJson`, returns `""` — that path does not produce LV0.
+- If the most recent Step 1 was `SetSourceCode` but `GenerateAll` has not been called, returns `""`.
+- After a successful `GenerateAll`, is populated.
 
-#### 3.4.2 `GetModelJson`
+#### `GetModelJson`
 
-**Returns**: `model_json_edit.Text` or `""`.
+Returns `ModelJsonEditor.Lines.Text` or `""`.
 
-- If the most recent Step 1 was `SetModelJson`, returns the exact string that was passed in.
-- If the most recent Step 1 was `SetSourceCode`, has value after a successful `GenerateAll`.
+- If the most recent Step 1 was `SetModelJson`, returns exactly the string that was passed in.
+- If the most recent Step 1 was `SetSourceCode`, is populated after a successful `GenerateAll`.
 
-### 3.5 Generation Tool Detailed Contract
+### 5.6 Generation Tool Contract
 
-#### 3.5.1 `GenerateAll`'s Disk-Write Side Effect
+#### `GenerateAll`
 
-**Key fact**: `GenerateAll` internally calls `GenerateSourceButtonClick`, which **writes all 17 artifacts to disk**. Disk location: `umlCombinePath(umlGetFilePath(ParamStr(0)), Model.UnitName)`.
+**Precondition**: `SourceCodeEditor.Text` or `ModelJsonEditor.Text` is non-empty.
 
-- If `<executable directory>/<UnitName>/` does not exist, it is created.
-- If the directory is not writable, the disk write fails but the in-memory cache is still filled; the MCP return is still `{"status":"ok"}`.
+**Postcondition on success**: all 17 code+README artifacts are cached, the two CMake artifacts are cached, and the on-disk directory `<exe dir>/<UnitName>/` contains all 19 files.
 
-### 3.6 Artifact Reader Detailed Contracts
+**Side effect**: writes to disk. If the disk is not writable, the disk write fails but the in-memory cache is still valid; the return value is still `{"status":"ok"}`.
 
-Each reader does two things before reading:
+### 5.7 Artifact Reader Contracts
 
-1. Switch `MainPageControl.ActivePage` to `FinalSourceTab`.
-2. Switch `final_source_PageControl.ActivePage` to the corresponding child `TabSheet`.
+Every artifact reader does the following before reading:
 
-**Return value** = the corresponding `final_*_Edit.Lines.Text`.
+1. Switch `MainPageControl.ActivePage` to `FinalSourceTabSheet`.
+2. Switch `FinalSourcePageControl.ActivePage` to the corresponding child `TabSheet`.
+3. Return the corresponding editor's `.Lines.Text` (or the cached session string, for the CMake pair).
 
-**Notes**:
-- If `GenerateAll` has never been called, the edit is empty → returns `""`.
-- If `Form not available`, returns `""`.
+**Return value**: the artifact text, or `""` if the branch has never been generated.
 
-### 3.7 All 22 Tools Quick Reference
+**Pure read**: no generation, no disk I/O.
 
-| # | Tool | Category | Input | Output |
-|---|------|----------|-------|--------|
-| 1 | `SetSourceCode` | Step 1 | text + source language | status JSON |
-| 2 | `SetModelJson` | Step 1 | LV1 JSON | status JSON |
-| 3 | `GetSourceJson` | intermediate read | none | LV0 JSON |
-| 4 | `GetModelJson` | intermediate read | none | LV1 JSON |
-| 5 | `GenerateAll` | Step 2 | none | file-manifest JSON |
-| 6 | `GetLastPascalServiceCode` | Step 3 | none | Pascal source |
-| 7 | `GetLastPascalServiceReadme` | Step 3 | none | Markdown |
-| 8 | `GetLastPascalCallCode` | Step 3 | none | Pascal source |
-| 9 | `GetLastPascalCallReadme` | Step 3 | none | Markdown |
-| 10 | `GetLastJsCallCode` | Step 3 | none | JavaScript |
-| 11 | `GetLastJsCallReadme` | Step 3 | none | Markdown |
-| 12 | `GetLastJsTestHtml` | Step 3 | none | HTML |
-| 13 | `GetLastPythonServiceCode` | Step 3 | none | Python source |
-| 14 | `GetLastPythonServiceReadme` | Step 3 | none | Markdown |
-| 15 | `GetLastPythonCallCode` | Step 3 | none | Python source |
-| 16 | `GetLastPythonCallReadme` | Step 3 | none | Markdown |
-| 17 | `GetLastCppServiceHeader` | Step 3 | none | C++ header |
-| 18 | `GetLastCppServiceImpl` | Step 3 | none | C++ impl |
-| 19 | `GetLastCppServiceReadme` | Step 3 | none | Markdown |
-| 20 | `GetLastCppCallHeader` | Step 3 | none | C++ header |
-| 21 | `GetLastCppCallImpl` | Step 3 | none | C++ impl |
-| 22 | `GetLastCppCallReadme` | Step 3 | none | Markdown |
+### 5.8 The Two CMake Readers
 
-### 3.8 Registration Flow (Not a Tool, Internal)
+`GetLastCMakeScript` and `GetLastTestMainCpp` are **not** backed by a `TSynEdit`. They return `FSessionCMakeScript` and `FSessionTestMainCpp`, which are plain `string` fields on the form. They are populated by `GenerateAll` in the CMake step of `GenerateAllSourcesClick`.
 
-`Execute_And_Reg_all` does this in one shot:
+If `GenerateAll` has not run since the last `SetSourceCode` / `SetModelJson`, both fields are empty and both readers return `""`.
 
-1. `RegisterAPIs` → creates the App and issues 22 `LF_RegisterCallEx` calls.
-2. `LF_PrepareClientEx("ipc:agent", App)`.
-3. `LF_PrepareDone`.
-4. `RegisterTools` → registers the 22 tool JSON schemas with `agent_main_app.register_agent`.
+### 5.9 Registration Flow
 
-**Return value**: `True` iff all 22 tools registered successfully.
+The `Execute_And_Reg_all` function performs the entire startup in one shot:
+
+1. `RegisterAPIs` — creates the LingoFuse App, issues 24 `LF_RegisterCallEx` calls.
+2. `LF_PrepareClientEx("ipc:agent", App)` — connects to the LingoFuse endpoint.
+3. `LF_PrepareDone` — waits for the client to be ready.
+4. `RegisterTools` — registers the 24 tool JSON schemas with `agent_main_app.register_agent`.
+
+**Return value**: `True` iff all 24 tools registered successfully.
 
 **Global variables** (may be modified before the call):
 
@@ -478,232 +741,79 @@ Each reader does two things before reading:
 | `AGENT_LOG_API` | `"agent_log"` |
 | `DEBUG_LOG` | `True` |
 
----
+### 5.10 The 24 Callbacks
 
-## Chapter 4  All 22 Tools Quick Reference
+Each tool has a corresponding `Callback_CodeDeclToJsonAbi_<ToolName>_CodeDeclToJsonAbi_<ToolName>` cdecl function that:
 
-(See §3.7; not repeated here.)
+1. Reads the input `TDataHnd___` as UTF-8 bytes.
+2. Parses the bytes as JSON.
+3. Extracts the named parameters.
+4. Calls the corresponding `internal_call_*` function.
+5. Writes the return string to the output `TDataHnd___` as JSON.
+6. Wraps everything in `try/except`.
 
-**Call templates**:
+The callbacks are **not** part of the AI-fill scope. They are entirely written by the bootstrap script.
 
-```
-# Minimum complete flow
-SetSourceCode(MyUnitText, "pascal")
-GenerateAll()
-GetLastPythonServiceCode()
-GetLastPythonServiceReadme()
-```
+### 5.11 The 24 Tool Schemas
 
-```
-# Feed model JSON directly
-SetModelJson(ExistingModelJson)
-GenerateAll()
-GetLastCppCallHeader()
-GetLastCppCallImpl()
-GetLastCppCallReadme()
-```
+Each tool's JSON schema is registered with the beacon in `RegisterTools`. The schema contains:
 
-```
-# One source text, multiple target reads
-SetSourceCode(MyUnitText, "pascal")
-GenerateAll()
-GetLastPascalServiceCode()
-GetLastPythonServiceCode()
-GetLastCppServiceHeader()
-GetLastJsCallCode()
-```
+- `name` — the tool identifier, exactly as listed in §5.2.
+- `description` — a long, single-string description of what the tool does, its parameters, and its return shape. These descriptions are written by the bootstrap script and are stable.
+- `target_app` — always `MY_APP_NAME`.
+- `target_api` — the LingoFuse Call API name; matches the tool name.
+- `parameters` — a JSON Schema object with `type: "object"`, a `properties` map, and a `required` array. For tools with no parameters, `properties` is empty and `required` is absent.
 
 ---
 
-## Chapter 5  UI Controls Complete Reference
+## Chapter 6  The 8 Generators in Detail
 
-### 5.1 Top-Level Structure
+### 6.1 The List
 
-```
-Tcode_decl_to_abi_json_form
-├── MainPageControl: TPageControl
-│   ├── WelcomeTab: TTabSheet
-│   ├── SourceTab: TTabSheet
-│   │   └── source_edit: TSynEdit
-│   ├── SourceJsonTab: TTabSheet
-│   │   └── source2json_edit: TSynEdit
-│   ├── ModelJsonTab: TTabSheet
-│   │   └── model_json_edit: TSynEdit
-│   └── FinalSourceTab: TTabSheet
-│       └── final_source_PageControl: TPageControl
-│           ├── http_pas_service_TabSheet
-│           │   ├── final_http_pas_service_source_Edit: TSynEdit
-│           │   └── final_http_pas_service_readme_Edit: TSynEdit
-│           ├── http_pas_call_TabSheet
-│           │   ├── final_http_pas_call_source_Edit: TSynEdit
-│           │   └── final_http_pas_call_readme_Edit: TSynEdit
-│           ├── http_webjs_call_TabSheet
-│           │   ├── final_http_webjs_call_source_Edit: TSynEdit
-│           │   └── final_http_webjs_call_readme_Edit: TSynEdit
-│           ├── http_webjs_test_TabSheet
-│           │   └── final_http_webjs_test_source_Edit: TSynEdit
-│           ├── http_py_service_TabSheet
-│           │   ├── final_http_py_service_source_Edit: TSynEdit
-│           │   └── final_http_py_service_readme_Edit: TSynEdit
-│           ├── http_py_call_TabSheet
-│           │   ├── final_http_py_call_source_Edit: TSynEdit
-│           │   └── final_http_py_call_readme_Edit: TSynEdit
-│           ├── http_cpp_service_TabSheet
-│           │   ├── final_http_hpp_service_source_Edit: TSynEdit
-│           │   ├── final_http_cpp_service_source_Edit: TSynEdit
-│           │   └── final_http_cpp_service_readme_Edit: TSynEdit
-│           └── http_cpp_call_TabSheet
-│               ├── final_http_hpp_call_source_Edit: TSynEdit
-│               ├── final_http_cpp_call_source_Edit: TSynEdit
-│               └── final_http_cpp_call_readme_Edit: TSynEdit
-├── BottomPanel: TPanel
-│   └── LogMemo: TMemo
-└── SysTimer: TTimer
-```
+| # | Generator unit | Produces |
+|---|----------------|----------|
+| 1 | `http_pas_abi_service_generator_tool` | Pascal service code + README |
+| 2 | `http_pas_abi_call_generator_tool` | Pascal call code + README |
+| 3 | `http_js_abi_call_generator_tool` | JS call code + README + HTML |
+| 4 | `http_py_abi_service_generator_tool` | Python service code + README |
+| 5 | `http_py_abi_call_generator_tool` | Python call code + README |
+| 6 | `http_cpp_abi_service_generator_tool` | C++ service header + impl + README |
+| 7 | `http_cpp_abi_call_generator_tool` | C++ call header + impl + README |
+| 8 | `http_cmake_generator_tool` | `CMakeLists.txt` + `test_main___.cpp` |
 
-### 5.2 Key Fields Overview
+Total artifacts: 17 (from generators 1–7) + 2 (from generator 8) = **19 files**.
 
-#### 5.2.1 Text Editors (3)
-
-| Field | Content |
-|-------|---------|
-| `source_edit` | source text |
-| `source2json_edit` | LV0 Source JSON |
-| `model_json_edit` | LV1 Model JSON |
-
-#### 5.2.2 Artifact Editors (17)
-
-See §3.2.4 and §3.7 — they map one-to-one.
-
-#### 5.2.3 TabSheets
-
-| Field | Description |
-|-------|-------------|
-| `WelcomeTab` | Welcome page |
-| `SourceTab` | Source text page |
-| `SourceJsonTab` | LV0 JSON page |
-| `ModelJsonTab` | LV1 JSON page |
-| `FinalSourceTab` | All artifacts page |
-| `http_pas_service_TabSheet` | Pascal service |
-| `http_pas_call_TabSheet` | Pascal call |
-| `http_webjs_call_TabSheet` | JS call |
-| `http_webjs_test_TabSheet` | JS HTML test page |
-| `http_py_service_TabSheet` | Python service |
-| `http_py_call_TabSheet` | Python call |
-| `http_cpp_service_TabSheet` | C++ service |
-| `http_cpp_call_TabSheet` | C++ call |
-
-#### 5.2.4 Buttons
-
-| Field | Event | Purpose |
-|-------|-------|---------|
-| `source_2_json_nex_Button` | `source_2_json_nex_ButtonClick` | Source → LV0 JSON |
-| `JsonToModelButton` | `JsonToModelButtonClick` | LV0 JSON → LV1 JSON |
-| `ModelToJsonButton` | `ModelToJsonButtonClick` | LV1 JSON → LV0 JSON (reverse) |
-| `BackToModelJsonButton` | `BackToModelJsonButtonClick` | Switch back to ModelJsonTab |
-| `JsonToPascalButton` | `JsonToPascalButtonClick` | LV0 JSON → source code |
-| `GenerateSourceButton` | `GenerateSourceButtonClick` | LV1 JSON → 17 artifacts (**writes to disk**) |
-| `Formater_source_Button` | `Formater_source_ButtonClick` | Format source text |
-| `to_source_Button` | `to_source_ButtonClick` | Switch back to SourceTab |
-| `empty_unit_Button` | `empty_unit_ButtonClick` | Insert empty template |
-| `empty_unit_Button1` | `empty_unit_Button1Click` | Insert complex test sample |
-| `Open_pascal_rule_Button` | `Open_pascal_rule_ButtonClick` | Open Pascal rules document |
-| `Open_c_rule_Button` | `Open_c_rule_ButtonClick` | Open C rules document |
-
-#### 5.2.5 Language Selection
-
-| Field | Description |
-|-------|-------------|
-| `Sel_Lang_ComboBox` | Drop-down: `ItemIndex` = 0 (unknown) / 1 (Pascal) / 2 (C) |
-| `Sel_Lang_ComboBoxChange` | Switches highlighter + updates `current_language` |
-
-**`current_language`** is a **private field**. It cannot be written from the outside. It must be set indirectly via `Sel_Lang_ComboBox.ItemIndex` + `Sel_Lang_ComboBoxChange`.
-
-#### 5.2.6 Log and Timer
-
-| Field | Description |
-|-------|-------------|
-| `LogMemo` | Displays `DoStatus` logs (cleared when exceeding 5000 lines) |
-| `SysTimer` | Flushes the log queue + drives LingoFuse Sync |
-
-### 5.3 MCP → UI Simulation Rules
-
-Each `internal_call_*` uses `TCompute.Sync` to post UI operations to the main thread. The simulation rule table:
-
-| MCP tool | UI operations |
-|----------|---------------|
-| `SetSourceCode` | Set `Sel_Lang_ComboBox.ItemIndex` → call `Sel_Lang_ComboBoxChange` → write `source_edit.Text` → switch to `SourceTab` |
-| `SetModelJson` | Validate JSON → write `model_json_edit.Text` → switch to `ModelJsonTab` |
-| `GetSourceJson` | Read `source2json_edit.Text` |
-| `GetModelJson` | Read `model_json_edit.Text` |
-| `GenerateAll` | If source → call `source_2_json_nex_ButtonClick`; if LV0 → call `JsonToModelButtonClick`; if LV1 → call `GenerateSourceButtonClick`; finally switch to `FinalSourceTab` |
-| All 17 readers | Switch to `FinalSourceTab` → switch to the corresponding child `TabSheet` → read the corresponding `final_*_Edit.Lines.Text` |
-
-### 5.4 Disk Write Location
-
-In `GenerateSourceButtonClick`:
-
-```pascal
-app_dir.Text := umlCombinePath(umlGetFilePath(ParamStr(0)), func_model.UnitName);
-umlCreateDirectory(app_dir.Text);
-```
-
-Artifacts are written to `<executable directory>/<UnitName>/`. **The MCP path writes to disk too** (because it internally calls this event).
-
-### 5.5 Disk Write File Names
-
-Specified by `SaveCode(fn)` / `SaveSynEditCode(edit, fn)`:
-
-| Call | File name |
-|------|-----------|
-| `SaveSynEditCode(source_edit, 'source.pas')` | `source.pas` (source, only if non-empty) |
-| `SaveSynEditCode(source_edit, 'source.h')` | `source.h` (C source, only if non-empty) |
-| `SaveSynEditCode(source2json_edit, 'source.json')` | `source.json` (only if non-empty) |
-| `SaveSynEditCode(model_json_edit, 'source_model.json')` | `source_model.json` (only if non-empty) |
-| `SaveCode(func_model.UnitName + '_http_json_service_unit.pas')` | Pascal service |
-| `SaveCode(func_model.UnitName + '_http_json_service_pascal.md')` | Pascal service README |
-| `SaveCode(func_model.UnitName + '_http_json_call_unit.pas')` | Pascal call |
-| `SaveCode(func_model.UnitName + '_http_json_call_pascal.md')` | Pascal call README |
-| `SaveCode(func_model.UnitName + '_http_json_call.js')` | JS call |
-| `SaveCode(func_model.UnitName + '_http_json_call_js.md')` | JS call README |
-| `SaveCode(func_model.UnitName + '_http_json_call_test.html')` | JS test page |
-| `SaveCode(func_model.UnitName + '_http_json_service.py')` | Python service |
-| `SaveCode(func_model.UnitName + '_http_json_service_python.md')` | Python service README |
-| `SaveCode(func_model.UnitName + '_http_json_call.py')` | Python call |
-| `SaveCode(func_model.UnitName + '_http_json_call_python.md')` | Python call README |
-| `SaveCode(func_model.UnitName + '_http_json_service.hpp')` | C++ service header |
-| `SaveCode(func_model.UnitName + '_http_json_service.cpp')` | C++ service impl |
-| `SaveCode(func_model.UnitName + '_http_json_service_cpp.md')` | C++ service README |
-| `SaveCode(func_model.UnitName + '_http_json_call.hpp')` | C++ call header |
-| `SaveCode(func_model.UnitName + '_http_json_call.cpp')` | C++ call impl |
-| `SaveCode(func_model.UnitName + '_http_json_call_cpp.md')` | C++ call README |
-
----
-
-## Chapter 6  The 7 Generators in Detail
-
-### 6.1 Common Contract (Shared by All 7)
+### 6.2 Common Contract (Generators 1–7)
 
 | Item | Convention |
 |------|-----------|
-| **Input** | `TPascal_Func_Model` with `Typ_Normalize_Func = tnf_ABI` |
-| **Output** | `TPascalStringList` (line list), caller must `DisposeObject` |
-| **Empty model** | `Model = nil` or `Model.UnitName` empty → returns `nil` |
-| **Unsupported routines** | Silently dropped; only a `DoStatus` log if `GenerateCode_LogEnabled=True` |
-| **Overloads** | Same-name overloads are suffixed `_1`, `_2` in order |
+| Input | `TPascal_Func_Model` with `Typ_Normalize_Func = tnf_ABI` |
+| Output | `TPascalStringList` (line list), caller must `DisposeObject` |
+| Empty model | `Model = nil` or `Model.UnitName` empty → returns `nil` |
+| Unsupported routines | silently dropped; log only if `GenerateCode_LogEnabled` is `True` |
+| Overloads | same-name overloads are suffixed `_1`, `_2`, … in source order |
 
-### 6.2 Name Normalization
+### 6.3 The CMake Generator Contract
+
+`GenerateCMakeScript` and `GenerateTestMainCpp` both take a `TPascal_Func_Model` and return a `TPascalStringList`. Both consult:
+
+- `Model.UnitName` — to derive the project name, the target names, and the endpoint string.
+- `Model.Funcs` — only `GenerateTestMainCpp` iterates over the functions, to emit one test call per routine.
+
+`GenerateCMakeScript` does **not** consult the function list. It only needs the unit name.
+
+### 6.4 Name Normalization
 
 `MakeApiName(FuncName)` replaces the following characters in `FuncName` with `_`:
 
 - space, tab
-- `.` `/` `\` `@` `:` `#` `?` `&` `=` `+`
+- `.` `/` `\` `@` `:` `#` `?` `&` `=` `+` `-`
 
-**Note**: `-` is not replaced. If the source function name contains `-`, the generated JS/C++ identifier will be a syntax error.
+If the resulting identifier begins with a digit, a `_` is prepended.
 
-### 6.3 File Name Rules
+### 6.5 Artifact File Names
 
-Every artifact name is prefixed with `Model.UnitName` (`UnitName` is also run through `MakeApiName` first).
+Every artifact from generators 1–7 is prefixed with the normalized `UnitName`:
 
 | Generator | Output files |
 |-----------|--------------|
@@ -714,149 +824,13 @@ Every artifact name is prefixed with `Model.UnitName` (`UnitName` is also run th
 | Python call | `<U>_http_json_call.py` + `<U>_http_json_call_python.md` |
 | C++ service | `<U>_http_json_service.hpp` + `<U>_http_json_service.cpp` + `<U>_http_json_service_cpp.md` |
 | C++ call | `<U>_http_json_call.hpp` + `<U>_http_json_call.cpp` + `<U>_http_json_call_cpp.md` |
+| CMake | `CMakeLists.txt` + `test_main___.cpp` (**fixed names, no unit prefix**) |
 
-Where `<U>` = the normalized `UnitName`.
+Where `<U>` is the normalized `UnitName`.
 
-### 6.4 Generator-by-Generator Details
+### 6.6 The `internal_call_<Api>` Stub
 
-#### 6.4.1 Pascal Service (`http_pas_abi_service_generator_tool`)
-
-**Output structure**:
-- Unit name: `<U>_http_json_service_unit`
-- Interface:
-  - `HTTP_SERVICE_APP_NAME` / `HTTP_SERVICE_APP_DESC` (editable)
-  - `DEBUG_LOG: Boolean` (editable)
-  - `RegisterAllHTTPJsonAPIs(App: TAppHnd___)`
-  - `CreateAndRegisterHTTPJsonApp: TAppHnd___`
-  - `function internal_call_<Api>(...): ...;` × N (**stubs that the user must fill in**)
-- Implementation:
-  - JSON access helpers (`_Json_Get_Int64_ByIndex` etc.)
-  - cdecl callbacks (`Callback_<Api>`)
-  - registration function
-
-**Dependencies** (needed by the generated unit):
-- `SysUtils, Z.Core, Z.PascalStrings, Z.UPascalStrings, Z.UnicodeMixedLib, Z.Json, lingofuse_import`
-
-**What the user must do**:
-1. Add the actual implementation unit to the `uses` clause in the `implementation` section.
-2. Fill in each `internal_call_<Api>` function body.
-3. Start the host program using the standard LingoFuse service workflow.
-
-#### 6.4.2 Pascal Call (`http_pas_abi_call_generator_tool`)
-
-**Output structure**:
-- Unit name: `<U>_http_json_call_unit`
-- Interface:
-  - `EHTTPCallError = class(Exception)`
-  - `HTTP_CALL_BASE_URL: string` (editable)
-  - `function <Api>(...): ...;` × N
-- Implementation: each function does `LFHttpPost` → checks `body.code` → returns `body.result`
-
-**Dependencies**:
-- `SysUtils, Z.Core, Z.PascalStrings, Z.UPascalStrings, Z.UnicodeMixedLib, Z.Json, lingofuse_import, lf_http_bridge_client`
-
-**What the user must do**:
-1. Prepare LingoFuse at program startup (`LF_ResetPrepare` / `LF_PrepareClient` / `LF_PrepareDone`).
-2. Set `HTTP_CALL_BASE_URL`.
-3. Call the generated free functions directly.
-
-#### 6.4.3 JS Call (`http_js_abi_call_generator_tool`)
-
-**Outputs 3 files**:
-
-1. `<U>_http_json_call.js` — standalone IIFE library
-   - Attached to `window.<U>Api` (or `globalThis.<U>Api`)
-   - Members: `baseUrl` / `getBaseUrl()` / `setBaseUrl(url)` / `Error` / one `async` function per API
-   - No third-party dependencies (only `fetch` / `Promise` / `async-await`)
-
-2. `<U>_http_json_call_js.md` — README
-
-3. `<U>_http_json_call_test.html` — self-contained test page
-   - Embeds the JS library
-   - One test card per API: parameter input boxes + button + result area
-
-**JS precision warning**: `int64` / `uint64` parameters and return values are tagged with `@warning` in the JSDoc.
-
-#### 6.4.4 Python Service (`http_py_abi_service_generator_tool`)
-
-**Output structure**:
-- Dependency: the `lingofuse` Python package
-- Interface:
-  - `HTTP_SERVICE_APP_NAME` / `HTTP_SERVICE_APP_DESC` / `HTTP_SERVICE_ENDPOINT` (editable)
-  - `DEBUG_LOG: bool` (editable)
-  - `register_all_http_json_apis(app)`
-  - `create_and_register_http_json_app()`
-  - `internal_call_<Api>(...)` × N (stub)
-  - `main()` — includes signal handling and clean shutdown
-
-**What the user must do**:
-1. Fill in each `internal_call_<Api>`.
-2. Run `python3 <U>_http_json_service.py`.
-3. Start `bridge.py` with the same `--endpoint`.
-
-#### 6.4.5 Python Call (`http_py_abi_call_generator_tool`)
-
-**Output structure**:
-- Dependency: `requests`
-- Interface:
-  - `HTTP_CALL_BASE_URL: str`
-  - `HTTP_CALL_TIMEOUT: float` (default 30.0)
-  - `DEBUG_LOG: bool` (default False)
-  - `HTTPCallError`
-  - One function per API
-  - `_call_api(api_name, args)` — internal unified entry point
-
-**What the user must do**:
-1. `pip install requests`
-2. `import <U>_http_json_call as api`
-3. `api.HTTP_CALL_BASE_URL = "http://.../<app>"`
-4. Call the generated functions
-
-#### 6.4.6 C++ Service (`http_cpp_abi_service_generator_tool`)
-
-**Outputs 3 files**:
-
-1. `<U>_http_json_service.hpp`
-   - Depends on `<cstdint>` `<string>` `LingoFuse.hpp`
-   - Namespace: `<u>` (lowercase `U`)
-   - Members: `HTTP_SERVICE_APP_NAME` and other constants, `internal_call_<Api>` × N, `register_all_http_json_apis` / `create_and_register_http_json_app` / `run_service`
-2. `<U>_http_json_service.cpp`
-   - Implementation: stub definitions, cdecl callbacks, registration, `main()`
-   - Depends on `LingoFuse.hpp` / `lf_io.hpp` / `json.hpp`
-3. `<U>_http_json_service_cpp.md`
-
-**What the user must do**:
-1. Fill in each `internal_call_<Api>`.
-2. `g++ -std=c++17 ... LingoFuse.c -o service -pthread -ldl`
-3. Start the service, then start the bridge with the same endpoint.
-
-#### 6.4.7 C++ Call (`http_cpp_abi_call_generator_tool`)
-
-**Outputs 3 files**:
-
-1. `<U>_http_json_call.hpp`
-   - Depends on `<cstdint>` `<stdexcept>` `<string>`
-   - Namespace: `<u>`
-   - Members:
-     - `HTTP_BRIDGE_APP_NAME` (default `__lf_http_bridge__`)
-     - `HTTP_BRIDGE_API_NAME` (default `__lf_outbound_post__`)
-     - `HTTP_CALL_TIMEOUT_MS` (default 60000)
-     - `HTTP_CALL_BASE_URL` (default `http://127.0.0.1:8081/<U>`)
-     - `HTTP_CALL_DEFAULT_TIMEOUT_S` (default 25.0)
-     - `HTTPCallError` class
-     - `<Api>` × N
-2. `<U>_http_json_call.cpp`
-   - Internal unified entry point `_lf_http_post(url, body, timeout)`
-3. `<U>_http_json_call_cpp.md`
-
-**What the user must do**:
-1. Prepare LingoFuse (`LibraryLoader` / `resetPrepare` / `prepareClient` / `prepareDone`).
-2. Set `HTTP_CALL_BASE_URL`.
-3. Call the generated functions.
-
-### 6.5 Shape of the `internal_call_<Api>` Stub
-
-Each stub is where the user must fill in. Copy as-is:
+Each generated service unit contains one stub per supported routine, which the user must fill in. The shape is fixed:
 
 **Pascal**:
 ```pascal
@@ -883,9 +857,9 @@ std::int64_t internal_call_Foo(std::int64_t a, std::string b) {
 }
 ```
 
-### 6.6 LV1 Model JSON Shape
+### 6.7 LV1 Model JSON Shape
 
-`GenerateAll` actually consumes this JSON. If you feed it directly via `SetModelJson`, it must contain the following fields:
+`GenerateAll` consumes this JSON. If you feed it directly via `SetModelJson`, it must contain:
 
 ```json
 {
@@ -907,19 +881,9 @@ std::int64_t internal_call_Foo(std::int64_t a, std::string b) {
 
 **Key points**:
 - `UnitName` is required.
-- Each element of the `Functions` array requires `Name` / `IsFunction` / `Params` / `ReturnType`.
+- Each element of `Functions` requires `Name` / `IsFunction` / `Params` / `ReturnType`.
 - `PascalType` determines the type-family decision (see Chapter 7).
-- `Description` is used by the README.
-
-### 6.7 Generator ↔ GUI Event Mapping
-
-| GUI event | Generator called |
-|-----------|------------------|
-| `source_2_json_nex_ButtonClick` | none (parse only) |
-| `JsonToModelButtonClick` | none (normalize only) |
-| `JsonToPascalButtonClick` | `tpascal_func_decl_tool.decl_to_pascal` / `decl_to_c` |
-| `Formater_source_ButtonClick` | same as above |
-| `GenerateSourceButtonClick` | **all 7 generators × 2 (code + README)** |
+- `Description` is used only by the READMEs.
 
 ---
 
@@ -927,46 +891,38 @@ std::int64_t internal_call_Foo(std::int64_t a, std::string b) {
 
 ### 7.1 The Three Families
 
-#### 7.1.1 String Family
+#### String family
 
-| Type name (case-insensitive) |
-|------------------------------|
-| `string` / `ansistring` / `unicodestring` |
-| `tpascalstring` / `tupascalstring` / `tp_string` |
-| `pchar` / `pansichar` / `pwidechar` |
-| `u_string` (**only recognized by the JS generator**; Pascal/Python/C++ generators do not recognize it) |
+`string` / `ansistring` / `unicodestring` / `tpascalstring` / `tupascalstring` / `tp_string` / `pchar` / `pansichar` / `pwidechar`
 
-#### 7.1.2 Float Family
+The JS generator additionally recognizes `u_string`.
 
-| Type name |
-|-----------|
-| `double` / `single` / `extended` / `real` |
+#### Float family
 
-#### 7.1.3 Integer Family
+`double` / `single` / `extended` / `real`
 
-| Type name |
-|-----------|
-| `integer` / `longint` / `int64` |
-| `cardinal` / `dword` / `longword` / `uint64` |
-| `word` / `smallint` / `byte` |
+#### Integer family
 
-### 7.2 Target Language Mapping Table
+`integer` / `longint` / `int64` / `cardinal` / `dword` / `longword` / `uint64` / `word` / `smallint` / `byte`
+
+### 7.2 Target Language Mapping
 
 | ABI family | Pascal | Python | C++ | JavaScript |
 |------------|--------|--------|-----|------------|
 | String | `string` | `str` | `std::string` | `string` |
-| Float | `Double` / `Single` / `Extended` / `Real` (each preserved) | `float` | `double` | `number` |
-| Integer | each preserved (`Integer` / `Int64` / ...) | `int` | `std::int64_t` (all narrowed) | `number` |
+| Float | preserved | `float` | `double` | `number` |
+| Integer | preserved | `int` | `std::int64_t` | `number` |
 
 **Key differences**:
+
 - **Pascal** preserves the original width.
-- **Python** uses `int` (unbounded); annotation is informational only.
+- **Python** uses `int` (unbounded).
 - **C++** narrows all integers to `std::int64_t` and all floats to `double`.
-- **JavaScript** narrows all integers and floats to `number` (IEEE-754 double) — **there is precision risk**.
+- **JavaScript** narrows everything to `number` (IEEE-754 double) — **precision risk**.
 
 ### 7.3 Unsupported Types
 
-The following types cause **the entire routine to be silently dropped**:
+The following types cause the entire routine to be silently dropped:
 
 - `Boolean` / `WordBool` / `LongBool`
 - `Variant` / `OleVariant`
@@ -975,11 +931,9 @@ The following types cause **the entire routine to be silently dropped**:
 - Pointers, function pointers
 - `Currency` / `Comp` / `TDateTime`
 
-**Workaround**: serialize complex values to `string` and pass them along.
+**Workaround**: serialize complex values to `string` and pass them as a normal string argument.
 
 ### 7.4 JSON Wire Types
-
-The HTTP/JSON protocol carries less type information than the ABI binary protocol:
 
 | ABI family | JSON wire type |
 |------------|----------------|
@@ -987,22 +941,19 @@ The HTTP/JSON protocol carries less type information than the ABI binary protoco
 | Float | `number` |
 | Integer | `number` |
 
-Therefore:
-- JSON clients cannot distinguish `Integer` from `Int64` at the byte level.
-- Large integers' precision is determined by the client's JSON parser.
-- The server deserializes according to the declared Pascal type; if a JSON number exceeds the target type's range, it is **silently truncated**.
+JSON clients cannot distinguish `Integer` from `Int64` at the byte level. Large-integer precision is bounded by the client's JSON parser.
 
-### 7.5 Numeric Precision Limits Quick Reference
+### 7.5 Numeric Precision Limits
 
 | Scenario | Limit |
 |----------|-------|
 | JS `Number` exact integer range | ±2^53 − 1 |
-| `int64` maximum | 9223372036854775807 ≈ 9.2×10^18 |
-| `uint64` maximum | 18446744073709551615 ≈ 1.8×10^19 |
-| JSON number (Python `json`) | unbounded int, or bounded float |
-| JSON number (JS `JSON.parse`) | IEEE-754 double |
+| `int64` maximum | 9223372036854775807 |
+| `uint64` maximum | 18446744073709551615 |
+| Python `json` int | unbounded |
+| JS `JSON.parse` number | IEEE-754 double |
 
-**Recommendation**: When handling `int64` / `uint64` on a JS client, have the server return strings.
+**Recommendation**: when handling `int64` / `uint64` on a JS client, have the service return strings.
 
 ---
 
@@ -1010,28 +961,21 @@ Therefore:
 
 ### 8.1 URL Composition
 
-#### 8.1.1 Call → Bridge
-
 ```
 HTTP_CALL_BASE_URL + "/" + <api-name>
 ```
 
-- `HTTP_CALL_BASE_URL` default: `http://127.0.0.1:8081/<U>`
-- The user may modify it after the call side is initialized
-
-#### 8.1.2 Bridge → Service
-
-The bridge maps `/<app>/<api>` to a LingoFuse call `LF_Call(<app>, <api>)`.
+Default `HTTP_CALL_BASE_URL` for every target: `http://127.0.0.1:8081/<U>`.
 
 ### 8.2 Request Format
 
-#### 8.2.1 Call → Bridge (LingoFuse call)
+#### Call → Bridge (LingoFuse call)
 
 ```
-LF_Call("__lf_http_bridge__", <bridge_request>)
+LF_Call("__lf_http_bridge__", <bridge-request-json>)
 ```
 
-`<bridge_request>` is JSON:
+Where `<bridge-request-json>` is:
 
 ```json
 {
@@ -1043,7 +987,7 @@ LF_Call("__lf_http_bridge__", <bridge_request>)
 }
 ```
 
-#### 8.2.2 Bridge → Service (HTTP POST)
+#### Bridge → Service (HTTP POST)
 
 ```http
 POST /<app>/<api> HTTP/1.1
@@ -1055,14 +999,14 @@ Content-Length: ...
 
 ### 8.3 Response Format
 
-#### 8.3.1 Service → Bridge
+#### Service → Bridge
 
 ```json
-{"code": 0, "result": <value>}     // success
-{"code": -1, "error": "<message>"} // failure
+{"code": 0, "result": <value>}
+{"code": -1, "error": "<message>"}
 ```
 
-#### 8.3.2 Bridge → Call (envelope)
+#### Bridge → Call (envelope)
 
 ```json
 {
@@ -1072,199 +1016,225 @@ Content-Length: ...
 }
 ```
 
-#### 8.3.3 Call Unwrapping
+#### Call Unwrapping
 
-Read the `body` field and check `body.code`:
+Read `body`, check `body.code`:
 
-- `body.code = 0` → return `body.result`
-- `body.code <> 0` → throw an exception
+- `body.code = 0` → return `body.result`.
+- `body.code <> 0` → throw the language-appropriate exception.
 
 ### 8.4 Argument Semantics
 
-#### 8.4.1 Positional Arguments (Recommended)
+#### Positional (recommended)
 
 ```json
 {"args": [v1, v2, v3]}
 ```
 
-- Array element `i` maps to the `i`-th parameter of the original function
-- If too few arguments are provided, missing parameters take the type's default value (`0` / `0.0` / `""`)
+Array element `i` maps to parameter `i`. Missing arguments take the type default (`0` / `0.0` / `""`).
 
-#### 8.4.2 Named Arguments (Alternative)
+#### Named (alternative)
 
 ```json
 {"param1": v1, "param2": v2}
 ```
 
-- Matches the original function's parameter names (**case-sensitive**)
-- **Only takes effect when `args` is absent**
+Matches parameter names, case-sensitive. **Only takes effect when `args` is absent**.
 
-#### 8.4.3 Priority
+### 8.5 Encoding
 
-If `args` is present, named arguments are **completely ignored**.
-
-### 8.5 Character Encoding
-
-- Both requests and responses are **UTF-8**
-- Serialization strategy: `ensure_ascii=False`
-- The bridge strips the trailing `\0` from LingoFuse strings before forwarding
+- Requests and responses are UTF-8.
+- The bridge serializes with `ensure_ascii=False`.
+- The bridge strips the trailing `\0` from LingoFuse strings before forwarding.
 
 ### 8.6 HTTP Method
 
-The bridge only accepts **`POST`** (other methods are rejected).
+The bridge only accepts **`POST`**.
 
 ---
 
 ## Chapter 9  Error Handling and Error Codes
 
-### 9.1 Toolchain Error JSON Shape
+### 9.1 Toolchain Error JSON
 
-#### 9.1.1 Input/Generation Tool Errors
+- Tool errors: `{"error": "<message>"}`.
+- Service / bridge errors: `{"code": -N, "error": "<message>"}`.
 
-```json
-{"error":"<message>"}
-```
-
-#### 9.1.2 Service/Bridge Errors
-
-```json
-{"code": -N, "error": "<message>"}
-```
-
-### 9.2 All Known Error Messages
+### 9.2 All Known Tool Error Messages
 
 | Message | Trigger |
 |---------|---------|
 | `Unsupported language. Use pascal or c.` | `Language` is not `pascal` / `c` |
 | `Empty model JSON` | `SetModelJson("")` |
 | `Invalid model JSON` | `SetModelJson(invalid JSON)` |
-| `Form not available` | Main form not created |
-| `No source text or model JSON in session. Call SetSourceCode or SetModelJson first.` | `GenerateAll` called before Step 1 |
-| `Model JSON is empty. Cannot generate.` | `model_json_edit` empty |
+| `Form not available` | main form not created |
+| `No source text or model JSON in session. Call SetSourceCode or SetModelJson first.` | `GenerateAll` before Step 1 |
+| `Model JSON is empty. Cannot generate.` | `ModelJsonEditor` empty |
 
-### 9.3 Service/Bridge Error Codes
+### 9.3 Service / Bridge Error Codes
 
 | code | Meaning | Typical `http_status` |
 |:----:|---------|:---------------------:|
-| `0` | Success | 200 |
-| `-1` | Remote call failed (server exception, network error, timeout) | 200 (server exception) / 0 (network error) |
-| `-2` | Request shape error (URL path could not be parsed) | 400 |
-| `-3` | Bridge precheck failed (bridge did not find the target API) | 200 |
+| `0` | success | 200 |
+| `-1` | remote call failed | 200 or 0 |
+| `-2` | request shape error | 400 |
+| `-3` | bridge precheck failed | 200 |
 
-### 9.4 Exception Types by Target Language
+### 9.4 Exception Types by Target
 
 | Target | Exception class | Fields |
 |--------|-----------------|--------|
-| Pascal | `EHTTPCallError` | `.Message` (no `.code` field) |
+| Pascal | `EHTTPCallError` | `.Message` only |
 | Python | `HTTPCallError` | `.code` / `.http_status` |
 | C++ | `HTTPCallError` | `.code` / `.http_status` |
 | JavaScript | `LFHttpCallError` | `.code` / `.httpStatus` |
 
 ### 9.5 Troubleshooting Flow
 
-1. **Check whether Step 1 succeeded** (returns `{"status":"ok"}`).
-2. **Check whether `GenerateAll` succeeded.**
-3. **Check reader return values** (empty string means not generated).
-4. **Check the LingoFuse connection** (`Execute_And_Reg_all`'s return value).
-5. **Check `LogMemo`** (all `DoStatus` output).
+1. Check that Step 1 returned `{"status":"ok"}`.
+2. Check that `GenerateAll` returned `{"status":"ok"}`.
+3. Check that the required reader returned a non-empty string.
+4. Check the GUI's log panel for dropped-routine warnings.
+5. If the environment uses an agent, check the LingoFuse connection via the `Execute_And_Reg_all` return value.
 
-### 9.6 Handling Bridge Precheck Failure (code = -3)
+### 9.6 Bridge Precheck Failure (code = -3)
 
-`bridge.py` checks `check_api` by default, relying on a broadcast cache that may lag by ~3 seconds. Recommendations:
+`bridge.py` checks the API by default through a broadcast cache that may lag by about 3 seconds. Recommendations:
 
-- Start the bridge with `--no-precheck`
-- Or wait 3 seconds after the service starts before calling
-- Or catch `code = -3` on the client and retry after a delay
+- Start the bridge with `--no-precheck`.
+- Or wait 3 seconds after the service starts before calling.
+- Or catch `code = -3` and retry.
 
 ---
 
-## Chapter 10  Common Pitfalls and Anti-Patterns
+## Chapter 10  Complete Artifact Inventory
 
-### 10.1 Input-Stage Pitfalls
+### 10.1 The 19 Files
 
-| Anti-pattern | Correct approach |
-|--------------|------------------|
-| `SetSourceCode(Text, "python")` | `SetSourceCode(Text, "pascal")` + read Python reader |
-| `SetSourceCode(Text, "cpp")` | `SetSourceCode(Text, "c")` + read C++ reader |
-| Call `GenerateAll` directly | Call `SetSourceCode` or `SetModelJson` first |
-| Read right after `SetSourceCode` | `GenerateAll` must be in between |
-| `SetModelJson(hand-written JSON)` without `UnitName` | Must contain `UnitName` / `Functions` |
+| # | File | Produced by | Purpose |
+|---|------|-------------|---------|
+| 1 | `<U>_http_json_service_unit.pas` | Pascal service gen | Pascal service |
+| 2 | `<U>_http_json_service_pascal.md` | Pascal service gen | Pascal service README |
+| 3 | `<U>_http_json_call_unit.pas` | Pascal call gen | Pascal call |
+| 4 | `<U>_http_json_call_pascal.md` | Pascal call gen | Pascal call README |
+| 5 | `<U>_http_json_call.js` | JS gen | JS client |
+| 6 | `<U>_http_json_call_js.md` | JS gen | JS README |
+| 7 | `<U>_http_json_call_test.html` | JS gen | JS HTML test page |
+| 8 | `<U>_http_json_service.py` | Python service gen | Python service |
+| 9 | `<U>_http_json_service_python.md` | Python service gen | Python service README |
+| 10 | `<U>_http_json_call.py` | Python call gen | Python call |
+| 11 | `<U>_http_json_call_python.md` | Python call gen | Python call README |
+| 12 | `<U>_http_json_service.hpp` | C++ service gen | C++ service header |
+| 13 | `<U>_http_json_service.cpp` | C++ service gen | C++ service impl |
+| 14 | `<U>_http_json_service_cpp.md` | C++ service gen | C++ service README |
+| 15 | `<U>_http_json_call.hpp` | C++ call gen | C++ call header |
+| 16 | `<U>_http_json_call.cpp` | C++ call gen | C++ call impl |
+| 17 | `<U>_http_json_call_cpp.md` | C++ call gen | C++ call README |
+| 18 | `CMakeLists.txt` | CMake gen | CMake build script |
+| 19 | `test_main___.cpp` | CMake gen | C++ test driver |
 
-### 10.2 Generation-Stage Pitfalls
+### 10.2 File Locations
 
-| Anti-pattern | Correct approach |
-|--------------|------------------|
-| Think `GenerateAll` can only be called once | It can be called many times; each refreshes the cache |
-| `SetSourceCode(A)` → read → `SetSourceCode(B)` → read | The latter overwrites the former; a session should have only one source |
-| Expect the MCP path not to write to disk | It actually writes to `<exe_dir>/<UnitName>/` |
-| Assume the directory is writable | If not, the disk write fails but the in-memory cache remains valid |
+| Frontend | Location |
+|----------|----------|
+| GUI | `<exe dir>/<UnitName>/` |
+| CLI | same directory as the output file |
+| MCP | `<exe dir>/<UnitName>/` |
 
-### 10.3 Read-Stage Pitfalls
+### 10.3 The Bridge Is Not Part of the Deployment
 
-| Anti-pattern | Correct approach |
-|--------------|------------------|
-| Expect a reader to trigger generation | A reader only reads the cache |
-| Read a Call reader after generating Service | You get an empty string; read the corresponding branch |
-| Read `GetSourceJson` after `SetModelJson` | You get an empty string; that path produces no LV0 |
+The bridge is a **forwarder**. It is a separate process that must be running for any Call artifact to work. It is not generated by this toolchain; it ships with the LingoFuse runtime.
 
-### 10.4 Type-Stage Pitfalls
+---
 
-| Anti-pattern | Correct approach |
-|--------------|------------------|
-| A `Boolean` parameter in the source unit | Change to `Integer` (0/1) or `string` |
-| An array parameter in the source unit | Serialize it to `string` |
-| Expect `int64` to be lossless on JS | JS `Number` is only exact up to 2^53; have the server return strings |
-| Expect `Extended` to be consistent across platforms | Treat it as `double` |
+## Chapter 11  Common Pitfalls and Anti-Patterns
 
-### 10.5 Session-Stage Pitfalls
-
-| Anti-pattern | Correct approach |
-|--------------|------------------|
-| Expect a reset tool | There is none; re-call `SetSourceCode` / `SetModelJson` |
-| Multi-threaded `GenerateAll` | Serialize; internal UI operations are not concurrency-safe |
-| Expect state to persist after the process exits | It is in-memory; the process exit discards it |
-
-### 10.6 UI-Stage Pitfalls
+### 11.1 Input-Stage Pitfalls
 
 | Anti-pattern | Correct approach |
 |--------------|------------------|
-| Write `current_language` directly | Use `Sel_Lang_ComboBox.ItemIndex` + `Sel_Lang_ComboBoxChange` |
-| Expect `*_ButtonClick` to produce no logs | It does `DoStatus` to `LogMemo` |
-| Expect `LogMemo` to be unbounded | It clears when exceeding 5000 lines |
+| `SetSourceCode(Text, "python")` | `SetSourceCode(Text, "pascal")` + read a Python reader |
+| `SetSourceCode(Text, "cpp")` | `SetSourceCode(Text, "c")` + read a C++ reader |
+| Call `GenerateAll` directly | call `SetSourceCode` or `SetModelJson` first |
+| Read immediately after `SetSourceCode` | `GenerateAll` must be in between |
 
-### 10.7 Complete Anti-Pattern List
+### 11.2 Generation-Stage Pitfalls
+
+| Anti-pattern | Correct approach |
+|--------------|------------------|
+| Think `GenerateAll` can only be called once | It may be called many times; each refreshes the cache |
+| `SetSourceCode(A)` → read → `SetSourceCode(B)` → read | The latter overwrites the former |
+| Expect the MCP path not to write to disk | It writes to `<exe dir>/<UnitName>/` |
+
+### 11.3 Read-Stage Pitfalls
+
+| Anti-pattern | Correct approach |
+|--------------|------------------|
+| Expect a reader to trigger generation | a reader only reads the cache |
+| Read a Call reader after generating Service | the corresponding branch must be generated |
+| Read `GetSourceJson` after `SetModelJson` | that path produces no LV0 |
+
+### 11.4 Type-Stage Pitfalls
+
+| Anti-pattern | Correct approach |
+|--------------|------------------|
+| A `Boolean` parameter | change to `Integer` (0/1) or `string` |
+| An array parameter | serialize to `string` |
+| Expect `int64` to be lossless on JS | JS `Number` is exact only up to 2^53 |
+| Expect `Extended` to be consistent across platforms | treat it as `double` |
+
+### 11.5 CMake-Stage Pitfalls
+
+| Anti-pattern | Correct approach |
+|--------------|------------------|
+| `project(<name> CXX)` | use `project(<name> C CXX)`; `LingoFuse.c` is a C file |
+| Generating two units into the same directory | one directory per unit; `CMakeLists.txt` and `test_main___.cpp` are overwritten |
+| Expecting the CMake script to stage DLLs | the script does not; the README's deployment section covers it |
+| Forgetting `LINGOFUSE_CPP_LIB_DIR` | the configure step fails with a clear `FATAL_ERROR` |
+
+### 11.6 Session-Stage Pitfalls
+
+| Anti-pattern | Correct approach |
+|--------------|------------------|
+| Expect a reset tool | there is none; re-call `SetSourceCode` / `SetModelJson` |
+| Multi-threaded `GenerateAll` | serialize; UI operations are not concurrency-safe |
+| Expect state to persist after process exit | state is in-memory; process exit discards it |
+
+### 11.7 The Complete Anti-Pattern List
 
 | # | Anti-pattern | Consequence | Fix |
 |---|--------------|-------------|-----|
-| 1 | `Language='python'` | Returns error | Use `pascal` / `c` |
-| 2 | Skip `GenerateAll` | Readers return empty string | Call `GenerateAll` first |
-| 3 | Call `SetSourceCode` twice without `GenerateAll` | Cache not updated | Call `GenerateAll` again |
-| 4 | Mix Service / Call | Wire protocol mismatch | Generate both from the same source |
-| 5 | Have a `Boolean` parameter | Whole routine dropped | Change the type |
-| 6 | Handle `int64` on JS | Precision loss | Server returns strings |
-| 7 | Forget bridge `--no-precheck` | First call returns `code = -3` | Add `--no-precheck` |
-| 8 | LingoFuse not prepared | Call side fails to initialize | `LF_PrepareClient` + `LF_PrepareDone` |
-| 9 | Bridge endpoint does not match service | `code = -3` | Check `--endpoint` |
-| 10 | Expect empty source text to error | It silently writes | Validate input yourself |
+| 1 | `Language='python'` | error return | use `pascal` / `c` |
+| 2 | Skip `GenerateAll` | readers return `""` | call `GenerateAll` first |
+| 3 | Call `SetSourceCode` twice without `GenerateAll` | cache not updated | call `GenerateAll` again |
+| 4 | Mix Service / Call | wire protocol mismatch | generate both from the same source |
+| 5 | Have a `Boolean` parameter | routine silently dropped | change the type |
+| 6 | Handle `int64` on JS | precision loss | service returns strings |
+| 7 | Forget bridge `--no-precheck` | first call returns `code = -3` | add `--no-precheck` |
+| 8 | LingoFuse not prepared | call side fails to initialize | `LF_PrepareClient` + `LF_PrepareDone` |
+| 9 | Bridge endpoint does not match service | `code = -3` | check `--endpoint` |
+| 10 | Generate two units into one directory | CMake files overwritten | one directory per unit |
+| 11 | `project(name CXX)` | configure error | `project(name C CXX)` |
+| 12 | Expect the CMake script to stage DLLs | linker cannot find LingoFuse | stage manually or set PATH |
 
 ---
 
-## Chapter 11  AI Agent Usage Rules and Decision Tree
+## Chapter 12  AI Agent Usage Rules and Decision Tree
 
-### 11.1 Ten Usage Rules
+### 12.1 Ten Usage Rules
 
-1. **Pass only `pascal` or `c` as `Language`**. Anything else returns an error.
-2. **After Step 1, you must call `GenerateAll`** before calling any reader.
-3. **Read is pure read**. To refresh, call `GenerateAll` again.
-4. **One `SetSourceCode` per session is enough**. Switching target language does not switch source.
-5. **Service / Call must come from the same source**.
-6. **When there are `int64` / `uint64` parameters or return values, warn the user about JS precision**.
-7. **Unsupported routines are silently dropped**; tell the user to look at `LogMemo` or check the artifacts.
-8. **On failure, look at `LogMemo` first**, then the MCP `error` return.
-9. **The MCP path writes to disk** under `<exe_dir>/<UnitName>/`.
-10. **When unsure, run a minimal example first**.
+1. **Pass only `pascal` or `c` as `Language`.**
+2. **After Step 1, always call `GenerateAll`.**
+3. **Read is a pure read.** To refresh, call `GenerateAll` again.
+4. **One `SetSourceCode` per session is enough.**
+5. **Service and Call must come from the same source text.**
+6. **When `int64` / `uint64` are involved, warn the user about JS precision.**
+7. **Unsupported routines are silently dropped.** Tell the user to inspect the artifact or re-generate with supported types.
+8. **On failure, check the tool's `{"error":"..."}` return first.**
+9. **The MCP path writes to disk** under `<exe dir>/<UnitName>/`.
+10. **When unsure, run a minimal example first.**
 
-### 11.2 Decision Tree
+### 12.2 Decision Tree
 
 ```
 What does the user want?
@@ -1273,61 +1243,72 @@ What does the user want?
 │   ├── Target Pascal call    → SetSourceCode(pas) → GenAll → GetLastPascalCallCode
 │   ├── Target Python service → SetSourceCode(pas) → GenAll → GetLastPythonServiceCode
 │   ├── Target Python call    → SetSourceCode(pas) → GenAll → GetLastPythonCallCode
-│   ├── Target C++ service    → SetSourceCode(pas) → GenAll → GetLastCppServiceHeader + Impl
-│   ├── Target C++ call       → SetSourceCode(pas) → GenAll → GetLastCppCallHeader + Impl
-│   └── Target JS call        → SetSourceCode(pas) → GenAll → GetLastJsCallCode + Html
+│   ├── Target C++ service    → SetSourceCode(pas) → GenAll → GetLastCppServiceHeader + Impl + Readme
+│   ├── Target C++ call       → SetSourceCode(pas) → GenAll → GetLastCppCallHeader + Impl + Readme
+│   ├── Target JS call        → SetSourceCode(pas) → GenAll → GetLastJsCallCode + TestHtml
+│   └── Target CMake          → SetSourceCode(pas) → GenAll → GetLastCMakeScript + TestMainCpp
 └── "Generate code from a C header"
     └── Same as above, pass "c" as Language
 ```
 
-### 11.3 Pre-Call Checklist
+### 12.3 Pre-Call Checklist
 
-- [ ] Which target language? (pascal / python / cpp / js)
+- [ ] Which target language? (Pascal / Python / C++ / JS)
 - [ ] Service side or call side?
 - [ ] Is the source text Pascal or C?
 - [ ] Are all parameter types supported?
-- [ ] Are there any `Boolean` / `Variant` / array / record parameters? (→ will be dropped)
-- [ ] Are there any `int64` parameters or return values? (→ JS precision issue)
+- [ ] Are there any `Boolean` / `Variant` / array / record parameters?
+- [ ] Are there any `int64` parameters or return values? (JS precision)
 
-### 11.4 Post-Call Checklist
+### 12.4 Post-Call Checklist
 
 - [ ] Did `SetSourceCode` / `SetModelJson` return `{"status":"ok"}`?
 - [ ] Did `GenerateAll` return `{"status":"ok"}`?
 - [ ] Does the required reader return a non-empty string?
-- [ ] If empty, was the wrong branch called (Service / Call)?
-- [ ] Does `LogMemo` show any dropped-routine warnings?
+- [ ] If empty, was the wrong branch called?
+- [ ] For C++: are `CMakeLists.txt` and `test_main___.cpp` present next to the `.hpp`/`.cpp` pair?
 
-### 11.5 Output File Naming Cheat Sheet
+### 12.5 Output File Naming Cheat Sheet
 
 ```
 <UnitName>_http_json_<side>.<ext>
 
 side ∈ {service, call}
 ext  ∈ {pas, py, hpp, cpp, js, html, md}
+
+Fixed-name exceptions:
+  CMakeLists.txt
+  test_main___.cpp
 ```
 
-### 11.6 FAQ
+### 12.6 Frequently Asked Questions
 
 **Q: Should I use `SetSourceCode` or `SetModelJson`?**
-A: If you have source text, use `SetSourceCode`. If you have LV1 JSON (e.g. produced elsewhere), use `SetModelJson`. In most cases, use `SetSourceCode`.
+A: Use `SetSourceCode` if you have source text. Use `SetModelJson` if you already have an LV1 model JSON.
 
 **Q: Where are the generated artifacts?**
-A: In memory (returned by readers) + on disk (`<exe_dir>/<UnitName>/`).
+A: In memory (returned by the readers) and on disk (`<exe dir>/<UnitName>/` for GUI/MCP; the output directory for CLI).
 
 **Q: Why does a reader return an empty string?**
-A: One of three reasons: ① `GenerateAll` was not called; ② the wrong branch was called; ③ the source text is empty.
+A: Three reasons: `GenerateAll` was not called; the wrong branch was called; or the source text was empty.
 
-**Q: Why is a function missing from the generated output?**
-A: It contains an unsupported type and was silently dropped. Check `LogMemo`.
+**Q: Why is a function missing from the output?**
+A: It contains an unsupported type and was silently dropped.
 
-**Q: Do I need to call `SetSourceCode` once per target language?**
-A: No. After one `SetSourceCode`, `GenerateAll` produces all 17 artifacts at once. You can then read any of them.
+**Q: Where is the CMake script?**
+A: In `CMakeLists.txt`, written next to the C++ artifacts. Also retrievable via `GetLastCMakeScript`.
+
+**Q: How do I build the generated C++?**
+A: Configure the CMake project with `-DLINGOFUSE_CPP_LIB_DIR=/path/to/lf`, then `cmake --build`.
+
+**Q: Does the CMake script stage the DLLs?**
+A: No. The README's deployment section covers DLL placement.
 
 ---
 
-## Chapter 12  Complete Usage Examples
+## Chapter 13  Complete Usage Examples
 
-### 12.1 Minimum Complete Flow (Pascal source → Python service)
+### 13.1 Minimum Flow — Pascal source → Python service
 
 **Input** (Pascal unit):
 
@@ -1373,7 +1354,7 @@ end.
    → Markdown usage document
 ```
 
-### 12.2 C source → C++ call
+### 13.2 C source → C++ call (with CMake)
 
 **Input** (C header):
 
@@ -1391,14 +1372,24 @@ double sqrt_of(double x);
 **Call sequence**:
 
 ```
-1. SetSourceCode(<text above>, "c")
-2. GenerateAll()
-3. GetLastCppCallHeader()
-4. GetLastCppCallImpl()
-5. GetLastCppCallReadme()
+1. CodeDeclToJsonAbi_SetSourceCode(<text above>, "c")
+2. CodeDeclToJsonAbi_GenerateAll()
+3. CodeDeclToJsonAbi_GetLastCppCallHeader()
+4. CodeDeclToJsonAbi_GetLastCppCallImpl()
+5. CodeDeclToJsonAbi_GetLastCppCallReadme()
+6. CodeDeclToJsonAbi_GetLastCMakeScript()
+7. CodeDeclToJsonAbi_GetLastTestMainCpp()
 ```
 
-### 12.3 One source, multiple targets
+**Build the artifacts**:
+
+```bash
+# write the seven outputs above to a directory
+cmake -S . -B build -DLINGOFUSE_CPP_LIB_DIR=/path/to/lf
+cmake --build build
+```
+
+### 13.3 One source, multiple targets
 
 ```
 1. SetSourceCode(MyUnitText, "pascal")
@@ -1411,11 +1402,12 @@ double sqrt_of(double x);
 6. GetLastCppServiceImpl()
 7. GetLastJsCallCode()
 8. GetLastJsTestHtml()
+9. GetLastCMakeScript()
 ```
 
-**No need** to re-call `SetSourceCode`.
+No need to re-call `SetSourceCode`.
 
-### 12.4 Use an existing Model JSON directly
+### 13.4 Use an existing model JSON
 
 ```
 1. SetModelJson('{"UnitName":"X","Functions":[...]}')
@@ -1424,115 +1416,122 @@ double sqrt_of(double x);
 3. GetLastPascalCallCode()
 ```
 
-### 12.5 Troubleshooting a Failure
+### 13.5 Troubleshooting a failure
 
 ```
 SetSourceCode(Text, "pascal")
 GenerateAll()
 // Returns {"error":"Model JSON is empty. Cannot generate."}
-// ↓ This means the source text failed to parse
+// This means the source text failed to parse.
 GetSourceJson()
-// If empty → the source text itself has a problem
-// If non-empty → LV0 to LV1 normalization failed (rare)
+// If empty → the source text itself has a problem.
+// If non-empty → LV0 to LV1 normalization failed (rare).
 ```
 
-### 12.6 GUI User Manual Flow
+### 13.6 GUI user flow
 
 1. Open the program.
 2. Select `Pascal` or `C` in the top dropdown.
-3. Paste source text into the `Source` page.
+3. Paste source text into the Source page.
 4. Click `Source → JSON`.
 5. Click `JSON → Model`.
 6. Click `Generate Source`.
-7. View/copy artifacts on the `Final Source` page's various TabSheets.
-8. Artifacts are also written to `<exe_dir>/<UnitName>/`.
+7. View or copy artifacts from the Final Source tabs.
+8. Artifacts are also written to `<exe dir>/<UnitName>/`.
 
 ---
 
-## Chapter 13  Honest Uncertainty List
+## Chapter 14  Honest Uncertainty List
 
-The following items cannot be fully determined from the available source. Consult the source or ask a human before relying on them.
-
-1. **`GenerateAll`'s disk-write behavior in a non-writable directory**
+1. **`GenerateAll` disk-write behavior in a non-writable directory**
    - The source calls `SaveCode` / `SaveSynEditCode`, which internally uses `TPascalStringList.SaveToFile`.
-   - **Uncertain**: whether a write failure raises an exception that is swallowed; whether the MCP return is affected.
-   - **Recommendation**: rely only on the in-memory cache (reader return values), not on disk.
+   - **Uncertain**: whether a write failure raises an exception that is swallowed, and whether the MCP return value is affected.
+   - **Recommendation**: rely on the in-memory cache (reader return values), not on the disk.
 
-2. **Exception propagation from `GenerateSourceButtonClick` to MCP**
-   - The button event handler is not wrapped in `try...except` in the source.
-   - **Uncertain**: whether the exception is caught by `Callback_*` and converted to `{"error":...}`.
-   - **Speculation**: yes (because `Callback_*` has `except on E: Exception`), but the message may be incomplete.
+2. **Exception propagation from `GenerateAllSourcesClick` to MCP**
+   - The button event handler is not wrapped in `try/except` in the source.
+   - **Uncertain**: whether an exception is caught by the callback envelope and converted to `{"error":"..."}`.
+   - **Speculation**: yes, because the callback envelope has an `except on E: Exception` branch, but the message may be incomplete.
 
-3. **`Sel_Lang_ComboBoxChange`'s behavior when `ItemIndex = 0`**
-   - The `else` branch in the source sets `source_edit.Highlighter` to `AnyHighlighter` and `current_language` to `slUnknown`.
-   - **Uncertain**: what happens when `source_2_json_nex_ButtonClick` is called after `slUnknown` is set.
-   - **Speculation**: it will report `"unsupported language."` and exit.
+3. **`LanguageSelectorChange` when `ItemIndex = 0`**
+   - The `else` branch sets the highlighter to `AnyHighlighter` and `CurrentSourceLanguage` to `slUnknown`.
+   - **Uncertain**: what `ParseSourceToJsonClick` does in the `slUnknown` state.
+   - **Speculation**: it reports `"Unsupported language."` and exits.
 
 4. **State sharing when multiple `TFuncDeclList`s are used simultaneously**
-   - Whether `tpascal_func_decl_tool` uses global state internally.
-   - **Uncertain**: whether concurrent calls are safe.
+   - **Uncertain**: whether `tpascal_func_decl_tool` uses global state internally, and therefore whether concurrent calls are safe.
 
 5. **`MakeApiName`'s handling of `-`**
-   - The source does not replace `-`.
-   - **Uncertain**: whether this is intentional (since Pascal function names do not contain `-`) or an oversight.
-   - **Speculation**: intentional.
+   - The source replaces `-` with `_`.
+   - **Uncertain**: whether this is intentional (Pascal function names cannot contain `-` anyway) or defensive.
+   - **Speculation**: defensive.
 
-6. **Whether all edge syntax in the complex test sample inserted by `empty_unit_Button1Click` can be parsed**
-   - The sample contains a variety of edge syntax (generics, function pointers, nested types, etc.).
-   - **Uncertain**: whether every syntax construct is correctly parsed by `Z.Pascal_Func_Tool`.
-   - **Recommendation**: treat it as a **parser stress test** rather than a generator test.
+6. **Whether every edge syntax in the `InsertTestUnit` sample parses**
+   - The sample contains a variety of edge syntax (generics, function pointers, nested types).
+   - **Uncertain**: whether every construct is correctly parsed by `Z.Pascal_Func_Tool`.
+   - **Recommendation**: treat it as a parser stress test, not a generator test.
 
-7. **Whether the HTML produced by `GetLastJsTestHtml` can be opened by double-clicking**
-   - The generated HTML embeds the JS library and can theoretically run offline.
-   - **Uncertain**: CORS behavior under the `file://` protocol.
-   - **Speculation**: for `http://127.0.0.1:8081` requests, cross-origin is triggered; serve it via a local HTTP server.
+7. **Whether the generated HTML test page works under `file://`**
+   - The HTML embeds everything needed.
+   - **Uncertain**: CORS behavior under `file://`.
+   - **Speculation**: for `http://127.0.0.1:8081` requests, cross-origin is triggered; serve the page via a local HTTP server.
 
-8. **Whether the C++ call side's `_lf_http_post` is thread-safe internally**
-   - The source uses `lingofuse::DataHandle` + `lingofuse::call`.
-   - **Uncertain**: whether there is shared-state contention under concurrent calls.
-   - **Speculation**: `LF_Call` is thread-safe (see the LingoFuse documentation).
+8. **Whether the C++ call side's `_invoke` is thread-safe**
+   - **Uncertain**: whether concurrent calls to `lingofuse::bridge::httpCall` contend on shared state.
+   - **Speculation**: `LF_Call` is thread-safe.
 
-9. **Relationship between `HTTP_CALL_DEFAULT_TIMEOUT_S` and `HTTP_CALL_TIMEOUT_MS`**
-   - In the source, `HTTP_CALL_DEFAULT_TIMEOUT_S = 25.0` and `HTTP_CALL_TIMEOUT_MS = 60000`.
-   - **Uncertain**: `60000 ms` is the LingoFuse round-trip timeout and `25.0 s` is the HTTP request timeout; the two must be kept consistent manually.
+9. **The relationship between `HTTP_CALL_DEFAULT_TIMEOUT_S` and `HTTP_CALL_TIMEOUT_MS`**
+   - The source uses `25.0` and `60000`.
+   - **Uncertain**: whether the two must be kept consistent manually.
    - **Recommendation**: ensure `HTTP_CALL_TIMEOUT_MS > HTTP_CALL_DEFAULT_TIMEOUT_S * 1000`.
 
-10. **`LogMemo` clearing strategy when exceeding 5000 lines**
-    - Source: `if LogMemo.Lines.Count > 5000 then LogMemo.Lines.Clear;`.
+10. **The GUI log panel's clearing strategy**
+    - Source: clears when exceeding 5000 lines.
     - **Uncertain**: whether this causes performance problems when log volume explodes.
 
-11. **`SysTimer`'s interval**
-    - The source does not directly give `Interval`.
+11. **The `SysTimer` interval**
     - **Uncertain**: the concrete value.
-    - **Speculation**: between 100 and 500 ms.
+    - **Speculation**: 100–500 ms.
 
-12. **Whether all `Callback_*` are correctly registered**
-    - The source has 22 `Callback_*` functions.
+12. **Whether all 24 callbacks are correctly registered**
     - **Uncertain**: whether `RegisterAPIs` has omissions or duplicates.
-    - **Speculation**: they correspond one-to-one with the 22 schemas in `RegisterTools`.
+    - **Speculation**: they correspond one-to-one with the 24 schemas in `RegisterTools`.
 
-13. **Whether `Do_Th_Send`'s `TCompute.RunC` can lose logs**
-    - The source posts asynchronously.
-    - **Uncertain**: whether there is a race condition under high concurrency.
+13. **Whether `SendLogAsync`'s `TCompute.RunC` can lose logs**
+    - **Uncertain**: race conditions under high concurrency.
 
-14. **`LF_CheckApiEx(BEACON_APP, REGISTER_API)`'s 3-second cache issue**
-    - `RegisterTools` calls it first to check the beacon.
-    - **Uncertain**: if the beacon just started, whether it misjudges it as unavailable.
+14. **`LF_CheckApiEx(BEACON_APP, REGISTER_API)`'s 3-second cache**
+    - **Uncertain**: whether a just-started beacon is misjudged as unavailable.
 
 15. **C++ generator's `LF_CDECL` macro**
-    - It appears in the source in `Callback_*` definitions.
-    - **Uncertain**: where `LF_CDECL` is defined (LingoFuse.hpp or LingoFuse.h).
-    - **Recommendation**: confirm `LF_CDECL` is defined before compiling.
+    - It appears in callback definitions.
+    - **Uncertain**: where `LF_CDECL` is defined.
+    - **Recommendation**: confirm it is defined before compiling.
 
-16. **Whether `GenerateAll`'s file manifest matches the actual file names written by `GenerateSourceButtonClick`**
-    - The `files` field returned by MCP is assembled manually by `internal_call`.
-    - **Uncertain**: whether it matches `SaveCode`'s actual file names word-for-word.
-    - **Speculation**: yes (same naming rules).
+16. **Whether `GenerateAll`'s file manifest matches the actual file names**
+    - The manifest is assembled manually in `internal_call`.
+    - **Uncertain**: whether it matches the names written by `SaveCode` word-for-word.
+    - **Speculation**: yes, because both follow the same naming rules.
 
-17. **Whether `SetModelJson` preserves the byte-level exactness of the input JSON**
-    - The source first validates with `ParseText`, then writes the original string into `model_json_edit`.
+17. **Whether `SetModelJson` preserves the byte-level exactness of the input**
+    - The source validates with `ParseText`, then writes the original string.
     - **Uncertain**: whether `ParseText` normalizes the original.
-    - **Speculation**: no (what is written is the original string).
+    - **Speculation**: no; the original string is preserved.
+
+18. **Whether `GenerateCMakeScript` and `GenerateTestMainCpp` are called for non-C++ targets**
+    - The GUI's `GenerateAllSourcesClick` calls them unconditionally.
+    - **Uncertain**: whether this is intentional or an oversight.
+    - **Speculation**: intentional — the CMake script is a unit-level artifact, not a C++-only artifact, and the CLI writes it for C++ targets specifically (see §3.8).
+
+19. **Whether the CMake script's `test_main___.cpp` reference is always satisfiable**
+    - The script expects `test_main___.cpp` in the same directory.
+    - **Uncertain**: whether the CLI always writes it alongside the `.hpp`/`.cpp` pair.
+    - **Speculation**: yes — the CLI's `Generate_Cpp` writes both CMake artifacts unconditionally.
+
+20. **The exact scope of `FSessionCMakeScript` / `FSessionTestMainCpp`**
+    - They are cleared by `SetSourceCode` and `SetModelJson`.
+    - **Uncertain**: whether they are also cleared by `GenerateAll`'s other steps.
+    - **Speculation**: no; they are populated only by the CMake step.
 
 ---
 
@@ -1540,30 +1539,30 @@ The following items cannot be fully determined from the available source. Consul
 
 ### Purpose of This Knowledge Base
 
-A **self-contained, actionable, bounded** reference for `code_decl_to_json_abi`. It does not pretend to replace the source, but it lets you use the tool correctly in 90% of scenarios, and know when to stop and ask a human in the remaining 10%.
+A self-contained, actionable, bounded reference for `code_decl_to_json_abi`. It does not pretend to replace the source, but it lets you use the tool correctly in 90% of scenarios, and know when to stop and ask a human in the remaining 10%.
 
 ### Core Promises
 
-- **Self-review**: every conclusion has been verified line-by-line against the source.
+- **Self-review**: every conclusion has been verified against the source.
 - **Actionable**: every pattern can be copied and pasted.
-- **Honest**: uncertain points are called out explicitly, without misleading.
+- **Honest**: uncertain points are called out explicitly.
 
-### Quick Recall
+### The Five Facts to Remember
 
 1. **`SetSourceCode(Source, "pascal" | "c")`** — only these two source languages are accepted.
-2. **`GenerateAll()`** — mandatory, produces all 17 artifacts at once.
-3. **`GetLast<Lang><Side><Artifact>()`** — 17 pure-read readers.
-4. **Unsupported routines are silently dropped**.
-5. **JS handling of `int64` carries precision risk**.
+2. **`GenerateAll()`** — mandatory; produces all 19 artifacts at once.
+3. **24 readers** — 2 intermediate + 1 generation + 19 artifact readers.
+4. **The MCP provider is a bootstrap → AI-fill architecture** — every tool body delegates to the GUI via `TCompute.Sync`.
+5. **C++ targets carry two extra fixed-name files** — `CMakeLists.txt` and `test_main___.cpp`.
 
 ### Interface with Related Units
 
 - The generators depend on `Z.Pascal_Func_Model` and `Z.Pascal_Func_Tool`.
-- The generated artifacts depend on `lingofuse_import` and `lf_http_bridge_client`.
-- The bridge `bridge.py` handles the conversion between HTTP/JSON and LingoFuse (this document does not cover its internals).
+- The generated artifacts depend on `lingofuse_import` (and, for C++ call, `lf_http_bridge_client`).
+- The CMake sub-toolchain depends on the LingoFuse C++ distribution.
+- The bridge `bridge.py` handles the conversion between HTTP/JSON and LingoFuse; its internals are outside this document's scope.
 
 ---
 
-**Document version**: v1.0
-**Last updated**: 2026-09-23
-**Document role**: This file is the single authoritative reference for `code_decl_to_json_abi`. If any discrepancy with the source is found, the source prevails.
+**Document version**: v2
+**Document role**: single authoritative reference for `code_decl_to_json_abi`. If any discrepancy with the source is found, the source prevails.
