@@ -23,7 +23,7 @@ uses
   py_abi_call_generator_tool,
   cpp_abi_service_generator_tool,
   cpp_abi_call_generator_tool,
-  code_decl_to_abi_cmdline, code_decl_to_abi_mcp_api_tool_provider_unit;
+  code_decl_to_abi_cmdline, code_decl_to_abi_mcp_api_tool_provider_unit, cpp_abi_cmake_generator_tool;
 
   {$R *.res}
 
