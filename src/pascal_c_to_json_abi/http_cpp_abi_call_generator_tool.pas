@@ -3,37 +3,71 @@ unit http_cpp_abi_call_generator_tool;
 // http_cpp_abi_call_generator_tool - LingoFuse HTTP/JSON ABI Call-Side
 // Generator for C++.
 //
-// This unit consumes a TPascal_Func_Model (built with Typ_Normalize_Func =
-// tnf_ABI) and produces three artifacts:
+// Consumes a TPascal_Func_Model (Typ_Normalize_Func = tnf_ABI) and
+// produces three artifacts:
 //
-//   1. A C++ header (*.hpp) declaring the call-side namespace, its
+//   1. A C++ header (*.hpp) that declares the call-side namespace, its
 //      configuration globals, the HTTPCallError class, and one typed
 //      free function per supported routine.
 //
-//   2. A C++ implementation (*.cpp) defining the configuration globals,
-//      the error class, the internal bridge transport helper, and every
-//      generated call function.
+//   2. A C++ implementation (*.cpp) that defines the configuration
+//      globals, the error class, and every generated call function.
+//      The transport is delegated to the C++ bridge client shipped
+//      with the LingoFuse distribution (lf_http_bridge_client.hpp),
+//      i.e. lingofuse::bridge::httpCall.
 //
 //   3. A Markdown README describing the contract, deployment, a full
 //      CMake script, a minimal test program, and a machine-readable
 //      summary for AI agents.
 //
-// The generated client uses ONLY the C ABI declared in LingoFuse.h.
-// It does not depend on any specific version of the C++ wrapper
-// (LingoFuse.hpp), so it stays stable across wrapper reorganisation.
+// Revision notes (v3):
+//
+//   - The README CMake script now declares "C CXX" as the project
+//     languages. LingoFuse.c is a C source file and cannot be compiled
+//     when only the CXX language is enabled; the previous CXX-only
+//     project failed at configure time with "Cannot determine link
+//     language".
+//
+//   - The dead catch clause for nlohmann::json::exception in _invoke
+//     has been removed. Every JSON failure that can reach the caller
+//     is already wrapped into lingofuse::Error by the bridge client.
+//
+//   - The redundant `static` on the anonymous-namespace helpers has
+//     been removed; symbols inside an anonymous namespace already
+//     have internal linkage.
+//
+//   - The error code -2 is now meaningful. When the bridge client
+//     reports ErrorCode::InvalidArgument (empty URL, un-serializable
+//     request body), the wrapper maps it to -2 rather than collapsing
+//     it into the generic -1 transport code. The header comment
+//     documents this exactly.
+//
+//   - The README troubleshooting table now lists the symptom of a
+//     missing LibraryLoader (lingofuse::Error "App: LF_CreateApp
+//     failed"), which was previously only documented on the service
+//     side.
+//
+// Revision notes (v2):
+//
+//   - The generated client no longer touches the C ABI directly. It
+//     calls lingofuse::bridge::httpCall, the cross-language-canonical
+//     bridge transport, so the generated code stays consistent with
+//     the C++ bridge client, the Pascal bridge client, and the Python
+//     bridge client.
+//
+//   - Every exception raised by the transport layer is translated
+//     into HTTPCallError. Callers only ever need to catch one type.
+//
+//   - The generated code rejects a JSON float sent for an integer
+//     result instead of silently truncating it.
+//
+//   - The bridge request "timeout" field is emitted as an integer,
+//     matching every other language binding in this toolchain.
 //
 // Wire protocol (from the client's point of view):
-//   the client sends  = POST <HTTP_CALL_BASE_URL>/<api>
-//                       body: { "args": [v1, v2, ...] }
-//   the client receives = { "code": 0,  "result": ... }
-//                         { "code": -1, "error":  ... }
-// The bridge is what actually performs the HTTP POST; the client only
-// sees a LingoFuse round trip.
-//
-// Type mapping (from Normalize_ABI_Type in Z.Pascal_Func_Model):
-//   Every integer family member  -> std::int64_t
-//   Every float family member    -> double
-//   Every string family member   -> std::string
+//   the client sends   = lingofuse::bridge::httpCall(...)
+//   the bridge returns = { "status_code": ..., "headers": {...},
+//                          "body": { "code": 0, "result": ... } }
 //
 // Author: LingoFuse-pasAgent project
 
@@ -68,13 +102,12 @@ function GenerateHTTPCallCppCode(Model: TPascal_Func_Model): TPascalStringList;
 function GenerateHTTPCallCppReadme(Model: TPascal_Func_Model): TPascalStringList;
 
 const
-  // Enable verbose logging during generation.
   GenerateCode_LogEnabled: boolean = False;
 
 implementation
 
 // -----------------------------------------------------------------------------
-// Logging helpers
+// Logging
 // -----------------------------------------------------------------------------
 
 procedure Log(const Msg: TP_String); overload;
@@ -90,7 +123,7 @@ begin
 end;
 
 // -----------------------------------------------------------------------------
-// ABI type family classification
+// ABI type classification
 // -----------------------------------------------------------------------------
 
 function ABI_Type_Is_String(const T: TP_String): boolean;
@@ -175,15 +208,12 @@ end;
 // Identifier helpers
 // -----------------------------------------------------------------------------
 
-// MakeApiName - canonicalize an arbitrary identifier into one that is
-// safe to use simultaneously as:
-//   * an API name on the LingoFuse wire,
-//   * a URL path segment for the bridge's HTTP route,
-//   * a JavaScript object key,
-//   * a C++ / Pascal / Python identifier.
+// MakeApiName - canonicalize a routine name into an identifier that is
+// simultaneously safe as a URL path segment, a JSON object key, and an
+// identifier in C++, Pascal, and Python.
 //
-// The character set replaced here MUST match the character set replaced
-// by every other generator in this toolchain:
+// The replacement set MUST match every other generator in this
+// toolchain:
 //   * http_pas_abi_service_generator_tool
 //   * http_pas_abi_call_generator_tool
 //   * http_js_abi_call_generator_tool
@@ -191,19 +221,17 @@ end;
 //   * http_py_abi_call_generator_tool
 //   * http_cpp_abi_service_generator_tool
 //
-// Replaced character set:
-//   space, tab, '.', '/', '\', '@', ':', '#', '?', '&', '=', '+', '-'
+// Replaced characters: space, tab, '.', '/', '\', '@', ':', '#', '?',
+// '&', '=', '+', '-'.
 function MakeApiName(const FuncName: TP_String): TP_String;
 begin
   Result := FuncName.ReplaceChar(#32#9'./\@:#?&=+-', '_');
 end;
 
 // MakeSafeCppIdent - turn an arbitrary string into a valid C++
-// identifier. Rules:
-//   * empty input        -> 'p' + index
-//   * invalid chars      -> '_'
-//   * leading digit      -> prefix '_'
-//   * C++ reserved word  -> suffix '_'
+// identifier. Empty input yields a generated placeholder. Leading
+// digits are prefixed with '_'. C++ reserved words are suffixed with
+// '_'.
 function MakeSafeCppIdent(const Name: TP_String; Index: integer): TP_String;
 var
   i: integer;
@@ -288,7 +316,7 @@ var
   i, code: integer;
   c: TP_Char;
 begin
-  Result := #34;   // opening double quote
+  Result := #34;
   for i := 1 to S.Len do
   begin
     c := S[i];
@@ -310,7 +338,7 @@ begin
           Result.Append(c);
     end;
   end;
-  Result.Append(#34);   // closing double quote
+  Result.Append(#34);
 end;
 
 // -----------------------------------------------------------------------------
@@ -331,7 +359,7 @@ begin
     else if c = #10 then
       Result.Append(' ')
     else if c = #13 then
-      // skip
+      // skip CR
     else
       Result.Append(c);
   end;
@@ -460,6 +488,9 @@ begin
   end;
 end;
 
+// BuildCppArgArrayInit - comma-separated argument names for use inside
+// nlohmann::json::array({...}). Empty when the routine has no
+// parameters; the caller must then emit nlohmann::json::array().
 function BuildCppArgArrayInit(const Params: TParamArray): TP_String;
 var
   i: integer;
@@ -571,7 +602,6 @@ var
   Lines: TPascalStringList;
   ParamList, RetType: TP_String;
   Description: TP_String;
-  HeaderFileName: TP_String;
 begin
   Result := nil;
   if Model = nil then
@@ -594,7 +624,6 @@ begin
   Ns := NormalizedUnit.LowerText;
   BaseUrl := 'http://127.0.0.1:8081/' + NormalizedUnit;
   GuardMacro := NormalizedUnit.UpperText + '_HTTP_JSON_CALL_HPP';
-  HeaderFileName := NormalizedUnit + '_http_json_call.hpp';
 
   SupportedFuncs := CollectSupportedFunctions(Model);
 
@@ -612,9 +641,9 @@ begin
 
       // The C++ function name may differ from the API name when the
       // sanitized API name is a C++ reserved word (for example a
-      // Pascal routine literally named 'class'). In that case the
-      // C++ function gets a '_' suffix while the URL path keeps the
-      // raw sanitized name, because that is what the service side
+      // Pascal routine literally named 'class'). In that case the C++
+      // function gets a '_' suffix while the URL path keeps the raw
+      // sanitized name, because that is what the service side
       // registered on the LingoFuse wire.
       CppFuncName := UniqueName(MakeSafeCppIdent(ApiName, i), UsedCppFuncNames);
       UsedCppFuncNames.Add(CppFuncName);
@@ -629,20 +658,19 @@ begin
     Lines.Add('// Do not edit by hand unless you know what you are doing.');
     Lines.Add('//');
     Lines.Add('// Call-side C++ wrapper for the LingoFuse HTTP/JSON service that');
-    Lines.Add('// was generated from the same source unit. Requests are routed');
-    Lines.Add('// through the LingoFuse HTTP bridge (bridge.py) via the bridge''s');
-    Lines.Add('// outbound POST API.');
+    Lines.Add('// was generated from the same source unit. Requests go through the');
+    Lines.Add('// LingoFuse HTTP bridge (bridge.py) via lingofuse::bridge, which is');
+    Lines.Add('// provided by the LingoFuse C++ distribution.');
     Lines.Add('//');
-    Lines.Add('// The generated client uses ONLY the C ABI declared in');
-    Lines.Add('// "LingoFuse.h". It does not depend on any specific version of');
-    Lines.Add('// the C++ wrapper (LingoFuse.hpp), so it stays stable across');
-    Lines.Add('// wrapper reorganisations.');
+    Lines.Add('// Required LingoFuse C++ files (in addition to this pair):');
+    Lines.Add('//   * LingoFuse.h, LingoFuse.c           (C ABI)');
+    Lines.Add('//   * LingoFuse.hpp, lf_io.hpp           (RAII wrappers)');
+    Lines.Add('//   * lf_http_bridge_client.hpp          (bridge transport)');
+    Lines.Add('//   * json.hpp                           (nlohmann/json)');
     Lines.Add('//');
-    Lines.Add('// Wire protocol (from the client''s point of view):');
-    Lines.Add('//   request  = POST <HTTP_CALL_BASE_URL>/<api>');
-    Lines.Add('//              body: { "args": [v1, v2, ...] }');
-    Lines.Add('//   response = { "code": 0,  "result": ... }   on success');
-    Lines.Add('//              { "code": -1, "error":  ... }   on failure');
+    Lines.Add('// The transport is fully encapsulated in the paired .cpp file.');
+    Lines.Add('// This header only exposes configuration, the exception type, and');
+    Lines.Add('// the typed call functions.');
     Lines.Add('//');
     Lines.Add('// Mapping note: when the sanitized API name collides with a C++');
     Lines.Add('// reserved word (for example a Pascal routine called "class"),');
@@ -660,46 +688,70 @@ begin
     Lines.Add('namespace ' + Ns + ' {');
     Lines.Add('');
     Lines.Add('// ---------------------------------------------------------------------');
-    Lines.Add('// Global configuration');
+    Lines.Add('// Configuration');
     Lines.Add('//');
-    Lines.Add('// Set these once, before the first call. All five are global');
-    Lines.Add('// variables; they are read on every call. Do not change them');
-    Lines.Add('// from another thread while a call is in flight.');
+    Lines.Add('// Set HTTP_CALL_BASE_URL before the first call. The other four');
+    Lines.Add('// variables are optional overrides: leave them empty (or zero) to');
+    Lines.Add('// use the bridge client''s own compiled-in defaults.');
     Lines.Add('// ---------------------------------------------------------------------');
     Lines.Add('');
-    Lines.Add('// LingoFuse application name of the bridge''s outbound POST API.');
-    Lines.Add('extern std::string HTTP_BRIDGE_APP_NAME;');
-    Lines.Add('');
-    Lines.Add('// LingoFuse API name of the bridge''s outbound POST API.');
-    Lines.Add('extern std::string HTTP_BRIDGE_API_NAME;');
-    Lines.Add('');
-    Lines.Add('// Timeout, in milliseconds, for the LingoFuse round trip to the');
-    Lines.Add('// bridge. Must be larger than the HTTP timeout carried inside');
-    Lines.Add('// the request.');
-    Lines.Add('extern std::uint64_t HTTP_CALL_TIMEOUT_MS;');
-    Lines.Add('');
-    Lines.Add('// Base URL prefix of the target service. The full URL for API');
-    Lines.Add('// "X" is HTTP_CALL_BASE_URL + "/" + "X". Do not append a');
-    Lines.Add('// trailing slash: the generated code adds it.');
+    Lines.Add('// Base URL prefix of the target service. The full URL for API "X"');
+    Lines.Add('// is HTTP_CALL_BASE_URL + "/" + "X". Must not have a trailing');
+    Lines.Add('// slash: the generated code adds it.');
     Lines.Add('extern std::string HTTP_CALL_BASE_URL;');
     Lines.Add('');
-    Lines.Add('// Default outbound HTTP timeout, in seconds, used when the');
-    Lines.Add('// caller does not specify one.');
+    Lines.Add('// LingoFuse App name of the bridge. An empty string means "use the');
+    Lines.Add('// bridge client''s default", which is __lf_http_bridge__.');
+    Lines.Add('extern std::string HTTP_BRIDGE_APP_NAME;');
+    Lines.Add('');
+    Lines.Add('// LingoFuse API name of the bridge''s outbound POST proxy. An empty');
+    Lines.Add('// string means "use the bridge client''s default", which is');
+    Lines.Add('// __lf_outbound_post__.');
+    Lines.Add('extern std::string HTTP_BRIDGE_API_NAME;');
+    Lines.Add('');
+    Lines.Add('// Timeout, in milliseconds, for the LingoFuse round trip that');
+    Lines.Add('// carries the request to the bridge and the response back. Zero');
+    Lines.Add('// means "use the bridge client''s default" (60000 ms).');
+    Lines.Add('//');
+    Lines.Add('// Must be larger than the outbound HTTP timeout');
+    Lines.Add('// (HTTP_CALL_DEFAULT_TIMEOUT_S * 1000), otherwise the LF_Call');
+    Lines.Add('// times out before the HTTP request completes and the caller sees');
+    Lines.Add('// an empty response.');
+    Lines.Add('extern std::uint64_t HTTP_CALL_TIMEOUT_MS;');
+    Lines.Add('');
+    Lines.Add('// Outbound HTTP timeout, in seconds, sent inside the bridge');
+    Lines.Add('// request. Zero means "use the bridge client''s default" (25.0 s).');
     Lines.Add('extern double HTTP_CALL_DEFAULT_TIMEOUT_S;');
     Lines.Add('');
     Lines.Add('// ---------------------------------------------------------------------');
     Lines.Add('// Error type');
     Lines.Add('//');
     Lines.Add('// Raised by every generated function when a call fails for any');
-    Lines.Add('// reason: transport error, missing response field, or a non-zero');
-    Lines.Add('// "code" in the response body.');
+    Lines.Add('// reason. The transport layer (lingofuse::bridge) raises');
+    Lines.Add('// lingofuse::Error; this wrapper translates every such exception');
+    Lines.Add('// into HTTPCallError so that the caller only ever needs to catch');
+    Lines.Add('// one type.');
+    Lines.Add('//');
+    Lines.Add('// `code` semantics:');
+    Lines.Add('//   * -1: transport / service failure. Any lingofuse::Error from');
+    Lines.Add('//         the bridge client except ErrorCode::InvalidArgument, or');
+    Lines.Add('//         a service-side exception forwarded by the bridge.');
+    Lines.Add('//   * -2: request shape error. Raised when the caller supplied an');
+    Lines.Add('//         empty URL, or when the request body could not be');
+    Lines.Add('//         serialized. These are caller-side mistakes rather than');
+    Lines.Add('//         transport failures, so they are reported distinctly.');
+    Lines.Add('//   * -4: bridge protocol error (malformed envelope, missing field).');
+    Lines.Add('//   * any other value: a service-defined error code forwarded from');
+    Lines.Add('//         the service''s { "code": N, "error": "..." } response.');
+    Lines.Add('//');
+    Lines.Add('// `http_status` is 200 for any well-formed service response and 0');
+    Lines.Add('// for transport-level failures.');
     Lines.Add('// ---------------------------------------------------------------------');
     Lines.Add('');
     Lines.Add('class HTTPCallError : public std::runtime_error {');
     Lines.Add('public:');
-    Lines.Add('    // Bridge / service error code. -1 for transport errors and');
-    Lines.Add('    // service exceptions, -2 for request-shape errors, -3 for');
-    Lines.Add('    // bridge pre-check failures, or a service-defined code.');
+    Lines.Add('    // Bridge / service error code. See the comment above for the');
+    Lines.Add('    // exact meaning of each value.');
     Lines.Add('    int code;');
     Lines.Add('');
     Lines.Add('    // HTTP status code of the underlying response, or 0 if the');
@@ -774,7 +826,6 @@ var
   Lines: TPascalStringList;
   ParamList, RetType: TP_String;
   ArgInit: TP_String;
-  ExtractDefault: TP_String;
 begin
   Result := nil;
   if Model = nil then
@@ -818,7 +869,7 @@ begin
     end;
 
     // -------------------------------------------------------------------------
-    // File header
+    // File header and includes
     // -------------------------------------------------------------------------
     Lines.Add('// Auto-generated by http_cpp_abi_call_generator_tool.pas.');
     Lines.Add('// Source model unit: ' + UnitName.Text + '.');
@@ -827,26 +878,31 @@ begin
     Lines.Add('// Implementation of the C++ HTTP/JSON call wrapper declared in');
     Lines.Add('// "' + HeaderFileName.Text + '".');
     Lines.Add('//');
-    Lines.Add('// This file uses ONLY the C ABI declared in "LingoFuse.h". It');
-    Lines.Add('// does not include "LingoFuse.hpp" and does not depend on any');
-    Lines.Add('// version-specific C++ wrapper API.');
+    Lines.Add('// The transport is delegated to lingofuse::bridge::httpCall, which');
+    Lines.Add('// is provided by lf_http_bridge_client.hpp. This keeps the generated');
+    Lines.Add('// code aligned with the canonical C++ bridge client and avoids');
+    Lines.Add('// duplicating the wire protocol in every generated client.');
     Lines.Add('');
     Lines.Add('#include "' + HeaderFileName.Text + '"');
     Lines.Add('');
-    Lines.Add('#include "LingoFuse.h"');
-    Lines.Add('#include "json.hpp"');
+    Lines.Add('#include "LingoFuse.hpp"');
+    Lines.Add('#include "lf_http_bridge_client.hpp"');
+    Lines.Add('');
+    Lines.Add('#include <cstdint>');
+    Lines.Add('#include <string>');
+    Lines.Add('#include <type_traits>');
     Lines.Add('');
     Lines.Add('namespace ' + Ns + ' {');
     Lines.Add('');
     Lines.Add('// ---------------------------------------------------------------------');
-    Lines.Add('// Global configuration');
+    Lines.Add('// Configuration');
     Lines.Add('// ---------------------------------------------------------------------');
     Lines.Add('');
-    Lines.Add('std::string HTTP_BRIDGE_APP_NAME = "__lf_http_bridge__";');
-    Lines.Add('std::string HTTP_BRIDGE_API_NAME = "__lf_outbound_post__";');
-    Lines.Add('std::uint64_t HTTP_CALL_TIMEOUT_MS = 60000;');
     Lines.Add('std::string HTTP_CALL_BASE_URL = ' + CppStrLit(BaseUrl).Text + ';');
-    Lines.Add('double HTTP_CALL_DEFAULT_TIMEOUT_S = 25.0;');
+    Lines.Add('std::string HTTP_BRIDGE_APP_NAME = "";');
+    Lines.Add('std::string HTTP_BRIDGE_API_NAME = "";');
+    Lines.Add('std::uint64_t HTTP_CALL_TIMEOUT_MS = 0;');
+    Lines.Add('double HTTP_CALL_DEFAULT_TIMEOUT_S = 0.0;');
     Lines.Add('');
     Lines.Add('// ---------------------------------------------------------------------');
     Lines.Add('// Error type');
@@ -864,121 +920,137 @@ begin
     Lines.Add('// Internal helpers');
     Lines.Add('// ---------------------------------------------------------------------');
     Lines.Add('');
+    Lines.Add('// Every helper in this anonymous namespace has internal linkage');
+    Lines.Add('// by virtue of the unnamed namespace; a `static` qualifier would');
+    Lines.Add('// be redundant.');
     Lines.Add('namespace {');
     Lines.Add('');
-    Lines.Add('// Strip trailing NUL bytes from a std::string in place.');
-    Lines.Add('static void _strip_trailing_nuls(std::string& s) {');
-    Lines.Add('    while (!s.empty() && s.back() == ''\\0'') {');
-    Lines.Add('        s.pop_back();');
+    Lines.Add('// Send a request through the bridge and return the service''s parsed');
+    Lines.Add('// response "body" object.');
+    Lines.Add('//');
+    Lines.Add('// Responsibilities:');
+    Lines.Add('//   1. Forward the request to the bridge via lingofuse::bridge,');
+    Lines.Add('//      using the caller''s configuration and falling back to the');
+    Lines.Add('//      bridge client''s compiled-in defaults where a setting is');
+    Lines.Add('//      empty or zero.');
+    Lines.Add('//   2. Validate the bridge envelope and the service response.');
+    Lines.Add('//   3. Translate every transport-level failure into HTTPCallError.');
+    Lines.Add('//   4. Raise HTTPCallError with the service error code when the');
+    Lines.Add('//      service responds with a non-zero "code" field.');
+    Lines.Add('//');
+    Lines.Add('// On success, the returned object is the service''s "body", which');
+    Lines.Add('// is guaranteed to have a "code" field equal to 0. The caller only');
+    Lines.Add('// needs to extract "result".');
+    Lines.Add('nlohmann::json _invoke(const std::string& url,');
+    Lines.Add('                       const nlohmann::json& request_body) {');
+    Lines.Add('    const char* app_name = HTTP_BRIDGE_APP_NAME.empty()');
+    Lines.Add('        ? nullptr');
+    Lines.Add('        : HTTP_BRIDGE_APP_NAME.c_str();');
+    Lines.Add('    const char* api_name = HTTP_BRIDGE_API_NAME.empty()');
+    Lines.Add('        ? nullptr');
+    Lines.Add('        : HTTP_BRIDGE_API_NAME.c_str();');
+    Lines.Add('');
+    Lines.Add('    nlohmann::json envelope;');
+    Lines.Add('    try {');
+    Lines.Add('        // lingofuse::bridge::httpCall throws lingofuse::Error on');
+    Lines.Add('        // any transport-level failure: empty URL, network');
+    Lines.Add('        // unreachable, bridge App not on the mesh, LF_Call');
+    Lines.Add('        // timeout, malformed bridge envelope, etc. Every JSON');
+    Lines.Add('        // failure that can reach this point is already wrapped');
+    Lines.Add('        // into lingofuse::Error by the bridge client, so a single');
+    Lines.Add('        // catch clause covers all transport failures.');
+    Lines.Add('        envelope = lingofuse::bridge::httpCall(');
+    Lines.Add('            url,');
+    Lines.Add('            "POST",');
+    Lines.Add('            request_body,');
+    Lines.Add('            HTTP_CALL_DEFAULT_TIMEOUT_S,');
+    Lines.Add('            app_name,');
+    Lines.Add('            api_name,');
+    Lines.Add('            HTTP_CALL_TIMEOUT_MS);');
+    Lines.Add('    } catch (const lingofuse::Error& e) {');
+    Lines.Add('        // Distinguish caller-side shape errors from genuine');
+    Lines.Add('        // transport failures. ErrorCode::InvalidArgument is');
+    Lines.Add('        // raised for an empty URL or an un-serializable request');
+    Lines.Add('        // body; both are the caller''s fault, so they are');
+    Lines.Add('        // reported with code -2 rather than collapsed into the');
+    Lines.Add('        // generic -1 transport code.');
+    Lines.Add('        const int code =');
+    Lines.Add('            (e.code() == lingofuse::ErrorCode::InvalidArgument)');
+    Lines.Add('                ? -2');
+    Lines.Add('                : -1;');
+    Lines.Add('        throw HTTPCallError(e.what(), code, 0);');
     Lines.Add('    }');
+    Lines.Add('');
+    Lines.Add('    // The bridge response is an envelope of the form');
+    Lines.Add('    //     { "status_code": ..., "headers": {...}, "body": {...} }');
+    Lines.Add('    // The service''s actual response is inside "body".');
+    Lines.Add('    if (!envelope.is_object()) {');
+    Lines.Add('        throw HTTPCallError(');
+    Lines.Add('            "bridge envelope is not a JSON object", -4, 0);');
+    Lines.Add('    }');
+    Lines.Add('    if (!envelope.contains("body")) {');
+    Lines.Add('        throw HTTPCallError(');
+    Lines.Add('            "bridge envelope has no ''body'' field", -4, 0);');
+    Lines.Add('    }');
+    Lines.Add('    const nlohmann::json& body = envelope.at("body");');
+    Lines.Add('    if (!body.is_object()) {');
+    Lines.Add('        throw HTTPCallError(');
+    Lines.Add('            "bridge envelope ''body'' is not a JSON object", -4, 0);');
+    Lines.Add('    }');
+    Lines.Add('    if (!body.contains("code")) {');
+    Lines.Add('        throw HTTPCallError(');
+    Lines.Add('            "service response has no ''code'' field", -4, 0);');
+    Lines.Add('    }');
+    Lines.Add('');
+    Lines.Add('    // The code field must be a JSON integer. A non-integer value');
+    Lines.Add('    // (string, float, object) is a protocol violation, so it is');
+    Lines.Add('    // reported as -4 rather than silently coerced.');
+    Lines.Add('    if (!body.at("code").is_number_integer()) {');
+    Lines.Add('        throw HTTPCallError(');
+    Lines.Add('            "service response ''code'' is not an integer", -4, 0);');
+    Lines.Add('    }');
+    Lines.Add('    const int service_code = body.at("code").get<int>();');
+    Lines.Add('');
+    Lines.Add('    if (service_code != 0) {');
+    Lines.Add('        std::string err = "service reported an error";');
+    Lines.Add('        if (body.contains("error") && body.at("error").is_string()) {');
+    Lines.Add('            err = body.at("error").get<std::string>();');
+    Lines.Add('        }');
+    Lines.Add('        throw HTTPCallError(err, service_code, 200);');
+    Lines.Add('    }');
+    Lines.Add('');
+    Lines.Add('    return body;');
     Lines.Add('}');
     Lines.Add('');
-    Lines.Add('// Send an HTTP POST request through the bridge using the C ABI');
-    Lines.Add('// declared in LingoFuse.h. On success returns the parsed body');
-    Lines.Add('// object. On failure throws HTTPCallError.');
-    Lines.Add('static nlohmann::json _lf_http_post(const std::string& url,');
-    Lines.Add('                                    const nlohmann::json& body,');
-    Lines.Add('                                    double timeout_seconds) {');
-    Lines.Add('    // Build the bridge request JSON.');
-    Lines.Add('    nlohmann::json bridge_req;');
-    Lines.Add('    bridge_req["url"] = url;');
-    Lines.Add('    bridge_req["method"] = "POST";');
-    Lines.Add('    bridge_req["body"] = body;');
-    Lines.Add('    bridge_req["timeout"] = timeout_seconds;');
-    Lines.Add('    std::string req_text = bridge_req.dump();');
-    Lines.Add('');
-    Lines.Add('    // Create the request handle.');
-    Lines.Add('    void* param_h = LF_CreateData(HTTP_BRIDGE_API_NAME.c_str());');
-    Lines.Add('    if (param_h == nullptr) {');
-    Lines.Add('        throw HTTPCallError("LF_CreateData returned null", -1, 0);');
+    Lines.Add('// Extract the "result" field of a service response with explicit');
+    Lines.Add('// type checking.');
+    Lines.Add('//');
+    Lines.Add('// Contract:');
+    Lines.Add('//   * Missing or null "result"    -> returns T{}.');
+    Lines.Add('//   * Integer T, JSON float value -> throws. nlohmann::json''s');
+    Lines.Add('//                                    get<std::int64_t>() would');
+    Lines.Add('//                                    silently truncate 3.7 to 3,');
+    Lines.Add('//                                    which is not acceptable');
+    Lines.Add('//                                    across a public API boundary.');
+    Lines.Add('//   * Any other type mismatch     -> throws.');
+    Lines.Add('template <typename T>');
+    Lines.Add('T _extract_result(const nlohmann::json& body) {');
+    Lines.Add('    if (!body.contains("result") || body.at("result").is_null()) {');
+    Lines.Add('        return T{};');
     Lines.Add('    }');
-    Lines.Add('');
-    Lines.Add('    // Write UTF-8 JSON + NUL.');
+    Lines.Add('    const nlohmann::json& slot = body.at("result");');
+    Lines.Add('    if (std::is_integral<T>::value && slot.is_number_float()) {');
+    Lines.Add('        throw HTTPCallError(');
+    Lines.Add('            "service response ''result'' expects an integer, but the "');
+    Lines.Add('            "service sent a floating-point number", -1, 200);');
+    Lines.Add('    }');
     Lines.Add('    try {');
-    Lines.Add('        std::int64_t to_write =');
-    Lines.Add('            static_cast<std::int64_t>(req_text.size()) + 1;');
-    Lines.Add('        std::int64_t written = LF_WriteBuffer(');
-    Lines.Add('            param_h, &req_text[0], to_write);');
-    Lines.Add('        if (written != to_write) {');
-    Lines.Add('            throw HTTPCallError(');
-    Lines.Add('                "LF_WriteBuffer wrote fewer bytes than requested",');
-    Lines.Add('                -1, 0);');
-    Lines.Add('        }');
-    Lines.Add('    } catch (...) {');
-    Lines.Add('        LF_FreeData(param_h);');
-    Lines.Add('        throw;');
-    Lines.Add('    }');
-    Lines.Add('');
-    Lines.Add('    // Send through LingoFuse. LF_Call returns a NEW handle; the');
-    Lines.Add('    // request handle is no longer needed.');
-    Lines.Add('    void* resp_h = LF_Call(HTTP_BRIDGE_APP_NAME.c_str(),');
-    Lines.Add('                           param_h, HTTP_CALL_TIMEOUT_MS);');
-    Lines.Add('    LF_FreeData(param_h);');
-    Lines.Add('');
-    Lines.Add('    if (resp_h == nullptr) {');
-    Lines.Add('        throw HTTPCallError("LF_Call returned a null handle", -1, 0);');
-    Lines.Add('    }');
-    Lines.Add('');
-    Lines.Add('    // Read the response.');
-    Lines.Add('    std::string resp_text;');
-    Lines.Add('    try {');
-    Lines.Add('        std::int64_t size = LF_GetSize(resp_h);');
-    Lines.Add('        if (size <= 0) {');
-    Lines.Add('            throw HTTPCallError(');
-    Lines.Add('                "Bridge returned an empty response (timeout?)", -1, 0);');
-    Lines.Add('        }');
-    Lines.Add('        resp_text.resize(static_cast<std::size_t>(size));');
-    Lines.Add('        std::int64_t read = LF_ReadBuffer(');
-    Lines.Add('            resp_h, &resp_text[0], size);');
-    Lines.Add('        if (read < 0) read = 0;');
-    Lines.Add('        resp_text.resize(static_cast<std::size_t>(read));');
-    Lines.Add('    } catch (...) {');
-    Lines.Add('        LF_FreeData(resp_h);');
-    Lines.Add('        throw;');
-    Lines.Add('    }');
-    Lines.Add('    LF_FreeData(resp_h);');
-    Lines.Add('');
-    Lines.Add('    _strip_trailing_nuls(resp_text);');
-    Lines.Add('    if (resp_text.empty()) {');
-    Lines.Add('        throw HTTPCallError("Bridge returned an empty string", -1, 0);');
-    Lines.Add('    }');
-    Lines.Add('');
-    Lines.Add('    // Parse the bridge envelope.');
-    Lines.Add('    nlohmann::json bridge_resp;');
-    Lines.Add('    try {');
-    Lines.Add('        bridge_resp = nlohmann::json::parse(resp_text);');
-    Lines.Add('    } catch (const std::exception& e) {');
+    Lines.Add('        return slot.get<T>();');
+    Lines.Add('    } catch (const nlohmann::json::exception& e) {');
     Lines.Add('        throw HTTPCallError(');
-    Lines.Add('            std::string("Invalid JSON response from bridge: ")');
-    Lines.Add('                + e.what(), -1, 0);');
+    Lines.Add('            std::string("cannot convert service response ''result'': ")');
+    Lines.Add('                + e.what(), -1, 200);');
     Lines.Add('    }');
-    Lines.Add('');
-    Lines.Add('    if (!bridge_resp.is_object()) {');
-    Lines.Add('        throw HTTPCallError(');
-    Lines.Add('            "Bridge response is not a JSON object", -1, 0);');
-    Lines.Add('    }');
-    Lines.Add('    if (!bridge_resp.contains("body")) {');
-    Lines.Add('        throw HTTPCallError(');
-    Lines.Add('            "Bridge response has no ''body'' field", -1, 0);');
-    Lines.Add('    }');
-    Lines.Add('    const nlohmann::json& inner = bridge_resp["body"];');
-    Lines.Add('    if (!inner.is_object()) {');
-    Lines.Add('        throw HTTPCallError(');
-    Lines.Add('            "Bridge response ''body'' is not a JSON object", -1, 0);');
-    Lines.Add('    }');
-    Lines.Add('    if (!inner.contains("code")) {');
-    Lines.Add('        throw HTTPCallError(');
-    Lines.Add('            "Bridge response ''body'' has no ''code'' field", -1, 0);');
-    Lines.Add('    }');
-    Lines.Add('');
-    Lines.Add('    const int code = inner.value("code", -1);');
-    Lines.Add('    if (code != 0) {');
-    Lines.Add('        const std::string err = inner.value(');
-    Lines.Add('            "error", std::string("unknown error"));');
-    Lines.Add('        throw HTTPCallError(err, code, 200);');
-    Lines.Add('    }');
-    Lines.Add('');
-    Lines.Add('    return inner;');
     Lines.Add('}');
     Lines.Add('');
     Lines.Add('}  // anonymous namespace');
@@ -988,7 +1060,7 @@ begin
     Lines.Add('// ---------------------------------------------------------------------');
     Lines.Add('');
 
-    // Function definitions
+    // Function definitions.
     for i := 0 to High(SupportedFuncs) do
     begin
       f := SupportedFuncs[i];
@@ -1008,16 +1080,17 @@ begin
       Lines.Add('');
       Lines.Add('    // Build the request body: { "args": [<arg1>, <arg2>, ...] }.');
       Lines.Add('    nlohmann::json req;');
-      Lines.Add('    req["args"] = nlohmann::json::array({' + ArgInit.Text + '});');
+      if Length(f.Params) = 0 then
+        Lines.Add('    req["args"] = nlohmann::json::array();')
+      else
+        Lines.Add('    req["args"] = nlohmann::json::array({' + ArgInit.Text + '});');
       Lines.Add('');
-      Lines.Add('    const nlohmann::json body = _lf_http_post(');
-      Lines.Add('        url, req, HTTP_CALL_DEFAULT_TIMEOUT_S);');
+      Lines.Add('    const nlohmann::json body = _invoke(url, req);');
 
       if f.IsFunction then
       begin
-        ExtractDefault := ABI_Type_To_Cpp_Default_Extract(f.ReturnType);
         Lines.Add('');
-        Lines.Add('    return body.value("result", ' + ExtractDefault.Text + ');');
+        Lines.Add('    return _extract_result<' + RetType.Text + '>(body);');
       end
       else
       begin
@@ -1124,9 +1197,6 @@ begin
       CppFuncNames.Add(CppFuncName);
     end;
 
-    // =========================================================================
-    // Header block
-    // =========================================================================
     Lines.Add('# ' + UnitName.Text + ' - C++ HTTP/JSON Call-Side Wrapper');
     Lines.Add('');
     Lines.Add('> **Auto-generated**. Produced by `http_cpp_abi_call_generator_tool.pas`;');
@@ -1144,16 +1214,9 @@ begin
     Lines.Add('> **Audience**: C++ developers and AI assistants who need to');
     Lines.Add('> compile the generated wrapper into their own program and call');
     Lines.Add('> a remote service through `bridge.py`.');
-    Lines.Add('>');
-    Lines.Add('> **AI agents**: jump straight to §12 "For AI Agents" for a');
-    Lines.Add('> compact, machine-readable summary.');
     Lines.Add('');
     Lines.Add('---');
     Lines.Add('');
-
-    // =========================================================================
-    // 1. Overview
-    // =========================================================================
     Lines.Add('## 1. Overview');
     Lines.Add('');
     Lines.Add('This document describes the **call-side C++ wrapper** that was');
@@ -1165,17 +1228,23 @@ begin
     Lines.Add('');
     Lines.Add('### 1.1 Dependencies');
     Lines.Add('');
-    Lines.Add('The generated wrapper has exactly three third-party dependencies:');
+    Lines.Add('The generated wrapper depends on the standard LingoFuse C++');
+    Lines.Add('distribution. In particular, it calls `lingofuse::bridge`, the');
+    Lines.Add('canonical C++ bridge client. The five files that must be present');
+    Lines.Add('on the include path are:');
     Lines.Add('');
     Lines.Add('| Piece | Files | Purpose |');
     Lines.Add('|-------|-------|---------|');
-    Lines.Add('| LingoFuse C ABI | `LingoFuse.h` + `LingoFuse.c` | Transport to the bridge |');
-    Lines.Add('| nlohmann/json | `json.hpp` | JSON encode/decode |');
-    Lines.Add('| C++ standard library | — | `std::string`, `std::runtime_error`, etc. |');
+    Lines.Add('| LingoFuse C ABI | `LingoFuse.h` + `LingoFuse.c` | Loads the dynamic library, forwarders |');
+    Lines.Add('| LingoFuse C++ RAII | `LingoFuse.hpp` | `DataHandle`, `App`, `LibraryLoader` |');
+    Lines.Add('| LingoFuse payload I/O | `lf_io.hpp` | UTF-8 JSON framing over a data handle |');
+    Lines.Add('| Bridge transport | `lf_http_bridge_client.hpp` | The `lingofuse::bridge` namespace |');
+    Lines.Add('| JSON engine | `json.hpp` | nlohmann/json single-header |');
     Lines.Add('');
-    Lines.Add('It does **not** depend on `LingoFuse.hpp` or `lf_io.hpp` — those');
-    Lines.Add('are C++ wrapper headers whose API varies across releases. Only');
-    Lines.Add('the stable C ABI is used.');
+    Lines.Add('The generated code does **not** re-implement the bridge wire');
+    Lines.Add('protocol. It relies on `lingofuse::bridge::httpCall`, which is');
+    Lines.Add('the same entry point used by every other C++ bridge client in');
+    Lines.Add('this toolchain.');
     Lines.Add('');
     Lines.Add('### 1.2 Files produced by the toolchain');
     Lines.Add('');
@@ -1185,32 +1254,37 @@ begin
     Lines.Add('| `' + CodeFileName.Text + '` | The call wrapper implementation. |');
     Lines.Add('| `' + NormalizedUnit.Text + '_http_json_call_cpp.md` | This README. |');
     Lines.Add('');
-
-    // =========================================================================
-    // 2. Quick Start
-    // =========================================================================
     Lines.Add('## 2. Quick Start');
     Lines.Add('');
     Lines.Add('### 2.1 Prepare LingoFuse');
     Lines.Add('');
-    Lines.Add('Your program must prepare LingoFuse before the first call:');
+    Lines.Add('Your program must prepare LingoFuse before the first call. The');
+    Lines.Add('`LibraryLoader` is the essential first step: it calls');
+    Lines.Add('`LF_LoadLibrary` in its constructor. Without it, every `LF_*`');
+    Lines.Add('entry point is a silent no-op and `LF_CreateApp` returns');
+    Lines.Add('`NULL`.');
     Lines.Add('');
     Lines.Add('```cpp');
-    Lines.Add('#include "LingoFuse.h"');
+    Lines.Add('#include "LingoFuse.hpp"');
     Lines.Add('');
     Lines.Add('int main() {');
-    Lines.Add('    // Connect to the same LingoFuse endpoint the bridge uses.');
-    Lines.Add('    LF_ResetPrepare();');
-    Lines.Add('    LF_PrepareClient("ipc:' + NormalizedUnit.Text + '_http_json", nullptr);');
-    Lines.Add('    if (LF_PrepareDone() != 1) {');
+    Lines.Add('    lingofuse::LibraryLoader loader;');
+    Lines.Add('    lingofuse::resetPrepare();');
+    Lines.Add('    lingofuse::prepareClient("ipc:' + NormalizedUnit.Text + '_http_json", nullptr);');
+    Lines.Add('    if (lingofuse::prepareDone() != 1) {');
     Lines.Add('        return 1;');
     Lines.Add('    }');
     Lines.Add('    // ... your calls ...');
-    Lines.Add('    LF_ExitMainThread();');
-    Lines.Add('    LF_Shutdown();');
+    Lines.Add('    lingofuse::exitMainThread();');
+    Lines.Add('    lingofuse::shutdown();');
     Lines.Add('    return 0;');
     Lines.Add('}');
     Lines.Add('```');
+    Lines.Add('');
+    Lines.Add('The `LibraryLoader` RAII wrapper manages the reference count on');
+    Lines.Add('`LF_LoadLibrary` / `LF_FreeLibrary`. The bridge App name defaults');
+    Lines.Add('to `__lf_http_bridge__`; you only need to override it if your');
+    Lines.Add('deployment used a non-default `--bridge-app` argument.');
     Lines.Add('');
     Lines.Add('### 2.2 Configure the client');
     Lines.Add('');
@@ -1218,26 +1292,30 @@ begin
     Lines.Add(Ns.Text + '::HTTP_CALL_BASE_URL = ' + CppStrLit(BaseUrl).Text + ';');
     Lines.Add('```');
     Lines.Add('');
+    Lines.Add('The other four globals are optional overrides. Leave them empty');
+    Lines.Add('(or zero) to use the bridge client''s compiled-in defaults:');
+    Lines.Add('');
+    Lines.Add('| Variable | Default if empty |');
+    Lines.Add('|----------|------------------|');
+    Lines.Add('| `HTTP_BRIDGE_APP_NAME` | `__lf_http_bridge__` |');
+    Lines.Add('| `HTTP_BRIDGE_API_NAME` | `__lf_outbound_post__` |');
+    Lines.Add('| `HTTP_CALL_TIMEOUT_MS` | `60000` ms |');
+    Lines.Add('| `HTTP_CALL_DEFAULT_TIMEOUT_S` | `25.0` s |');
+    Lines.Add('');
     Lines.Add('### 2.3 Make a call');
     Lines.Add('');
     Lines.Add('```cpp');
     Lines.Add('try {');
     Lines.Add('    std::int64_t r = ' + Ns.Text + '::Add(3, 4);');
-    Lines.Add('    std::cout << "Add(3, 4) = " << r << "\\n";');
+    Lines.Add('    std::cout << "Add(3, 4) = " << r << "\n";');
     Lines.Add('} catch (const ' + Ns.Text + '::HTTPCallError& e) {');
     Lines.Add('    std::cerr << "Call failed: " << e.what()');
     Lines.Add('              << " (code=" << e.code');
-    Lines.Add('              << ", http_status=" << e.http_status << ")\\n";');
+    Lines.Add('              << ", http_status=" << e.http_status << ")\n";');
     Lines.Add('}');
     Lines.Add('```');
     Lines.Add('');
-
-    // =========================================================================
-    // 3. Compatibility
-    // =========================================================================
     Lines.Add('## 3. Compatibility');
-    Lines.Add('');
-    Lines.Add('### 3.1 Compiler support');
     Lines.Add('');
     Lines.Add('| Compiler | Minimum version |');
     Lines.Add('|----------|-----------------|');
@@ -1247,33 +1325,19 @@ begin
     Lines.Add('');
     Lines.Add('The generated code requires C++17.');
     Lines.Add('');
-    Lines.Add('### 3.2 Platform support');
-    Lines.Add('');
-    Lines.Add('| Platform | Architecture | Status |');
-    Lines.Add('|----------|-------------|--------|');
-    Lines.Add('| Windows | x86_64 | Primary target |');
-    Lines.Add('| Linux | x86_64 | Supported |');
-    Lines.Add('| Linux | aarch64 | Supported |');
-    Lines.Add('| macOS | x86_64 | Supported |');
-    Lines.Add('| macOS | aarch64 | Supported |');
-    Lines.Add('');
-    Lines.Add('### 3.3 Threading');
+    Lines.Add('### 3.1 Threading');
     Lines.Add('');
     Lines.Add('Generated functions are synchronous and blocking. `LF_Call` is');
     Lines.Add('thread-safe, so multiple threads may call different functions');
-    Lines.Add('concurrently. The five module-level configuration globals are');
-    Lines.Add('not atomic: set them once at startup, before any call, and do');
-    Lines.Add('not modify them while a call is in flight.');
+    Lines.Add('concurrently. The five configuration globals are not atomic: set');
+    Lines.Add('them once at startup, before any call, and do not modify them');
+    Lines.Add('while a call is in flight.');
     Lines.Add('');
-
-    // =========================================================================
-    // 4. Wire Protocol
-    // =========================================================================
     Lines.Add('## 4. Wire Protocol');
     Lines.Add('');
-    Lines.Add('Every generated function performs a LingoFuse round trip to the');
-    Lines.Add('bridge, which then performs an HTTP POST to the target service.');
-    Lines.Add('The client never speaks HTTP directly.');
+    Lines.Add('The transport is entirely handled by `lingofuse::bridge::httpCall`;');
+    Lines.Add('the generated code never speaks HTTP directly. This section');
+    Lines.Add('documents what that helper does on the caller''s behalf.');
     Lines.Add('');
     Lines.Add('### 4.1 URL composition');
     Lines.Add('');
@@ -1281,22 +1345,23 @@ begin
     Lines.Add('HTTP_CALL_BASE_URL + "/" + <api-name>');
     Lines.Add('```');
     Lines.Add('');
-    Lines.Add('### 4.2 Outbound request');
+    Lines.Add('### 4.2 Bridge request');
     Lines.Add('');
-    Lines.Add('The client sends a bridge request:');
+    Lines.Add('`lingofuse::bridge::httpCall` sends a LingoFuse call to the');
+    Lines.Add('bridge with this JSON body:');
     Lines.Add('');
     Lines.Add('```json');
     Lines.Add('{');
     Lines.Add('  "url":     "<HTTP_CALL_BASE_URL>/<api>",');
     Lines.Add('  "method":  "POST",');
     Lines.Add('  "body":    { "args": [v1, v2, ...] },');
-    Lines.Add('  "timeout": 25.0');
+    Lines.Add('  "timeout": 25');
     Lines.Add('}');
     Lines.Add('```');
     Lines.Add('');
-    Lines.Add('### 4.3 Inbound response');
+    Lines.Add('### 4.3 Bridge response');
     Lines.Add('');
-    Lines.Add('The bridge returns a JSON envelope:');
+    Lines.Add('The bridge returns an envelope:');
     Lines.Add('');
     Lines.Add('```json');
     Lines.Add('{');
@@ -1306,43 +1371,41 @@ begin
     Lines.Add('}');
     Lines.Add('```');
     Lines.Add('');
-    Lines.Add('The generated function inspects `body.code` and either returns');
-    Lines.Add('`body.result` or throws `HTTPCallError` with `body.error`.');
+    Lines.Add('The generated code unwraps the envelope, checks `body.code` and');
+    Lines.Add('either returns `body.result` or throws `HTTPCallError`.');
     Lines.Add('');
     Lines.Add('### 4.4 Error model');
     Lines.Add('');
-    Lines.Add('| Condition | `code` in HTTPCallError |');
-    Lines.Add('|-----------|:-----------------------:|');
-    Lines.Add('| LingoFuse call timed out | `-1` |');
-    Lines.Add('| Bridge envelope missing `body` | `-1` |');
-    Lines.Add('| Bridge envelope `body` is not an object | `-1` |');
-    Lines.Add('| Response lacks `code` | `-1` |');
-    Lines.Add('| Service returned `code <> 0` | the service code |');
+    Lines.Add('Every failure mode is translated into `HTTPCallError`:');
     Lines.Add('');
-
-    // =========================================================================
-    // 5. Global Configuration
-    // =========================================================================
+    Lines.Add('| Condition | `code` | `http_status` |');
+    Lines.Add('|-----------|:------:|:-------------:|');
+    Lines.Add('| Empty URL or un-serializable request body | `-2` | `0` |');
+    Lines.Add('| LingoFuse call timed out | `-1` | `0` |');
+    Lines.Add('| Bridge App unreachable | `-1` | `0` |');
+    Lines.Add('| Bridge-level error (`{"error": "..."}`) | `-1` | `0` |');
+    Lines.Add('| Bridge envelope missing `body` | `-4` | `0` |');
+    Lines.Add('| Bridge envelope `body` not an object | `-4` | `0` |');
+    Lines.Add('| Response lacks `code` or `code` is not an integer | `-4` | `0` |');
+    Lines.Add('| Service returned `code != 0` | service code | `200` |');
+    Lines.Add('| Response `result` type mismatch | `-1` | `200` |');
+    Lines.Add('');
     Lines.Add('## 5. Global Configuration');
     Lines.Add('');
     Lines.Add('| Variable | Type | Default | Purpose |');
     Lines.Add('|----------|------|---------|---------|');
-    Lines.Add('| `HTTP_BRIDGE_APP_NAME` | `std::string` | `"__lf_http_bridge__"` | LingoFuse app name of the bridge. |');
-    Lines.Add('| `HTTP_BRIDGE_API_NAME` | `std::string` | `"__lf_outbound_post__"` | LingoFuse API name of the bridge''s outbound POST proxy. |');
-    Lines.Add('| `HTTP_CALL_TIMEOUT_MS` | `std::uint64_t` | `60000` | Timeout for the LingoFuse round trip. |');
-    Lines.Add('| `HTTP_CALL_BASE_URL` | `std::string` | `' + BaseUrl.Text + '` | Base URL of the target service. |');
-    Lines.Add('| `HTTP_CALL_DEFAULT_TIMEOUT_S` | `double` | `25.0` | Default HTTP timeout inside the request. |');
+    Lines.Add('| `HTTP_CALL_BASE_URL` | `std::string` | `' + BaseUrl.Text + '` | Base URL of the target service. Must be set. |');
+    Lines.Add('| `HTTP_BRIDGE_APP_NAME` | `std::string` | `""` | Bridge App name. Empty means "use the bridge default". |');
+    Lines.Add('| `HTTP_BRIDGE_API_NAME` | `std::string` | `""` | Bridge outbound API name. Empty means "use the bridge default". |');
+    Lines.Add('| `HTTP_CALL_TIMEOUT_MS` | `std::uint64_t` | `0` | LingoFuse round-trip timeout. 0 means "use the bridge default". |');
+    Lines.Add('| `HTTP_CALL_DEFAULT_TIMEOUT_S` | `double` | `0.0` | HTTP timeout inside the bridge request. 0.0 means "use the bridge default". |');
     Lines.Add('');
-
-    // =========================================================================
-    // 6. Error Handling
-    // =========================================================================
     Lines.Add('## 6. Error Handling');
     Lines.Add('');
     Lines.Add('```cpp');
     Lines.Add('class HTTPCallError : public std::runtime_error {');
     Lines.Add('public:');
-    Lines.Add('    int code;         // -1, -2, -3, or a service code');
+    Lines.Add('    int code;         // -1 (transport) / -2 (shape) / -4 (protocol)');
     Lines.Add('    int http_status;  // 0 for transport errors, 200 for service errors');
     Lines.Add('    HTTPCallError(const std::string& message,');
     Lines.Add('                  int code_ = -1,');
@@ -1350,17 +1413,18 @@ begin
     Lines.Add('};');
     Lines.Add('```');
     Lines.Add('');
+    Lines.Add('The generated code translates every `lingofuse::Error` into');
+    Lines.Add('`HTTPCallError`. Callers do not need to know about');
+    Lines.Add('`lingofuse::Error` or any other LingoFuse exception type.');
+    Lines.Add('');
     Lines.Add('| Code | Meaning |');
     Lines.Add('|------|---------|');
     Lines.Add('| `0` | Success. Never thrown. |');
-    Lines.Add('| `-1` | Remote call failed (service exception, transport error, timeout). |');
-    Lines.Add('| `-2` | Request shape error (URL path could not be parsed by the bridge). |');
-    Lines.Add('| `-3` | Bridge pre-check failed. |');
+    Lines.Add('| `-1` | Transport failure: LF_Call timeout, bridge unreachable, or a service-side exception forwarded by the bridge. |');
+    Lines.Add('| `-2` | Request shape error: empty URL or un-serializable request body. |');
+    Lines.Add('| `-4` | Bridge protocol error: malformed envelope or missing field. |');
+    Lines.Add('| any other value | A service-defined error code from the service''s `{"code": N, "error": "..."}` response. |');
     Lines.Add('');
-
-    // =========================================================================
-    // 7. API Reference
-    // =========================================================================
     Lines.Add('## 7. API Reference');
     Lines.Add('');
     Lines.Add('Total functions: **' + MdInt(FuncCount).Text + '**.');
@@ -1426,7 +1490,6 @@ begin
 
         Lines.Add('### 7.' + MdInt(i + 2).Text + ' `' + CppFuncName.Text + '`');
         Lines.Add('');
-
         Lines.Add('- **C++ signature**: `' + CppSig.Text + '`');
         Lines.Add('- **Pascal source**: `' + PascalDecl.Text + '`');
         Lines.Add('- **HTTP route**: `POST /' + AppName.Text + '/' + ApiName.Text + '`');
@@ -1436,16 +1499,12 @@ begin
         Description := GetFullDescription(f.Comment);
         if Description.Len > 0 then
         begin
-          Lines.Add('#### Description');
-          Lines.Add('');
-          Lines.Add(Description.Text);
+          Lines.Add('**Description**: ' + Description.Text);
           Lines.Add('');
         end;
 
         if HasParams then
         begin
-          Lines.Add('#### Arguments');
-          Lines.Add('');
           Lines.Add('| # | Name | C++ type | JSON wire type |');
           Lines.Add('|---|------|----------|----------------|');
           for j := 0 to High(f.Params) do
@@ -1473,7 +1532,7 @@ begin
             '(' + CallArgs.Text + ');');
         Lines.Add('} catch (const ' + Ns.Text + '::HTTPCallError& e) {');
         Lines.Add('    std::cerr << "Call failed: " << e.what()');
-        Lines.Add('              << " (code=" << e.code << ")\\n";');
+        Lines.Add('              << " (code=" << e.code << ")\n";');
         Lines.Add('}');
         Lines.Add('```');
         Lines.Add('');
@@ -1482,34 +1541,11 @@ begin
       end;
     end;
 
-    // =========================================================================
-    // 8. Building - Manual
-    // =========================================================================
     Lines.Add('## 8. Building - Manual');
     Lines.Add('');
-    Lines.Add('The generated wrapper is **not** a program by itself: it is a');
-    Lines.Add('library that you compile into your own program. The only');
-    Lines.Add('third-party source file that needs to be compiled in is');
-    Lines.Add('`LingoFuse.c`. Everything else is a header.');
-    Lines.Add('');
-    Lines.Add('### 8.1 Required files next to your sources');
-    Lines.Add('');
-    Lines.Add('```');
-    Lines.Add('your_project/');
-    Lines.Add('  ' + HeaderFileName.Text + '      <- generated');
-    Lines.Add('  ' + CodeFileName.Text + '        <- generated');
-    Lines.Add('  your_main.cpp                             <- your entry point');
-    Lines.Add('  LingoFuse.h                               <- from LingoFuse distribution');
-    Lines.Add('  LingoFuse.c                               <- from LingoFuse distribution');
-    Lines.Add('  json.hpp                                  <- nlohmann/json single header');
-    Lines.Add('  LingoFuse64.dll                           <- Windows runtime');
-    Lines.Add('  liblingofuse.so                           <- Linux runtime');
-    Lines.Add('  liblingofuse.dylib                        <- macOS runtime');
-    Lines.Add('  z_ipc_64.dll                              <- Windows runtime');
-    Lines.Add('  libz_ipc_64.so                            <- Linux runtime');
-    Lines.Add('```');
-    Lines.Add('');
-    Lines.Add('### 8.2 Minimal build (GCC / Clang)');
+    Lines.Add('The generated wrapper is a library that you compile into your');
+    Lines.Add('own program. It requires exactly one third-party source file to');
+    Lines.Add('be compiled in: `LingoFuse.c`. Everything else is headers.');
     Lines.Add('');
     Lines.Add('```bash');
     Lines.Add('g++ -std=c++17 -O2 \\');
@@ -1519,7 +1555,13 @@ begin
     Lines.Add('    -pthread -ldl');
     Lines.Add('```');
     Lines.Add('');
-    Lines.Add('### 8.3 Minimal build (MSVC)');
+    Lines.Add('Note that `LingoFuse.c` is a C file. When you invoke a C++');
+    Lines.Add('compiler driver like `g++` it will compile the `.c` file as C++');
+    Lines.Add('by default. That is usually fine, but if your build uses a');
+    Lines.Add('stricter toolchain, compile `LingoFuse.c` with a C compiler and');
+    Lines.Add('link the resulting object file.');
+    Lines.Add('');
+    Lines.Add('### 8.1 Minimal MSVC build');
     Lines.Add('');
     Lines.Add('```cmd');
     Lines.Add('cl /std:c++17 /O2 /EHsc ^');
@@ -1528,28 +1570,22 @@ begin
     Lines.Add('   /Fe:your_app.exe');
     Lines.Add('```');
     Lines.Add('');
-
-    // =========================================================================
-    // 9. Building - CMake
-    // =========================================================================
     Lines.Add('## 9. Building - CMake');
     Lines.Add('');
-    Lines.Add('If you use CMake, drop this `CMakeLists.txt` next to the two');
-    Lines.Add('generated files, the five support files, and a `test_main.cpp`');
-    Lines.Add('(see §10 for a minimal one).');
+    Lines.Add('The `project()` line must enable BOTH the `C` and `CXX`');
+    Lines.Add('languages. `LingoFuse.c` is a C source file, and CMake cannot');
+    Lines.Add('determine a link language for a target that contains a `.c` file');
+    Lines.Add('when only `CXX` is enabled. Enabling `C CXX` lets CMake route');
+    Lines.Add('`LingoFuse.c` to the C compiler and everything else to the C++');
+    Lines.Add('compiler.');
     Lines.Add('');
     Lines.Add('```cmake');
     Lines.Add('cmake_minimum_required(VERSION 3.15)');
-    Lines.Add('project(' + NormalizedUnit.Text + '_http_json_call_test CXX)');
+    Lines.Add('project(' + NormalizedUnit.Text + '_http_json_call_test C CXX)');
     Lines.Add('');
     Lines.Add('set(CMAKE_CXX_STANDARD 17)');
     Lines.Add('set(CMAKE_CXX_STANDARD_REQUIRED ON)');
     Lines.Add('');
-    Lines.Add('# ----------------------------------------------------------------------');
-    Lines.Add('# Adjust these paths if the support files live elsewhere.');
-    Lines.Add('# LINGOFUSE_DIR must contain: LingoFuse.h, LingoFuse.c');
-    Lines.Add('# NLOHMANN_DIR  must contain: json.hpp');
-    Lines.Add('# ----------------------------------------------------------------------');
     Lines.Add('set(LINGOFUSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")');
     Lines.Add('set(NLOHMANN_DIR  "${CMAKE_CURRENT_SOURCE_DIR}")');
     Lines.Add('');
@@ -1576,9 +1612,8 @@ begin
     Lines.Add('        Threads::Threads ${CMAKE_DL_LIBS})');
     Lines.Add('endif()');
     Lines.Add('');
-    Lines.Add('# ----------------------------------------------------------------------');
-    Lines.Add('# Copy the Windows runtime DLLs next to the executable.');
-    Lines.Add('# ----------------------------------------------------------------------');
+    Lines.Add('# Copy the Windows runtime DLLs next to the executable so that');
+    Lines.Add('# the program can find them without a manual PATH change.');
     Lines.Add('if(WIN32)');
     Lines.Add('    foreach(_dll');
     Lines.Add('        "${LINGOFUSE_DIR}/LingoFuse64.dll"');
@@ -1593,59 +1628,27 @@ begin
     Lines.Add('endif()');
     Lines.Add('```');
     Lines.Add('');
-    Lines.Add('### 9.1 Add to an existing CMake project');
-    Lines.Add('');
-    Lines.Add('If you already have a top-level `CMakeLists.txt`, add the');
-    Lines.Add('following to it instead of making a separate project:');
-    Lines.Add('');
-    Lines.Add('```cmake');
-    Lines.Add('# Build the generated wrapper as a static library.');
-    Lines.Add('add_library(' + NormalizedUnit.Text + '_http_json_call STATIC');
-    Lines.Add('    ' + CodeFileName.Text);
-    Lines.Add('    "${LINGOFUSE_DIR}/LingoFuse.c"');
-    Lines.Add(')');
-    Lines.Add('target_include_directories(' + NormalizedUnit.Text + '_http_json_call PUBLIC');
-    Lines.Add('    "${CMAKE_CURRENT_SOURCE_DIR}"');
-    Lines.Add('    "${LINGOFUSE_DIR}"');
-    Lines.Add('    "${NLOHMANN_DIR}"');
-    Lines.Add(')');
-    Lines.Add('');
-    Lines.Add('# Link your program against it.');
-    Lines.Add('target_link_libraries(your_app PRIVATE ' + NormalizedUnit.Text + '_http_json_call)');
-    Lines.Add('```');
-    Lines.Add('');
-
-    // =========================================================================
-    // 10. Minimal Test Program
-    // =========================================================================
     Lines.Add('## 10. Minimal Test Program');
     Lines.Add('');
-    Lines.Add('`test_main.cpp` used by §9:');
-    Lines.Add('');
     Lines.Add('```cpp');
-    Lines.Add('// Sample test program for the generated ' + NormalizedUnit.Text + '_http_json_call');
-    Lines.Add('// library. Replace the calls below with real ones.');
-    Lines.Add('');
     Lines.Add('#include "' + HeaderFileName.Text + '"');
+    Lines.Add('#include "LingoFuse.hpp"');
     Lines.Add('');
-    Lines.Add('#include <cstdio>');
     Lines.Add('#include <cstdint>');
-    Lines.Add('');
-    Lines.Add('#include "LingoFuse.h"');
+    Lines.Add('#include <cstdio>');
     Lines.Add('');
     Lines.Add('int main() {');
-    Lines.Add('    // 1. Prepare LingoFuse. The endpoint must match the one the');
-    Lines.Add('    //    bridge was started with (its --endpoint argument).');
-    Lines.Add('    LF_ResetPrepare();');
-    Lines.Add('    LF_PrepareClient("ipc:' + NormalizedUnit.Text + '_http_json", nullptr);');
-    Lines.Add('    if (LF_PrepareDone() != 1) {');
-    Lines.Add('        std::fprintf(stderr, "LingoFuse init failed\\n");');
+    Lines.Add('    lingofuse::LibraryLoader loader;');
+    Lines.Add('    lingofuse::resetPrepare();');
+    Lines.Add('    lingofuse::prepareClient("ipc:' + NormalizedUnit.Text + '_http_json", nullptr);');
+    Lines.Add('    if (lingofuse::prepareDone() != 1) {');
+    Lines.Add('        std::fprintf(stderr, "LingoFuse init failed\n");');
     Lines.Add('        return 1;');
     Lines.Add('    }');
     Lines.Add('');
-    Lines.Add('    // 2. Point the generated client at the bridge.');
     Lines.Add('    ' + Ns.Text + '::HTTP_CALL_BASE_URL = "http://127.0.0.1:8081/' + NormalizedUnit.Text + '";');
     Lines.Add('');
+    Lines.Add('    try {');
 
     if FuncCount > 0 then
     begin
@@ -1653,60 +1656,49 @@ begin
       CppFuncName := CppFuncNames[0];
       CallArgs := BuildCppCallArgList(f.Params);
 
-      Lines.Add('    // 3. Call a generated function.');
-      Lines.Add('    try {');
       if f.IsFunction then
       begin
-        Lines.Add('        std::int64_t r = ' + Ns.Text + '::' + CppFuncName.Text +
+        Lines.Add('        auto r = ' + Ns.Text + '::' + CppFuncName.Text +
           '(' + CallArgs.Text + ');');
-        Lines.Add('        std::printf("' + CppFuncName.Text + '(...) = %lld\\n", (long long)r);');
+        Lines.Add('        std::printf("call succeeded\n");');
       end
       else
       begin
-        Lines.Add('        ' + Ns.Text + '::' + CppFuncName.Text + '(' + CallArgs.Text + ');');
-        Lines.Add('        std::printf("' + CppFuncName.Text + '(...) succeeded\\n");');
+        Lines.Add('        ' + Ns.Text + '::' + CppFuncName.Text +
+          '(' + CallArgs.Text + ');');
+        Lines.Add('        std::printf("call succeeded\n");');
       end;
-      Lines.Add('    } catch (const ' + Ns.Text + '::HTTPCallError& e) {');
-      Lines.Add('        std::fprintf(stderr, "Call failed: %s (code=%d, http=%d)\\n",');
-      Lines.Add('                     e.what(), e.code, e.http_status);');
-      Lines.Add('    }');
     end
     else
-    begin
-      Lines.Add('    // No supported routines were generated for this unit.');
-    end;
+      Lines.Add('        // No supported routines were generated for this unit.');
 
+    Lines.Add('    } catch (const ' + Ns.Text + '::HTTPCallError& e) {');
+    Lines.Add('        std::fprintf(stderr, "Call failed: %s (code=%d, http=%d)\n",');
+    Lines.Add('                     e.what(), e.code, e.http_status);');
+    Lines.Add('    }');
     Lines.Add('');
-    Lines.Add('    // 4. Clean shutdown.');
-    Lines.Add('    LF_ExitMainThread();');
-    Lines.Add('    LF_Shutdown();');
+    Lines.Add('    lingofuse::exitMainThread();');
+    Lines.Add('    lingofuse::shutdown();');
     Lines.Add('    return 0;');
     Lines.Add('}');
     Lines.Add('```');
     Lines.Add('');
-
-    // =========================================================================
-    // 11. Troubleshooting
-    // =========================================================================
     Lines.Add('## 11. Troubleshooting');
     Lines.Add('');
     Lines.Add('| Symptom | Likely cause | Fix |');
     Lines.Add('|---------|--------------|-----|');
+    Lines.Add('| `lingofuse::Error: LibraryLoader: LF_LoadLibrary failed` | The LingoFuse dynamic library is not on the search path | Copy `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib` next to the executable, or add its directory to PATH / LD_LIBRARY_PATH |');
+    Lines.Add('| `lingofuse::Error: App: LF_CreateApp failed` | `LF_LoadLibrary` was never called | Add `lingofuse::LibraryLoader loader;` as the first statement of `main()` |');
+    Lines.Add('| `code == -1`, `http_status == 0` | Transport failure | Start `bridge.py`; verify `HTTP_CALL_BASE_URL` |');
+    Lines.Add('| `code == -2` | Request shape error: empty URL or un-serializable body | Verify `HTTP_CALL_BASE_URL` is non-empty and the arguments can be serialized to JSON |');
+    Lines.Add('| `code == -4` | Bridge protocol error | Bridge returned an unexpected envelope; check the bridge log |');
+    Lines.Add('| `code == -3` | Bridge pre-check failed | Start the bridge with `--no-precheck`, or retry after ~3 s |');
+    Lines.Add('| Service returns wrong result type | The service sent a JSON type that does not match the declared Pascal type | Fix the service, or widen the declared type |');
     Lines.Add('| Linker error: undefined reference to `LF_*` | `LingoFuse.c` not compiled in | Add it to the same build target |');
+    Lines.Add('| CMake: "Cannot determine link language" | `project()` declares only `CXX` | Change to `project(name C CXX)` |');
     Lines.Add('| Linker error: undefined reference to `dlopen` | Missing `-ldl` on Linux | Add `-ldl` to the link line |');
-    Lines.Add('| `LF_CreateData returned null` | LingoFuse library not loaded | Ensure `LingoFuse64.dll` / `liblingofuse.so` is next to the executable or on the search path |');
-    Lines.Add('| `LF_Call returned a null handle` | LingoFuse not prepared, or the bridge is not reachable | Call `LF_PrepareClient` + `LF_PrepareDone` before the first call |');
-    Lines.Add('| `Bridge returned an empty response` | Timeout, or the bridge is not running | Increase `HTTP_CALL_TIMEOUT_MS`; start `bridge.py` |');
-    Lines.Add('| `code: -3` | Bridge pre-check failed | Add `--no-precheck` to the bridge, or retry after ~3 s |');
-    Lines.Add('| `HTTP 404` from the bridge | Wrong URL path | Verify `HTTP_CALL_BASE_URL` ends with `/<app>` |');
     Lines.Add('');
-
-    // =========================================================================
-    // 12. For AI Agents
-    // =========================================================================
     Lines.Add('## 12. For AI Agents');
-    Lines.Add('');
-    Lines.Add('### 12.1 Contract summary');
     Lines.Add('');
     Lines.Add('```yaml');
     Lines.Add('artifact:');
@@ -1719,29 +1711,28 @@ begin
     Lines.Add('  default_base_url: ' + BaseUrl.Text);
     Lines.Add('');
     Lines.Add('dependencies:');
-    Lines.Add('  - LingoFuse.h   # C ABI declarations');
-    Lines.Add('  - LingoFuse.c   # C ABI implementation (compile it in)');
-    Lines.Add('  - json.hpp      # nlohmann/json single header');
-    Lines.Add('  - c++ standard library');
+    Lines.Add('  - LingoFuse.h            # C ABI declarations');
+    Lines.Add('  - LingoFuse.c            # C ABI implementation (compile it in)');
+    Lines.Add('  - LingoFuse.hpp          # C++ RAII wrappers');
+    Lines.Add('  - lf_io.hpp              # unified payload I/O');
+    Lines.Add('  - lf_http_bridge_client.hpp  # lingofuse::bridge transport');
+    Lines.Add('  - json.hpp               # nlohmann/json single header');
     Lines.Add('');
-    Lines.Add('does_not_depend_on:');
-    Lines.Add('  - LingoFuse.hpp');
-    Lines.Add('  - lf_io.hpp');
+    Lines.Add('transport:');
+    Lines.Add('  provider: lingofuse::bridge::httpCall');
+    Lines.Add('  protocol: JSON over the LingoFuse mesh to bridge.py');
     Lines.Add('');
     Lines.Add('global_configuration:');
-    Lines.Add('  HTTP_BRIDGE_APP_NAME: "__lf_http_bridge__"');
-    Lines.Add('  HTTP_BRIDGE_API_NAME: "__lf_outbound_post__"');
-    Lines.Add('  HTTP_CALL_TIMEOUT_MS: 60000');
     Lines.Add('  HTTP_CALL_BASE_URL: "' + BaseUrl.Text + '"');
-    Lines.Add('  HTTP_CALL_DEFAULT_TIMEOUT_S: 25.0');
+    Lines.Add('  HTTP_BRIDGE_APP_NAME: ""            # empty -> bridge default');
+    Lines.Add('  HTTP_BRIDGE_API_NAME: ""            # empty -> bridge default');
+    Lines.Add('  HTTP_CALL_TIMEOUT_MS: 0             # 0 -> bridge default');
+    Lines.Add('  HTTP_CALL_DEFAULT_TIMEOUT_S: 0.0    # 0.0 -> bridge default');
     Lines.Add('');
     Lines.Add('outbound_request:');
-    Lines.Add('  transport: "LF_Call to (__lf_http_bridge__, __lf_outbound_post__)"');
-    Lines.Add('  bridge_request:');
-    Lines.Add('    url: "HTTP_CALL_BASE_URL + ''/'' + api_name"');
-    Lines.Add('    method: POST');
-    Lines.Add('    body: ''{"args": [v1, v2, ..., vN]}''');
-    Lines.Add('    timeout: HTTP_CALL_DEFAULT_TIMEOUT_S');
+    Lines.Add('  transport_call: lingofuse::bridge::httpCall(url, "POST", body, http_timeout, app, api, lf_timeout)');
+    Lines.Add('  url: "HTTP_CALL_BASE_URL + ''/'' + api_name"');
+    Lines.Add('  body: ''{"args": [v1, v2, ..., vN]}''');
     Lines.Add('');
     Lines.Add('inbound_response:');
     Lines.Add('  envelope: ''{"status_code": ..., "headers": {...}, "body": {...}}''');
@@ -1752,8 +1743,13 @@ begin
     Lines.Add('  type: HTTPCallError');
     Lines.Add('  base: std::runtime_error');
     Lines.Add('  fields:');
-    Lines.Add('    code: "int"');
-    Lines.Add('    http_status: "int"');
+    Lines.Add('    code: "int, -1/-2/-4 or a service code"');
+    Lines.Add('    http_status: "int, 0 for transport errors"');
+    Lines.Add('  translation:');
+    Lines.Add('    source: [lingofuse::Error]');
+    Lines.Add('    target: HTTPCallError');
+    Lines.Add('    special_cases:');
+    Lines.Add('      - "lingofuse::ErrorCode::InvalidArgument -> code = -2"');
     Lines.Add('');
     Lines.Add('types:');
     Lines.Add('  cpp_int: "std::int64_t"');
@@ -1761,18 +1757,28 @@ begin
     Lines.Add('  cpp_str: "std::string"');
     Lines.Add('```');
     Lines.Add('');
-    Lines.Add('### 12.2 Anti-patterns');
+    Lines.Add('### 12.1 Anti-patterns');
     Lines.Add('');
     Lines.Add('| Anti-pattern | Why it fails | Correct form |');
     Lines.Add('|--------------|--------------|--------------|');
-    Lines.Add('| Calling a function before `LF_PrepareDone()` | LingoFuse mesh not ready | Prepare LingoFuse first |');
+    Lines.Add('| Missing `lingofuse::LibraryLoader` | Every `LF_*` call is a silent no-op; `LF_CreateApp` returns NULL | Make `LibraryLoader` the first object in `main()` |');
+    Lines.Add('| Calling a function before `prepareDone()` | LingoFuse mesh not ready | Prepare LingoFuse first |');
     Lines.Add('| Setting `HTTP_CALL_BASE_URL` after the first call | Race with in-flight calls | Set once at startup |');
     Lines.Add('| Catching `std::exception` instead of `HTTPCallError` | Hides unrelated bugs | Catch `HTTPCallError` explicitly |');
+    Lines.Add('| Catching `lingofuse::Error` on a generated call | It is never thrown by the generated code | Catch `HTTPCallError` |');
     Lines.Add('| Omitting `LingoFuse.c` from the build | Linker error | Add it to the same target |');
+    Lines.Add('| `project(name CXX)` in CMake | CMake cannot link a target that contains a `.c` file | Use `project(name C CXX)` |');
     Lines.Add('| Omitting `-ldl` on Linux | Linker error | Add `-ldl` to the link line |');
-    Lines.Add('| Using `int`/`float` instead of `std::int64_t`/`double` | Silent truncation | Use the generated types verbatim |');
+    Lines.Add('| Using `int`/`float` instead of `std::int64_t`/`double` | Silent truncation at the API boundary | Use the generated types verbatim |');
     Lines.Add('');
-
+    Lines.Add('### 12.2 What this document does NOT cover');
+    Lines.Add('');
+    Lines.Add('- The internal implementation of `bridge.py`.');
+    Lines.Add('- The internal implementation of `lingofuse::bridge`.');
+    Lines.Add('- The service side. See the paired');
+    Lines.Add('  `' + NormalizedUnit.Text + '_http_json_service_cpp.md`.');
+    Lines.Add('- Other language bindings (Pascal, Python, JavaScript).');
+    Lines.Add('');
     Lines.Add('---');
     Lines.Add('');
     Lines.Add('End of document. Generated by `http_cpp_abi_call_generator_tool.pas`');
