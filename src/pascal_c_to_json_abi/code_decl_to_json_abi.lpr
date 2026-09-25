@@ -23,7 +23,7 @@ uses
   http_cpp_abi_service_generator_tool,
   http_cpp_abi_call_generator_tool,
   code_decl_to_json_abi_mcp_api_tool_provider_unit,
-  code_decl_to_json_abi_cmdline;
+  code_decl_to_json_abi_cmdline, http_cmake_generator_tool;
 
   {$R *.res}
 
