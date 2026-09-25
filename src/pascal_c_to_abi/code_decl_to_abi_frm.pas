@@ -15,7 +15,7 @@ uses
   SynEdit, SynHighlighterPas, SynEditMiscClasses,
   lingofuse_import, pas_abi_call_generator_tool, pas_abi_service_generator_tool,
   py_abi_call_generator_tool, py_abi_service_generator_tool,
-  cpp_abi_call_generator_tool, cpp_abi_service_generator_tool, code_decl_to_abi_mcp_api_tool_provider_unit,
+  cpp_abi_call_generator_tool, cpp_abi_service_generator_tool, code_decl_to_abi_mcp_api_tool_provider_unit, cpp_abi_cmake_generator_tool,
   Z.Pascal_Func_Model, Z.Pascal_Func_Tool;
 
 type
@@ -51,8 +51,11 @@ type
     Bvl_WelcomeSpacer1: TBevel;
     Cmb_LanguageSelector: TComboBox;
     Edit_CppCallCpp: TSynEdit;
+    Edit_CMake_Call_Test: TSynEdit;
     Edit_CppCallHpp: TSynEdit;
+    Edit_CMake_Service_Test: TSynEdit;
     Edit_CppCallReadme: TSynEdit;
+    Edit_CMake: TSynEdit;
     Edit_CppServiceCpp: TSynEdit;
     Edit_CppServiceHpp: TSynEdit;
     Edit_CppServiceReadme: TSynEdit;
@@ -86,11 +89,16 @@ type
     Page_FinalSource: TPageControl;
     Page_Main: TPageControl;
     Split_CppCall: TPairSplitter;
+    Split_CppCall1: TPairSplitter;
     Split_CppCall_CppSide: TPairSplitterSide;
+    Split_CppCall_CppSide1: TPairSplitterSide;
     Split_CppCall_HppSide: TPairSplitterSide;
+    Split_CppCall_HppSide1: TPairSplitterSide;
     Split_CppService: TPairSplitter;
     Split_CppService_CppSide: TPairSplitterSide;
     Split_CppService_HppSide: TPairSplitterSide;
+    CMake_TabSheet: TTabSheet;
+    CMake_Test_TabSheet: TTabSheet;
     Tab_CppCall: TTabSheet;
     Tab_CppCallReadme: TTabSheet;
     Tab_CppService: TTabSheet;
@@ -108,12 +116,6 @@ type
     Tab_Source: TTabSheet;
     Tab_SourceJson: TTabSheet;
     Tab_Welcome: TTabSheet;
-
-
-
-
-
-
 
     { Timer }
     Timer_Progress: TTimer;
@@ -714,6 +716,33 @@ begin
     disposeObjectAndNil(l);
   end;
 
+  l := GenerateABICmakeScript(func_model);
+  if l <> nil then
+  begin
+    SaveCode('CMakeLists.txt');
+    l.AssignTo(Edit_CMake.Lines);
+    Edit_CMake.Hint := last_fn.Text;
+    disposeObjectAndNil(l);
+  end;
+
+  l := GenerateABIServiceTestProgram(func_model);
+  if l <> nil then
+  begin
+    SaveCode(func_model.UnitName + '_abi_service_main.cpp');
+    l.AssignTo(Edit_CMake_Service_Test.Lines);
+    Edit_CMake_Service_Test.Hint := last_fn.Text;
+    disposeObjectAndNil(l);
+  end;
+
+  l := GenerateABICallTestProgram(func_model);
+  if l <> nil then
+  begin
+    SaveCode(func_model.UnitName + '_abi_call_main.cpp');
+    l.AssignTo(Edit_CMake_Call_Test.Lines);
+    Edit_CMake_Call_Test.Hint := last_fn.Text;
+    disposeObjectAndNil(l);
+  end;
+
   Page_Main.ActivePage := Tab_FinalSource;
   func_model.Free;
 end;
@@ -837,8 +866,6 @@ end;
 
 procedure Tcode_decl_to_abi_form.sysTimerTimer(Sender: TObject);
 begin
-  while LF___.LF_GetStatusCount() > 0 do
-    DoStatus(LF___.LF_GetStatusEx());
   Check_Soft_Thread_Synchronize;
   LF___.LF_Sync;
 end;
