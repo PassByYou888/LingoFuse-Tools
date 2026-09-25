@@ -12,10 +12,13 @@ unit cpp_abi_service_generator_tool;
 //         extern const char* DEFAULT_APP_NAME;
 //         extern const char* DEFAULT_APP_DESC;
 //         constexpr std::uint8_t STATUS_OK / STATUS_ERROR;
+//         inline Safe_Write_Error / Safe_Write_Scalar /
+//                Safe_Write_String / Safe_Write_Void helpers;
 //         internal_call_* / Callback_* / RegisterAllABIAPIs /
 //         CreateAndRegisterABIApp declarations.
 //       Include this header to reference the service from any other
-//       translation unit.
+//       translation unit, or to implement the internal_call_* stubs
+//       in a separate .cpp file.
 //
 //   GenerateABIServiceCppCode  ->  <unit>_abi_service.cpp
 //       The implementation. Includes the .hpp above and provides:
@@ -31,18 +34,6 @@ unit cpp_abi_service_generator_tool;
 //                      (functions) or empty (procedures).
 //     status = 0xFF -> error; payload is a UTF-8 string message.
 //
-// Type mapping (from Normalize_ABI_Type in Z.Pascal_Func_Model):
-//   integer / longint             -> int32_t
-//   int64                         -> int64_t
-//   cardinal / dword / longword   -> uint32_t
-//   word                          -> uint16_t
-//   smallint                      -> int16_t
-//   byte                          -> uint8_t
-//   uint64                        -> uint64_t
-//   double / extended / real      -> double
-//   single                        -> float
-//   string / PChar family         -> std::string
-//
 // Robustness notes:
 //   Callbacks are invoked on a C worker thread. Any exception that
 //   escapes the callback body has undefined behaviour. Every generated
@@ -52,6 +43,16 @@ unit cpp_abi_service_generator_tool;
 //        to commit the success response as a single LF_WriteBuffer call,
 //        so a client can never observe a 0x00 status byte without the
 //        matching payload.
+//
+// Visibility note (P0-2):
+//   The four Safe_Write_* helpers are declared `inline` and are emitted
+//   into the generated .hpp rather than the .cpp. This lets users
+//   implement the internal_call_* stubs in a separate translation unit
+//   (for example, a hand-written my_engine.cpp) and still call the
+//   helpers when they need to report an error or build a response
+//   without going through the generated callback. It also lets a single
+//   translation unit include both the generated .hpp and its own
+//   helper headers without a redefinition conflict.
 //
 // Author: LingoFuse-pasAgent project
 
@@ -462,7 +463,7 @@ begin
 end;
 
 // -----------------------------------------------------------------------------
-// Emit the shared safety helpers into the service .cpp.
+// Emit the shared safety helpers into the service .hpp.
 //
 // These functions MUST NOT let any C++ exception escape into the C stack.
 // Callbacks registered with LF_RegisterCall run on a C worker thread, and
@@ -471,6 +472,12 @@ end;
 // The success helpers assemble [status][payload] into a single memory
 // buffer and commit it with one LF_WriteBuffer call, so the client can
 // never observe a 0x00 status byte without the matching payload.
+//
+// VISIBILITY:
+//   The functions are declared `inline` (the scalar variant is an inline
+//   template). They live in the header so that a translation unit which
+//   implements the internal_call_* stubs elsewhere can call them without
+//   re-including the generated .cpp. See the unit header for details.
 // -----------------------------------------------------------------------------
 
 procedure EmitSafetyHelpers(Lines: TPascalStringList);
@@ -486,9 +493,13 @@ begin
   Lines.Add('// The success helpers assemble [status][payload] into a single buffer');
   Lines.Add('// and commit it with one LF_WriteBuffer call, so the client can never');
   Lines.Add('// observe a 0x00 status followed by a truncated payload.');
+  Lines.Add('//');
+  Lines.Add('// These helpers are declared inline and live in this header so that');
+  Lines.Add('// any translation unit may use them. The scalar variant is a template');
+  Lines.Add('// and must be defined in the header to be instantiable from any TU.');
   Lines.Add('// ---------------------------------------------------------------------------');
   Lines.Add('');
-  Lines.Add('static void Safe_Write_Error(TDataHnd hnd, const std::string& msg) noexcept {');
+  Lines.Add('inline void Safe_Write_Error(TDataHnd hnd, const std::string& msg) noexcept {');
   Lines.Add('    try {');
   Lines.Add('        LF_WriteUInt8(hnd, STATUS_ERROR);');
   Lines.Add('        lingofuse::io::write_string(hnd, msg);');
@@ -498,7 +509,7 @@ begin
   Lines.Add('}');
   Lines.Add('');
   Lines.Add('template <typename T>');
-  Lines.Add('static void Safe_Write_Scalar(TDataHnd hnd, T value) noexcept {');
+  Lines.Add('inline void Safe_Write_Scalar(TDataHnd hnd, T value) noexcept {');
   Lines.Add('    static_assert(std::is_arithmetic<T>::value,');
   Lines.Add('                  "Safe_Write_Scalar requires an arithmetic type");');
   Lines.Add('    try {');
@@ -511,7 +522,7 @@ begin
   Lines.Add('    }');
   Lines.Add('}');
   Lines.Add('');
-  Lines.Add('static void Safe_Write_String(TDataHnd hnd, const std::string& value) noexcept {');
+  Lines.Add('inline void Safe_Write_String(TDataHnd hnd, const std::string& value) noexcept {');
   Lines.Add('    try {');
   Lines.Add('        const std::size_t total = 1 + value.size() + 1;   // status + bytes + NUL');
   Lines.Add('        std::vector<std::uint8_t> buf(total);');
@@ -526,7 +537,7 @@ begin
   Lines.Add('    }');
   Lines.Add('}');
   Lines.Add('');
-  Lines.Add('static void Safe_Write_Void(TDataHnd hnd) noexcept {');
+  Lines.Add('inline void Safe_Write_Void(TDataHnd hnd) noexcept {');
   Lines.Add('    try {');
   Lines.Add('        std::uint8_t buf[1] = { STATUS_OK };');
   Lines.Add('        LF_WriteBuffer(hnd, buf, 1);');
@@ -623,9 +634,12 @@ begin
     Lines.Add('#include "LingoFuse.hpp"');
     Lines.Add('');
     Lines.Add('#include <cstdint>');
+    Lines.Add('#include <cstring>');
     Lines.Add('#include <string>');
+    Lines.Add('#include <type_traits>');
+    Lines.Add('#include <vector>');
     Lines.Add('');
-    Lines.Add('namespace ' + NsName + ' {');
+    Lines.Add('namespace ' + NsName + '{');
     Lines.Add('');
 
     // -------------------------------------------------------------------------
@@ -659,12 +673,20 @@ begin
     Lines.Add('');
 
     // -------------------------------------------------------------------------
-    // 4. Internal call stub declarations
+    // 4. Safety helpers (inline, visible to every translation unit)
+    // -------------------------------------------------------------------------
+    EmitSafetyHelpers(Lines);
+
+    // -------------------------------------------------------------------------
+    // 5. Internal call stub declarations
     // -------------------------------------------------------------------------
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('// Internal call stubs (definitions in the companion .cpp file).');
     Lines.Add('// Each stub mirrors one original routine. The user is expected to');
     Lines.Add('// replace the body in the .cpp file with a call to the real function.');
+    Lines.Add('//');
+    Lines.Add('// The stubs are declared in this header so that the implementation');
+    Lines.Add('// may live in a separate translation unit if desired.');
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('');
 
@@ -696,7 +718,7 @@ begin
     Lines.Add('');
 
     // -------------------------------------------------------------------------
-    // 5. Callback declarations
+    // 6. Callback declarations
     // -------------------------------------------------------------------------
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('// cdecl callbacks (definitions in the companion .cpp file).');
@@ -726,7 +748,7 @@ begin
     Lines.Add('');
 
     // -------------------------------------------------------------------------
-    // 6. Registration entry point declarations
+    // 7. Registration entry point declarations
     // -------------------------------------------------------------------------
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('// Registration entry points (definitions in the companion .cpp file).');
@@ -811,7 +833,8 @@ begin
     Lines.Add('//     status = 0xFF -> error; payload is a UTF-8 string message.');
     Lines.Add('//');
     Lines.Add('// This is the service implementation file. Include the companion');
-    Lines.Add('// header to see the declarations and the wire protocol description.');
+    Lines.Add('// header to see the declarations, the wire protocol description, and');
+    Lines.Add('// the inline Safe_Write_* helpers.');
     Lines.Add('//');
     Lines.Add('// SOURCE FILE ENCODING: UTF-8.');
     Lines.Add('// MSVC users: add /utf-8 to the compiler command line. Otherwise the');
@@ -832,16 +855,11 @@ begin
     Lines.Add('#include <type_traits>');
     Lines.Add('#include <vector>');
     Lines.Add('');
-    Lines.Add('namespace ' + NsName + ' {');
+    Lines.Add('namespace ' + NsName + '{');
     Lines.Add('');
 
     // -------------------------------------------------------------------------
-    // 2. Safety helpers (must be emitted before the callbacks that use them)
-    // -------------------------------------------------------------------------
-    EmitSafetyHelpers(Lines);
-
-    // -------------------------------------------------------------------------
-    // 3. Application metadata definitions
+    // 2. Application metadata definitions
     // -------------------------------------------------------------------------
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('// Application metadata');
@@ -852,12 +870,17 @@ begin
     Lines.Add('');
 
     // -------------------------------------------------------------------------
-    // 4. Internal call stubs
+    // 3. Internal call stubs
     // -------------------------------------------------------------------------
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('// Internal call stubs. Each stub mirrors one original routine.');
     Lines.Add('// Replace the body with a call to the real function, for example:');
     Lines.Add('//     return MyUnit::Add(a, b);');
+    Lines.Add('//');
+    Lines.Add('// The declarations live in the companion .hpp; the definitions here');
+    Lines.Add('// are the default placeholders. If you prefer to keep the real bodies');
+    Lines.Add('// in a separate translation unit, remove the placeholder definitions');
+    Lines.Add('// here and provide your own elsewhere.');
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('');
 
@@ -909,7 +932,7 @@ begin
     end;
 
     // -------------------------------------------------------------------------
-    // 5. cdecl callbacks
+    // 4. cdecl callbacks
     // -------------------------------------------------------------------------
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('// cdecl callbacks. These are registered with LF_RegisterCall.');
@@ -922,7 +945,8 @@ begin
     Lines.Add('// Every callback:');
     Lines.Add('//   * never lets an exception escape into the C stack;');
     Lines.Add('//   * commits the success response as a single LF_WriteBuffer call');
-    Lines.Add('//     (see Safe_Write_Scalar / Safe_Write_String / Safe_Write_Void).');
+    Lines.Add('//     (see Safe_Write_Scalar / Safe_Write_String / Safe_Write_Void,');
+    Lines.Add('//      declared in the companion .hpp).');
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('');
 
@@ -1037,7 +1061,7 @@ begin
     end;
 
     // -------------------------------------------------------------------------
-    // 6. Registration
+    // 5. Registration
     // -------------------------------------------------------------------------
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('// Registration');
@@ -1250,6 +1274,26 @@ var
     L.Add('| `' + HppName + '` | Service declaration header. |');
     L.Add('| `' + CppName + '` | Service implementation file. |');
     L.Add('| `' + UnitName + '_abi_service_cpp.md` | This README. |');
+    L.Add('');
+    L.Add('### 1.5 Where the stubs live and where the helpers live');
+    L.Add('');
+    L.Add('The generated pair splits responsibilities as follows:');
+    L.Add('');
+    L.Add('| Symbol | File | Why |');
+    L.Add('|--------|------|-----|');
+    L.Add('| `internal_call_*` declarations | `' + HppName + '` | So the real bodies can be provided from a separate `.cpp`. |');
+    L.Add('| `internal_call_*` default bodies | `' + CppName + '` | Placeholder stubs. Replace them or remove them and provide your own. |');
+    L.Add('| `Callback_*` declarations | `' + HppName + '` | So tests and diagnostics can reference them. |');
+    L.Add('| `Callback_*` definitions | `' + CppName + '` | Registered with `LF_RegisterCall` by `RegisterAllABIAPIs`. |');
+    L.Add('| `Safe_Write_Error` / `Safe_Write_Scalar` / `Safe_Write_String` / `Safe_Write_Void` | `' + HppName + '` (inline) | So any translation unit can build error and success responses. |');
+    L.Add('| `DEFAULT_APP_NAME` / `DEFAULT_APP_DESC` | `' + CppName + '` (defined), `' + HppName + '` (declared) | Single definition, multiple references. |');
+    L.Add('| `STATUS_OK` / `STATUS_ERROR` | `' + HppName + '` (guarded) | Shared with the matching call header. |');
+    L.Add('');
+    L.Add('**Consequence**: the `internal_call_*` stubs may be implemented');
+    L.Add('either by editing `' + CppName + '` directly, or by deleting the');
+    L.Add('default bodies from `' + CppName + '` and providing your own');
+    L.Add('definitions from a different translation unit. In both cases,');
+    L.Add('`Safe_Write_*` is reachable.');
     L.Add('');
   end;
 
@@ -1613,8 +1657,19 @@ var
     L.Add('}');
     L.Add('```');
     L.Add('');
-    L.Add('Replace the placeholder body. The signature is already correct:');
-    L.Add('keep the parameter names and the return type.');
+    L.Add('Two options are available:');
+    L.Add('');
+    L.Add('**Option A (default)** - edit the placeholder body in place. Replace');
+    L.Add('the `// TODO` comment and the `return <default>;` line with a call');
+    L.Add('to the real function. The signature and the `(void)<param>;` lines');
+    L.Add('can stay as they are.');
+    L.Add('');
+    L.Add('**Option B** - move the bodies into a separate translation unit.');
+    L.Add('The declarations live in `' + HppName + '`, so your new `.cpp`');
+    L.Add('only needs to `#include` that header and define the stubs. Then');
+    L.Add('delete the placeholder definitions from `' + CppName + '`, or');
+    L.Add('guard them with `#if 0`. The `Safe_Write_*` helpers are declared');
+    L.Add('inline in the header, so they remain available to your file.');
     L.Add('');
     L.Add('### 7.3 Build commands');
     L.Add('');
@@ -1704,7 +1759,7 @@ var
     L.Add('#include <string>');
     L.Add('');
     L.Add('int main() {');
-    L.Add('    std::printf("=== %s service ===\\n",');
+    L.Add('    std::printf("=== %s service ===\n",');
     L.Add('                ' + NsName + '::DEFAULT_APP_NAME);');
     L.Add('');
     L.Add('    LF_ResetPrepare();');
@@ -1712,31 +1767,31 @@ var
     L.Add('');
     L.Add('    TAppHnd app = ' + NsName + '::CreateAndRegisterABIApp();');
     L.Add('    if (app == nullptr) {');
-    L.Add('        std::fprintf(stderr, "[FATAL] CreateAndRegisterABIApp failed\\n");');
+    L.Add('        std::fprintf(stderr, "[FATAL] CreateAndRegisterABIApp failed\n");');
     L.Add('        return 1;');
     L.Add('    }');
     L.Add('');
     L.Add('    if (LF_PrepareClient("ipc:' + AppName + '", app) == -1) {');
-    L.Add('        std::fprintf(stderr, "[FATAL] LF_PrepareClient failed\\n");');
+    L.Add('        std::fprintf(stderr, "[FATAL] LF_PrepareClient failed\n");');
     L.Add('        LF_FreeApp(app);');
     L.Add('        return 1;');
     L.Add('    }');
     L.Add('');
     L.Add('    if (LF_PrepareDone() != 1) {');
-    L.Add('        std::fprintf(stderr, "[FATAL] LF_PrepareDone failed\\n");');
+    L.Add('        std::fprintf(stderr, "[FATAL] LF_PrepareDone failed\n");');
     L.Add('        LF_ExitMainThread();');
     L.Add('        LF_FreeApp(app);');
     L.Add('        LF_Shutdown();');
     L.Add('        return 1;');
     L.Add('    }');
     L.Add('');
-    L.Add('    std::printf("[OK] Service ready. Press Enter to shut down.\\n");');
+    L.Add('    std::printf("[OK] Service ready. Press Enter to shut down.\n");');
     L.Add('    std::getchar();');
     L.Add('');
     L.Add('    LF_ExitMainThread();');
     L.Add('    LF_FreeApp(app);');
     L.Add('    LF_Shutdown();');
-    L.Add('    std::printf("[OK] Shutdown complete.\\n");');
+    L.Add('    std::printf("[OK] Shutdown complete.\n");');
     L.Add('    return 0;');
     L.Add('}');
     L.Add('```');
@@ -1982,10 +2037,10 @@ var
     L.Add('');
     L.Add('```cpp');
     L.Add('if (LF_CheckMainThread() == 0) {');
-    L.Add('    std::fprintf(stderr, "Main thread is not running\\n");');
+    L.Add('    std::fprintf(stderr, "Main thread is not running\n");');
     L.Add('}');
     L.Add('if (LF_CheckApp("' + AppName + '") == 0) {');
-    L.Add('    std::fprintf(stderr, "Service App not registered\\n");');
+    L.Add('    std::fprintf(stderr, "Service App not registered\n");');
     L.Add('}');
     L.Add('```');
     L.Add('');
@@ -2002,7 +2057,7 @@ var
     L.Add('for (std::int64_t i = 0; i < sz; ++i) {');
     L.Add('    std::printf("%02X ", p[i]);');
     L.Add('}');
-    L.Add('std::printf("\\n");');
+    L.Add('std::printf("\n");');
     L.Add('```');
     L.Add('');
     L.Add('### 10.4 Enabling verbose logging');
@@ -2038,12 +2093,14 @@ var
     L.Add('| 4 | What are the two bytes that frame every response? | §4.2 |');
     L.Add('| 5 | Which function do I call to create the App? | §5.1 |');
     L.Add('| 6 | What happens if a parameter type is not in the whitelist? | §6.2 |');
-    L.Add('| 7 | How do I implement an internal_call_* stub? | §7.2 |');
-    L.Add('| 8 | How do I compile the service with g++? | §7.3 |');
-    L.Add('| 9 | How do I compile the service with MSVC? | §7.3 |');
-    L.Add('| 10 | What is the shutdown order? | §7.6 |');
-    L.Add('| 11 | How do I write a minimal test harness? | §8 |');
-    L.Add('| 12 | How do I invoke a specific API from the call side? | §9 |');
+    L.Add('| 7 | Where do the Safe_Write_* helpers live, and why? | §1.5 |');
+    L.Add('| 8 | How do I implement an internal_call_* stub? | §7.2 |');
+    L.Add('| 9 | Can I move the internal_call_* bodies to a separate .cpp? | §7.2 (Option B) |');
+    L.Add('| 10 | How do I compile the service with g++? | §7.3 |');
+    L.Add('| 11 | How do I compile the service with MSVC? | §7.3 |');
+    L.Add('| 12 | What is the shutdown order? | §7.6 |');
+    L.Add('| 13 | How do I write a minimal test harness? | §8 |');
+    L.Add('| 14 | How do I invoke a specific API from the call side? | §9 |');
     L.Add('');
     L.Add('If you can answer all of the above, you are ready to use this');
     L.Add('C++ ABI service.');
@@ -2066,6 +2123,7 @@ var
     L.Add('| `py_abi_service_generator_tool.pas` | Paired Python service-side generator |');
     L.Add('| `py_abi_call_generator_tool.pas` | Paired Python call-side generator |');
     L.Add('| `cpp_abi_call_generator_tool.pas` | Paired C++ call-side generator |');
+    L.Add('| `cpp_abi_cmake_generator_tool.pas` | CMake and test-program generator |');
     L.Add('| `pascal_code_abi_rule.md` | Recommended source-declaration style |');
     L.Add('| `C_code_abi_rule.md` | C header source-declaration style |');
     L.Add('');
