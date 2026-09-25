@@ -78,15 +78,35 @@ unit code_decl_to_json_abi_cmdline;
 
   Every successful run produces the generated code file plus a
   companion Markdown README describing the artefact. When the target
-  is C++, two files are produced (a header and an implementation), and
-  the README describes the pair as a single unit. When the target is
-  JavaScript, a self-contained HTML test page is produced alongside
+  is C++, two code files are produced (a header and an implementation)
+  and the README describes the pair as a single unit. When the target
+  is JavaScript, a self-contained HTML test page is produced alongside
   the .js file, and the README describes all three artefacts.
 
   JavaScript is a CALL-SIDE ONLY target: naming .js as the output
   without also passing --call is an argument error. The other targets
   (Pascal, Python, C++) support both the service side and the call
   side.
+
+  C++ targets also produce two fixed-name companion files in the same
+  directory, because the generated C++ README references them by name:
+
+      CMakeLists.txt      a ready-to-use CMake build script that
+                          builds both the service executable and the
+                          call test executable from the .hpp/.cpp
+                          pair produced by this run.
+
+      test_main___.cpp    the call-side test driver referenced by the
+                          CMake script; it calls every wrapper function
+                          with default arguments and reports success
+                          or failure per call.
+
+  These two files are produced unconditionally for every C++ target,
+  whether the run is producing the service side or the call side. The
+  toolchain treats the two sides as halves of a single unit; the
+  CMake script builds both, and the test driver exercises the call
+  half against the service half. Producing both halves from the same
+  source text is the intended workflow.
 *)
 
 {$DEFINE FPC_DELPHI_MODE}
@@ -137,7 +157,8 @@ uses
   http_py_abi_service_generator_tool,
   http_py_abi_call_generator_tool,
   http_cpp_abi_service_generator_tool,
-  http_cpp_abi_call_generator_tool;
+  http_cpp_abi_call_generator_tool,
+  http_cmake_generator_tool;
 
 const
   EXIT_OK           = 0;
@@ -145,6 +166,15 @@ const
   EXIT_PARSE_FAILED = 2;
   EXIT_GEN_FAILED   = 3;
   EXIT_IO_ERROR     = 4;
+
+  (*
+    Fixed file names used by the C++ build support. These names are
+    NOT derived from the unit name: they are the exact names that the
+    generated C++ README's CMake section refers to, and that the
+    CMake script itself expects on disk.
+  *)
+  CMAKE_FILE_NAME     = 'CMakeLists.txt';
+  TEST_MAIN_FILE_NAME = 'test_main___.cpp';
 
 type
   TSourceLang = (slPascal, slC, slUnknown);
@@ -204,6 +234,28 @@ begin
   DoStatus('  causes the other to be written next to it under the same base');
   DoStatus('  name.');
   DoStatus('');
+  DoStatus('C++ BUILD SUPPORT');
+  DoStatus('  Every C++ target also produces two fixed-name companion files');
+  DoStatus('  in the same directory, because the generated C++ README');
+  DoStatus('  references them by name:');
+  DoStatus('');
+  DoStatus('    CMakeLists.txt      A ready-to-use CMake build script that');
+  DoStatus('                        builds both the service executable and');
+  DoStatus('                        the call test executable from the');
+  DoStatus('                        .hpp / .cpp pair.');
+  DoStatus('');
+  DoStatus('    test_main___.cpp    The call-side test driver that the CMake');
+  DoStatus('                        script compiles into the call test');
+  DoStatus('                        executable. It calls every wrapper');
+  DoStatus('                        function with default arguments.');
+  DoStatus('');
+  DoStatus('  Both are produced unconditionally for every C++ target, whether');
+  DoStatus('  you are generating the service side or the call side. The two');
+  DoStatus('  sides are halves of a single unit; the CMake project builds');
+  DoStatus('  both. Configure it with:');
+  DoStatus('');
+  DoStatus('      cmake -S . -B build -DLINGOFUSE_CPP_LIB_DIR=/path/to/lf');
+  DoStatus('');
   DoStatus('JAVASCRIPT EXTRA FILES');
   DoStatus('  When the target is JavaScript, an additional self-contained');
   DoStatus('  HTML test page is written as <base>_test.html next to the .js');
@@ -213,6 +265,9 @@ begin
   DoStatus('README');
   DoStatus('  A Markdown user guide is written next to the generated code');
   DoStatus('  file. Its name is the output base name plus "_readme.md".');
+  DoStatus('  The README is the primary deliverable: it contains the build');
+  DoStatus('  commands, the CMake script (for C++), and a full test program');
+  DoStatus('  for the target language.');
   DoStatus('');
   DoStatus('EXAMPLES');
   DoStatus('  code_decl_to_json_abi calculator.pas calculator_service.pas');
@@ -463,7 +518,10 @@ begin
 end;
 
 (*
-  Generate_Cpp - write the C++ HTTP/JSON pair (.hpp + .cpp) plus README.
+  Generate_Cpp - write the C++ HTTP/JSON pair (.hpp + .cpp), the
+  companion README, and the two CMake build artifacts
+  (CMakeLists.txt + test_main___.cpp) that the README's CMake section
+  references.
 
   The side is selected by Mode:
       tmService -> GenerateHTTPServiceCppHeader / ...CppCode / ...Readme
@@ -473,17 +531,34 @@ end;
   (.cpp). Either output name is accepted; both are derived from the
   same base name. The README describes the pair as a single unit and
   is written next to the header.
+
+  Two CMake artifacts are also written to the same directory, using
+  the fixed names "CMakeLists.txt" and "test_main___.cpp", because
+  the C++ README's CMake section refers to them by those exact names.
+  The CMake script that http_cmake_generator_tool.pas produces builds
+  both the service executable and the call test executable from the
+  pair emitted here, so generating both alongside the .hpp/.cpp is
+  what makes the emitted README directly actionable.
+
+  Both CMake artifacts are emitted unconditionally, regardless of
+  whether this run is producing the service side or the call side.
+  The toolchain treats the two sides as halves of one unit; a single
+  CMake project builds both halves, and producing only one half would
+  leave the CMake script with a missing source file at configure time.
 *)
 function Generate_Cpp(const Model: TPascal_Func_Model;
   const Mode: TTargetMode;
   const OutputFile: string): Integer;
 var
   HeaderList, ImplList, ReadmeList: TPascalStringList;
+  CmakeList, TestMainList: TPascalStringList;
   HppPath, CppPath, ReadmePath: string;
+  Dir, CmakePath, TestMainPath: string;
 begin
   Result := EXIT_OK;
 
   Cpp_Paths_From_Output(OutputFile, HppPath, CppPath);
+  Dir := ExtractFileDir(OutputFile);
 
   (* ---- Header ---- *)
   if Mode = tmService then
@@ -535,6 +610,37 @@ begin
       ReadmeList.Free;
     end;
   end;
+
+  (* ---- CMakeLists.txt ----
+   *
+   * Fixed name, written next to the .hpp/.cpp pair. The generated
+   * C++ README's "Building - CMake" section refers to this name
+   * literally, and the CMake script's source-file list expects the
+   * .hpp/.cpp pair to live in the same directory. *)
+  CmakePath := JoinPath(Dir, CMAKE_FILE_NAME);
+  CmakeList := GenerateCMakeScript(Model);
+  try
+    if (CmakeList <> nil) and Write_Text_List(CmakePath, CmakeList) then
+      DoStatus('Wrote  : %s', [CmakePath]);
+  finally
+    CmakeList.Free;
+  end;
+
+  (* ---- test_main___.cpp ----
+   *
+   * Fixed name, written next to the .hpp/.cpp pair. This is the call
+   * test driver that the CMake script compiles into the call test
+   * executable. It is generated regardless of the current side,
+   * because the CMake project builds both halves and the call side
+   * is required for the project to link successfully. *)
+  TestMainPath := JoinPath(Dir, TEST_MAIN_FILE_NAME);
+  TestMainList := GenerateTestMainCpp(Model);
+  try
+    if (TestMainList <> nil) and Write_Text_List(TestMainPath, TestMainList) then
+      DoStatus('Wrote  : %s', [TestMainPath]);
+  finally
+    TestMainList.Free;
+  end;
 end;
 
 (*
@@ -548,6 +654,10 @@ end;
       <base>.js           the standalone IIFE client library
       <base>_readme.md    the user guide
       <base>_test.html    a self-contained HTML test page
+
+  No CMake artifact is produced for JavaScript. The JS README's
+  deployment section relies on a plain HTTP server (for example
+  "python -m http.server"), not on a build system.
 *)
 function Generate_JavaScript(const Model: TPascal_Func_Model;
   const OutputFile: string): Integer;
