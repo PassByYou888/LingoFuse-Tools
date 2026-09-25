@@ -22,7 +22,7 @@ uses
   http_py_abi_call_generator_tool,
   http_cpp_abi_service_generator_tool,
   http_cpp_abi_call_generator_tool,
-  code_decl_to_json_abi_mcp_api_tool_provider_unit;
+  code_decl_to_json_abi_mcp_api_tool_provider_unit, http_cmake_generator_tool;
 
 type
 
@@ -30,11 +30,13 @@ type
 
   Tcode_decl_to_abi_json_form = class(TForm)
     BackToModelJsonButton: TButton;
+    CMake_TestMain_Editor: TSynEdit;
     CppCallHeaderEditor: TSynEdit;
     CppCallHeaderSide: TPairSplitterSide;
     CppCallImplEditor: TSynEdit;
     CppCallImplSide: TPairSplitterSide;
     CppCallReadmeEditor: TSynEdit;
+    CMakeEditor: TSynEdit;
     CppCallSplitter: TPairSplitter;
     CppServiceHeaderEditor: TSynEdit;
     CppServiceHeaderSide: TPairSplitterSide;
@@ -82,6 +84,9 @@ type
     NormalizeJsonToModelButton: TButton;
     OpenCRuleButton: TButton;
     OpenPascalRuleButton: TButton;
+    PairSplitter1: TPairSplitter;
+    PairSplitterSide1: TPairSplitterSide;
+    PairSplitterSide2: TPairSplitterSide;
     ParseSourceToJsonButton: TButton;
     PascalCallCodeEditor: TSynEdit;
     PascalCallCodeSide: TPairSplitterSide;
@@ -116,24 +121,12 @@ type
     SourceToolbarSpacerBevel2: TBevel;
     SourceToolbarSpacerBevel3: TBevel;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
     (* ---- Misc ---- *)
     StatusRefreshTimer: TTimer;
     PascalSyntaxHighlighter: TSynFreePascalSyn;
     AnySyntaxHighlighter: TSynAnySyn;
     CppSyntaxHighlighter: TSynCppSyn;
+    HttpCMakeTabSheet: TTabSheet;
     WelcomeHintLabel: TLabel;
     WelcomeTabSheet: TTabSheet;
     WelcomeTextMemo: TMemo;
@@ -283,301 +276,133 @@ procedure Tcode_decl_to_abi_json_form.InsertTestUnitClick(Sender: TObject);
 begin
   case CurrentSourceLanguage of
     TSourceLanguage.slPascal: SourceCodeEditor.Text :=
-        'unit ComplexTestUnit;'#13#10 + #13#10 +
-        '{'#13#10 +
-        '  A complex unit used to exercise the parser (Z.Pascal_Func_Tool).'#13#10 +
-        '  It contains a wide range of advanced and edge-case syntax'#13#10 +
-        '  constructs, to validate parser robustness and completeness.'#13#10 +
-        '  All declarations are syntactically correct; implementations'#13#10 +
-        '  are omitted (interface-only test).'#13#10 +
-        '}'#13#10 + #13#10 +
-        '{$mode objfpc}{$H+}'#13#10 +
-        '{$modeswitch advancedrecords}'#13#10 +
-        '{$modeswitch typehelpers}'#13#10 + #13#10 +
-        'interface'#13#10 + #13#10 +
-        'uses'#13#10 +
-        '  SysUtils, Classes, Generics.Collections, TypInfo,'#13#10 +
-        '  Z.Core, Z.PascalStrings, Math;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Comment style tests (multiple formats)'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '(* Top-level function, no parameters, returns Integer *)'#13#10 +
-        'function NoParamFunc: Integer;'#13#10 + #13#10 +
-        '// Single-line comment, parameterless procedure'#13#10 +
-        'procedure NoParamProc;'#13#10 + #13#10 +
-        '{'#13#10 +
-        '  Multi-line comment block,'#13#10 +
-        '  tests comment extraction.'#13#10 +
-        '}'#13#10 +
-        'function MultiLineComment(a: Integer): Integer;'#13#10 + #13#10 +
-        '(**'#13#10 +
-        ' * Doxygen-style comment'#13#10 +
-        ' * @param a First parameter'#13#10 +
-        ' * @param b Second parameter'#13#10 +
-        ' * @return Sum of a and b'#13#10 +
-        ' *)'#13#10 +
-        'function Add(a, b: Integer): Integer;'#13#10 + #13#10 +
-        '{ Comment right before the function name }'#13#10 +
-        'function Sub(a, b: Integer): Integer; // Trailing comment must not be bound'#13#10 + #13#10 +
-        '(* Comment with star prefix *)'#13#10 +
-        '// Another comment; two consecutive lines should be merged'#13#10 +
-        'function Mul(a, b: Double): Double;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Basic parameter declarations'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '// Single parameter'#13#10 +
-        'function SingleParam(x: Integer): Boolean;'#13#10 + #13#10 +
-        '// Multiple parameters, different types'#13#10 +
-        'function MultipleParams(a: Integer; b: string; c: Double): string;'#13#10 + #13#10 +
-        '// var parameter'#13#10 +
-        'procedure ModifyVar(var Value: Integer);'#13#10 + #13#10 +
-        '// const parameter'#13#10 +
-        'procedure ReadOnlyConst(const Value: string);'#13#10 + #13#10 +
-        '// out parameter'#13#10 +
-        'procedure GetValue(out Result: Integer);'#13#10 + #13#10 +
-        '// Mixed modifiers'#13#10 +
+        'unit ComplexTestUnit;'#13#10 + #13#10 + '{'#13#10 + '  A complex unit used to exercise the parser (Z.Pascal_Func_Tool).'#13#10 +
+        '  It contains a wide range of advanced and edge-case syntax'#13#10 + '  constructs, to validate parser robustness and completeness.'#13#10 +
+        '  All declarations are syntactically correct; implementations'#13#10 + '  are omitted (interface-only test).'#13#10 +
+        '}'#13#10 + #13#10 + '{$mode objfpc}{$H+}'#13#10 + '{$modeswitch advancedrecords}'#13#10 + '{$modeswitch typehelpers}'#13#10 +
+        #13#10 + 'interface'#13#10 + #13#10 + 'uses'#13#10 + '  SysUtils, Classes, Generics.Collections, TypInfo,'#13#10 +
+        '  Z.Core, Z.PascalStrings, Math;'#13#10 + #13#10 + '{ ==========================================================================='#13#10 +
+        '  Comment style tests (multiple formats)'#13#10 + '  =========================================================================== }'#13#10 +
+        #13#10 + '(* Top-level function, no parameters, returns Integer *)'#13#10 + 'function NoParamFunc: Integer;'#13#10 + #13#10 +
+        '// Single-line comment, parameterless procedure'#13#10 + 'procedure NoParamProc;'#13#10 + #13#10 + '{'#13#10 +
+        '  Multi-line comment block,'#13#10 + '  tests comment extraction.'#13#10 + '}'#13#10 +
+        'function MultiLineComment(a: Integer): Integer;'#13#10 + #13#10 + '(**'#13#10 + ' * Doxygen-style comment'#13#10 +
+        ' * @param a First parameter'#13#10 + ' * @param b Second parameter'#13#10 + ' * @return Sum of a and b'#13#10 +
+        ' *)'#13#10 + 'function Add(a, b: Integer): Integer;'#13#10 + #13#10 + '{ Comment right before the function name }'#13#10 +
+        'function Sub(a, b: Integer): Integer; // Trailing comment must not be bound'#13#10 + #13#10 + '(* Comment with star prefix *)'#13#10 +
+        '// Another comment; two consecutive lines should be merged'#13#10 + 'function Mul(a, b: Double): Double;'#13#10 + #13#10 +
+        '{ ==========================================================================='#13#10 + '  Basic parameter declarations'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + '// Single parameter'#13#10 +
+        'function SingleParam(x: Integer): Boolean;'#13#10 + #13#10 + '// Multiple parameters, different types'#13#10 +
+        'function MultipleParams(a: Integer; b: string; c: Double): string;'#13#10 + #13#10 + '// var parameter'#13#10 +
+        'procedure ModifyVar(var Value: Integer);'#13#10 + #13#10 + '// const parameter'#13#10 + 'procedure ReadOnlyConst(const Value: string);'#13#10 +
+        #13#10 + '// out parameter'#13#10 + 'procedure GetValue(out Result: Integer);'#13#10 + #13#10 + '// Mixed modifiers'#13#10 +
         'procedure MixedMods(const Input: string; var Output: Integer; out ErrorCode: Integer);'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Default values'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '// Integer default'#13#10 +
-        'function WithDefaultInt(a: Integer = 42): Integer;'#13#10 + #13#10 +
-        '// String default (quoted)'#13#10 +
-        'function WithDefaultString(s: string = '#39'default'#39'): string;'#13#10 + #13#10 +
-        '// Boolean default'#13#10 +
-        'function WithDefaultBool(flag: Boolean = True): Boolean;'#13#10 + #13#10 +
-        '// Floating-point default'#13#10 +
-        'function WithDefaultFloat(pi: Double = 3.14159): Double;'#13#10 + #13#10 +
-        '// Constant-expression default'#13#10 +
-        'function WithDefaultConst(x: Integer = MaxBufferSize + 10): Integer;'#13#10 + #13#10 +
-        '// Enum default'#13#10 +
-        'function WithDefaultEnum(c: TColor = clRed): TColor;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Grouped parameters (shared modifier and type)'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '// const modifier, multiple same-type parameters'#13#10 +
-        'function GroupConst(const a, b, c: Integer): Integer;'#13#10 + #13#10 +
-        '// var modifier, same type'#13#10 +
-        'procedure GroupVar(var x, y, z: Double);'#13#10 + #13#10 +
-        '// Same group with default values'#13#10 +
-        'function GroupDefault(const a, b: Integer = 0; const s: string = '#39#39'): Boolean;'#13#10 + #13#10 +
-        '// More complex: multiple groups'#13#10 +
-        'function ComplexGroups(var a, b: Integer; const c: string; out d: Double): Integer;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Complex type parameters'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '// Dynamic array'#13#10 +
-        'procedure ProcessArray(const Arr: array of Integer);'#13#10 + #13#10 +
-        '// Static array'#13#10 +
-        'procedure ProcessStaticArray(const Arr: array[0..9] of Integer);'#13#10 + #13#10 +
-        '// Record type'#13#10 +
-        'procedure ProcessRecord(const P: TPoint);'#13#10 + #13#10 +
-        '// Class type'#13#10 +
-        'procedure ProcessClass(const Obj: TObject);'#13#10 + #13#10 +
-        '// Generic type'#13#10 +
-        'procedure ProcessGenericList(const List: TGenericList<string>);'#13#10 + #13#10 +
-        '// Function-pointer type (procedural type in Pascal)'#13#10 +
-        'type'#13#10 +
-        '  TIntFunc = function(x: Integer): Integer;'#13#10 + #13#10 +
-        '// Accepts a function pointer'#13#10 +
-        'procedure UseFuncPtr(F: TIntFunc);'#13#10 + #13#10 +
-        '// Inline function type as a parameter (reference to)'#13#10 +
-        'procedure UseAnonymous(const F: reference to procedure);'#13#10 + #13#10 +
-        '// Complex function type: parameters and return value'#13#10 +
-        'type'#13#10 +
-        '  TBinaryOp = function(a, b: Double): Double;'#13#10 + #13#10 +
-        'procedure UseBinaryOp(Op: TBinaryOp);'#13#10 + #13#10 +
-        '// Nested function type (function returning a function)'#13#10 +
+        '{ ==========================================================================='#13#10 + '  Default values'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + '// Integer default'#13#10 +
+        'function WithDefaultInt(a: Integer = 42): Integer;'#13#10 + #13#10 + '// String default (quoted)'#13#10 +
+        'function WithDefaultString(s: string = '#39'default'#39'): string;'#13#10 + #13#10 + '// Boolean default'#13#10 +
+        'function WithDefaultBool(flag: Boolean = True): Boolean;'#13#10 + #13#10 + '// Floating-point default'#13#10 +
+        'function WithDefaultFloat(pi: Double = 3.14159): Double;'#13#10 + #13#10 + '// Constant-expression default'#13#10 +
+        'function WithDefaultConst(x: Integer = MaxBufferSize + 10): Integer;'#13#10 + #13#10 + '// Enum default'#13#10 +
+        'function WithDefaultEnum(c: TColor = clRed): TColor;'#13#10 + #13#10 + '{ ==========================================================================='#13#10 +
+        '  Grouped parameters (shared modifier and type)'#13#10 + '  =========================================================================== }'#13#10 +
+        #13#10 + '// const modifier, multiple same-type parameters'#13#10 + 'function GroupConst(const a, b, c: Integer): Integer;'#13#10 +
+        #13#10 + '// var modifier, same type'#13#10 + 'procedure GroupVar(var x, y, z: Double);'#13#10 + #13#10 +
+        '// Same group with default values'#13#10 + 'function GroupDefault(const a, b: Integer = 0; const s: string = '#39#39'): Boolean;'#13#10 +
+        #13#10 + '// More complex: multiple groups'#13#10 + 'function ComplexGroups(var a, b: Integer; const c: string; out d: Double): Integer;'#13#10 +
+        #13#10 + '{ ==========================================================================='#13#10 + '  Complex type parameters'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + '// Dynamic array'#13#10 +
+        'procedure ProcessArray(const Arr: array of Integer);'#13#10 + #13#10 + '// Static array'#13#10 +
+        'procedure ProcessStaticArray(const Arr: array[0..9] of Integer);'#13#10 + #13#10 + '// Record type'#13#10 +
+        'procedure ProcessRecord(const P: TPoint);'#13#10 + #13#10 + '// Class type'#13#10 + 'procedure ProcessClass(const Obj: TObject);'#13#10 +
+        #13#10 + '// Generic type'#13#10 + 'procedure ProcessGenericList(const List: TGenericList<string>);'#13#10 + #13#10 +
+        '// Function-pointer type (procedural type in Pascal)'#13#10 + 'type'#13#10 + '  TIntFunc = function(x: Integer): Integer;'#13#10 +
+        #13#10 + '// Accepts a function pointer'#13#10 + 'procedure UseFuncPtr(F: TIntFunc);'#13#10 + #13#10 +
+        '// Inline function type as a parameter (reference to)'#13#10 + 'procedure UseAnonymous(const F: reference to procedure);'#13#10 +
+        #13#10 + '// Complex function type: parameters and return value'#13#10 + 'type'#13#10 + '  TBinaryOp = function(a, b: Double): Double;'#13#10 +
+        #13#10 + 'procedure UseBinaryOp(Op: TBinaryOp);'#13#10 + #13#10 + '// Nested function type (function returning a function)'#13#10 +
         'procedure UseNestedFunc(F: function(x: Integer): function(y: Integer): Integer);'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  External declarations and calling conventions'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '// cdecl calling convention'#13#10 +
-        'function CdeclFunc(a: Integer): Integer; cdecl;'#13#10 + #13#10 +
-        '// stdcall'#13#10 +
-        'procedure StdcallProc(a: Integer; var b: Double); stdcall;'#13#10 + #13#10 +
-        '// register'#13#10 +
-        'function RegisterFunc(a, b: Integer): Integer; register;'#13#10 + #13#10 +
-        '// external library name'#13#10 +
-        'function ExternalLib(const Name: PChar): Boolean; cdecl; external '#39'my.dll'#39';'#13#10 + #13#10 +
-        '// external + name alias'#13#10 +
-        'procedure ExternalAlias; stdcall; external '#39'kernel32'#39' name '#39'GetCurrentProcess'#39';'#13#10 + #13#10 +
-        '// external + index'#13#10 +
-        'procedure ExternalIndex; stdcall; external '#39'user32'#39' index 10;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Overload and inheritance modifiers'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '// overload'#13#10 +
-        'function OverloadTest(a: Integer): Integer; overload;'#13#10 +
-        'function OverloadTest(a, b: Integer): Integer; overload;'#13#10 +
-        'function OverloadTest(a: Double): Double; overload;'#13#10 + #13#10 +
-        '// virtual / override / abstract'#13#10 +
-        'type'#13#10 +
-        '  TBase = class'#13#10 +
-        '    procedure VirtualProc; virtual;'#13#10 +
-        '    function AbstractFunc: Integer; virtual; abstract;'#13#10 +
-        '  end;'#13#10 + #13#10 +
-        '  TDerived = class(TBase)'#13#10 +
-        '    procedure VirtualProc; override;'#13#10 +
-        '    function AbstractFunc: Integer; override;'#13#10 +
-        '  end;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Class methods, static methods, constructors, etc.'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        'type'#13#10 +
-        '  TMath = class'#13#10 +
-        '  public'#13#10 +
-        '    class function StaticAdd(a, b: Integer): Integer; static;'#13#10 +
-        '    class procedure StaticProc; static;'#13#10 +
-        '    constructor Create(a: Integer);'#13#10 +
-        '    destructor Destroy; override;'#13#10 +
-        '  end;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Generic methods (inside a generic class)'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        'type'#13#10 +
-        '  TGenericClass<T> = class'#13#10 +
-        '    function GenericMethod<U>(a: T; b: U): T;'#13#10 +
-        '    procedure ProcWithGenericParam(const List: TList<T>);'#13#10 +
-        '  end;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Operator overloads (implicit, explicit)'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        'type'#13#10 +
-        '  TMyRecord = record'#13#10 +
-        '    Value: Integer;'#13#10 +
-        '    class operator Implicit(a: Integer): TMyRecord;'#13#10 +
-        '    class operator Explicit(a: Integer): TMyRecord;'#13#10 +
-        '    class operator Add(a, b: TMyRecord): TMyRecord;'#13#10 +
-        '  end;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Nested type as parameter'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        'type'#13#10 +
-        '  TOuter = class'#13#10 +
-        '  public type'#13#10 +
-        '    TInner = record'#13#10 +
-        '      X: Integer;'#13#10 +
-        '    end;'#13#10 +
-        '  end;'#13#10 + #13#10 +
-        'procedure UseNestedType(const P: TOuter.TInner);'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Complex default values (strings, arrays, etc.)'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '// String default containing quotes'#13#10 +
-        'function StringWithQuotes(s: string = '#39'He said: "Hello"'#39'): string;'#13#10 + #13#10 +
-        '// Enum constant default'#13#10 +
-        'function EnumDefault(c: TColor = clBlue): TColor;'#13#10 + #13#10 +
-        '// Set constant default'#13#10 +
+        '{ ==========================================================================='#13#10 + '  External declarations and calling conventions'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + '// cdecl calling convention'#13#10 +
+        'function CdeclFunc(a: Integer): Integer; cdecl;'#13#10 + #13#10 + '// stdcall'#13#10 + 'procedure StdcallProc(a: Integer; var b: Double); stdcall;'#13#10 +
+        #13#10 + '// register'#13#10 + 'function RegisterFunc(a, b: Integer): Integer; register;'#13#10 + #13#10 +
+        '// external library name'#13#10 + 'function ExternalLib(const Name: PChar): Boolean; cdecl; external '#39'my.dll'#39';'#13#10 +
+        #13#10 + '// external + name alias'#13#10 + 'procedure ExternalAlias; stdcall; external '#39'kernel32'#39' name '#39'GetCurrentProcess'#39';'#13#10 +
+        #13#10 + '// external + index'#13#10 + 'procedure ExternalIndex; stdcall; external '#39'user32'#39' index 10;'#13#10 +
+        #13#10 + '{ ==========================================================================='#13#10 + '  Overload and inheritance modifiers'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + '// overload'#13#10 +
+        'function OverloadTest(a: Integer): Integer; overload;'#13#10 + 'function OverloadTest(a, b: Integer): Integer; overload;'#13#10 +
+        'function OverloadTest(a: Double): Double; overload;'#13#10 + #13#10 + '// virtual / override / abstract'#13#10 +
+        'type'#13#10 + '  TBase = class'#13#10 + '    procedure VirtualProc; virtual;'#13#10 +
+        '    function AbstractFunc: Integer; virtual; abstract;'#13#10 + '  end;'#13#10 + #13#10 + '  TDerived = class(TBase)'#13#10 +
+        '    procedure VirtualProc; override;'#13#10 + '    function AbstractFunc: Integer; override;'#13#10 + '  end;'#13#10 +
+        #13#10 + '{ ==========================================================================='#13#10 + '  Class methods, static methods, constructors, etc.'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + 'type'#13#10 +
+        '  TMath = class'#13#10 + '  public'#13#10 + '    class function StaticAdd(a, b: Integer): Integer; static;'#13#10 +
+        '    class procedure StaticProc; static;'#13#10 + '    constructor Create(a: Integer);'#13#10 + '    destructor Destroy; override;'#13#10 +
+        '  end;'#13#10 + #13#10 + '{ ==========================================================================='#13#10 +
+        '  Generic methods (inside a generic class)'#13#10 + '  =========================================================================== }'#13#10 +
+        #13#10 + 'type'#13#10 + '  TGenericClass<T> = class'#13#10 + '    function GenericMethod<U>(a: T; b: U): T;'#13#10 +
+        '    procedure ProcWithGenericParam(const List: TList<T>);'#13#10 + '  end;'#13#10 + #13#10 +
+        '{ ==========================================================================='#13#10 + '  Operator overloads (implicit, explicit)'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + 'type'#13#10 +
+        '  TMyRecord = record'#13#10 + '    Value: Integer;'#13#10 + '    class operator Implicit(a: Integer): TMyRecord;'#13#10 +
+        '    class operator Explicit(a: Integer): TMyRecord;'#13#10 + '    class operator Add(a, b: TMyRecord): TMyRecord;'#13#10 +
+        '  end;'#13#10 + #13#10 + '{ ==========================================================================='#13#10 +
+        '  Nested type as parameter'#13#10 + '  =========================================================================== }'#13#10 +
+        #13#10 + 'type'#13#10 + '  TOuter = class'#13#10 + '  public type'#13#10 + '    TInner = record'#13#10 +
+        '      X: Integer;'#13#10 + '    end;'#13#10 + '  end;'#13#10 + #13#10 + 'procedure UseNestedType(const P: TOuter.TInner);'#13#10 +
+        #13#10 + '{ ==========================================================================='#13#10 + '  Complex default values (strings, arrays, etc.)'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + '// String default containing quotes'#13#10 +
+        'function StringWithQuotes(s: string = '#39'He said: "Hello"'#39'): string;'#13#10 + #13#10 + '// Enum constant default'#13#10 +
+        'function EnumDefault(c: TColor = clBlue): TColor;'#13#10 + #13#10 + '// Set constant default'#13#10 +
         'function SetDefault(s: TOptions = [optRead, optWrite]): TOptions;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Complex return types'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '// Returns an array'#13#10 +
-        'function ReturnArray: TIntArray;'#13#10 + #13#10 +
-        '// Returns a record'#13#10 +
-        'function ReturnRecord: TPoint;'#13#10 + #13#10 +
-        '// Returns a generic list'#13#10 +
-        'function ReturnGenericList: TGenericList<string>;'#13#10 + #13#10 +
-        '// Returns a function pointer'#13#10 +
-        'function ReturnFuncPtr: TIntFunc;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Complex declarations with comments (comment-binding test)'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        '(*'#13#10 +
-        '  A very complex function declaration with multiple parameter'#13#10 +
-        '  groups, defaults, var/const/out, and external directives.'#13#10 +
-        '  The comment must be extracted and attached to this function.'#13#10 +
-        '*)'#13#10 +
-        'function SuperComplex('#13#10 +
+        '{ ==========================================================================='#13#10 + '  Complex return types'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + '// Returns an array'#13#10 +
+        'function ReturnArray: TIntArray;'#13#10 + #13#10 + '// Returns a record'#13#10 + 'function ReturnRecord: TPoint;'#13#10 +
+        #13#10 + '// Returns a generic list'#13#10 + 'function ReturnGenericList: TGenericList<string>;'#13#10 + #13#10 +
+        '// Returns a function pointer'#13#10 + 'function ReturnFuncPtr: TIntFunc;'#13#10 + #13#10 +
+        '{ ==========================================================================='#13#10 + '  Complex declarations with comments (comment-binding test)'#13#10 +
+        '  =========================================================================== }'#13#10 + #13#10 + '(*'#13#10 +
+        '  A very complex function declaration with multiple parameter'#13#10 + '  groups, defaults, var/const/out, and external directives.'#13#10 +
+        '  The comment must be extracted and attached to this function.'#13#10 + '*)'#13#10 + 'function SuperComplex('#13#10 +
         '  const Name: string = '#39'default'#39';    // First group, const modifier'#13#10 +
         '  var Value: Integer = 42;           // Second group, var modifier with default'#13#10 +
-        '  out Flag: Boolean;                 // Third group, out modifier'#13#10 +
-        '  const Data: array of Byte          // Fourth group, array type'#13#10 +
-        '): Integer; cdecl; external '#39'lib'#39' name '#39'SuperComplex'#39';'#13#10 + #13#10 +
-        '{ Another declaration with a function-type parameter }'#13#10 +
-        '{'#13#10 +
-        '  A function that takes a binary-op function as a parameter and'#13#10 +
-        '  returns the result of applying it.'#13#10 +
-        '}'#13#10 +
-        'function ApplyBinaryOp('#13#10 +
-        '  const Op: TBinaryOp;        // Function-type parameter'#13#10 +
-        '  const a, b: Double = 0.0    // Default-value parameter group'#13#10 +
-        '): Double; overload;'#13#10 + #13#10 +
-        '// Another overload that takes an integer operation'#13#10 +
-        'function ApplyBinaryOp('#13#10 +
-        '  const Op: function(a, b: Integer): Integer;'#13#10 +
-        '  const a, b: Integer = 0'#13#10 +
-        '): Integer; overload;'#13#10 + #13#10 +
-        '{ ==========================================================================='#13#10 +
-        '  Some additional complex structures (classes, interfaces)'#13#10 +
-        '  =========================================================================== }'#13#10 + #13#10 +
-        'type'#13#10 +
-        '  IMyInterface = interface'#13#10 +
-        '    procedure DoIt;'#13#10 +
-        '  end;'#13#10 + #13#10 +
-        '  TMyClass = class(TInterfacedObject, IMyInterface)'#13#10 +
-        '  private'#13#10 +
-        '    FData: TGenericList<TPoint>;'#13#10 +
-        '  public'#13#10 +
-        '    constructor Create;'#13#10 +
-        '    procedure DoIt;'#13#10 +
-        '    function GetItem(Index: Integer): TPoint;'#13#10 +
-        '    property Items[Index: Integer]: TPoint read GetItem; default;'#13#10 +
-        '  end;'#13#10 + #13#10 +
-        'implementation'#13#10 + #13#10 + 'end.'#13#10;
+        '  out Flag: Boolean;                 // Third group, out modifier'#13#10 + '  const Data: array of Byte          // Fourth group, array type'#13#10 +
+        '): Integer; cdecl; external '#39'lib'#39' name '#39'SuperComplex'#39';'#13#10 + #13#10 + '{ Another declaration with a function-type parameter }'#13#10 +
+        '{'#13#10 + '  A function that takes a binary-op function as a parameter and'#13#10 + '  returns the result of applying it.'#13#10 +
+        '}'#13#10 + 'function ApplyBinaryOp('#13#10 + '  const Op: TBinaryOp;        // Function-type parameter'#13#10 +
+        '  const a, b: Double = 0.0    // Default-value parameter group'#13#10 + '): Double; overload;'#13#10 + #13#10 +
+        '// Another overload that takes an integer operation'#13#10 + 'function ApplyBinaryOp('#13#10 +
+        '  const Op: function(a, b: Integer): Integer;'#13#10 + '  const a, b: Integer = 0'#13#10 + '): Integer; overload;'#13#10 +
+        #13#10 + '{ ==========================================================================='#13#10 +
+        '  Some additional complex structures (classes, interfaces)'#13#10 + '  =========================================================================== }'#13#10 +
+        #13#10 + 'type'#13#10 + '  IMyInterface = interface'#13#10 + '    procedure DoIt;'#13#10 + '  end;'#13#10 +
+        #13#10 + '  TMyClass = class(TInterfacedObject, IMyInterface)'#13#10 + '  private'#13#10 + '    FData: TGenericList<TPoint>;'#13#10 +
+        '  public'#13#10 + '    constructor Create;'#13#10 + '    procedure DoIt;'#13#10 + '    function GetItem(Index: Integer): TPoint;'#13#10 +
+        '    property Items[Index: Integer]: TPoint read GetItem; default;'#13#10 + '  end;'#13#10 + #13#10 + 'implementation'#13#10 + #13#10 + 'end.'#13#10;
 
     TSourceLanguage.slC: SourceCodeEditor.Text :=
-        '/* ComplexTestUnit.h */'#13#10 + #13#10 +
-        '#ifndef ComplexTestUnit_H'#13#10 +
-        '#define ComplexTestUnit_H'#13#10 +
-        '/* Generated from unit ComplexTestUnit.h */'#13#10 + #13#10 +
-        '/* Top-level function, no parameters, returns Integer */'#13#10 +
-        'int NoParamFunc(void);'#13#10 + #13#10 +
-        '/* Single-line comment, parameterless procedure */'#13#10 +
-        'void NoParamProc(void);'#13#10 + #13#10 +
-        '/* Multi-line comment block,'#13#10 +
-        '   tests comment extraction. */'#13#10 +
-        'int MultiLineComment(int a);'#13#10 + #13#10 +
-        '/* *'#13#10 +
-        ' * Doxygen-style comment'#13#10 +
-        ' * @param a First parameter'#13#10 +
-        ' * @param b Second parameter'#13#10 +
-        ' * @return Sum of a and b */'#13#10 +
-        'int Add(int a, int b);'#13#10 + #13#10 +
-        '/* Comment right before the function name */'#13#10 +
-        'int Sub(int a, int b);'#13#10 + #13#10 +
-        '/* Another comment; consecutive lines merge */'#13#10 +
-        'double Mul(double a, double b);'#13#10 + #13#10 +
-        '/* Multiple parameters, different types */'#13#10 +
-        'char * MultipleParams(int a, char * b, double c);'#13#10 + #13#10 +
-        '/* const parameter */'#13#10 +
-        'void ReadOnlyConst(const char * Value);'#13#10 + #13#10 +
-        '/* Integer default */'#13#10 +
-        'int WithDefaultInt(int a);'#13#10 + #13#10 +
-        '/* String default (quoted) */'#13#10 +
-        'char * WithDefaultString(char * s);'#13#10 + #13#10 +
-        '/* Floating-point default */'#13#10 +
-        'double WithDefaultFloat(double pi);'#13#10 + #13#10 +
-        '/* Constant-expression default */'#13#10 +
-        'int WithDefaultConst(int x);'#13#10 + #13#10 +
-        '/* const modifier, multiple same-type parameters */'#13#10 +
-        'int GroupConst(const int a, const int b, const int c);'#13#10 + #13#10 +
-        '/* cdecl calling convention */'#13#10 +
-        'int CdeclFunc(int a);'#13#10 + #13#10 +
-        '/* register */'#13#10 +
-        'int RegisterFunc(int a, int b);'#13#10 + #13#10 +
-        '/* external + name alias */'#13#10 +
-        'void ExternalAlias(void);'#13#10 + #13#10 +
-        '/* external + index */'#13#10 +
-        'void ExternalIndex(void);'#13#10 + #13#10 +
-        '/* overload */'#13#10 +
-        'int OverloadTest(int a);'#13#10 + #13#10 +
-        'int OverloadTest(int a, int b);'#13#10 +
-        'double OverloadTest(double a);'#13#10 + #13#10 +
-        '/* String default containing quotes */'#13#10 +
-        'char * StringWithQuotes(char * s);'#13#10 + #13#10 +
-        '#endif /* ComplexTestUnit_H */'#13#10;
+        '/* ComplexTestUnit.h */'#13#10 + #13#10 + '#ifndef ComplexTestUnit_H'#13#10 + '#define ComplexTestUnit_H'#13#10 +
+        '/* Generated from unit ComplexTestUnit.h */'#13#10 + #13#10 + '/* Top-level function, no parameters, returns Integer */'#13#10 +
+        'int NoParamFunc(void);'#13#10 + #13#10 + '/* Single-line comment, parameterless procedure */'#13#10 + 'void NoParamProc(void);'#13#10 +
+        #13#10 + '/* Multi-line comment block,'#13#10 + '   tests comment extraction. */'#13#10 + 'int MultiLineComment(int a);'#13#10 +
+        #13#10 + '/* *'#13#10 + ' * Doxygen-style comment'#13#10 + ' * @param a First parameter'#13#10 +
+        ' * @param b Second parameter'#13#10 + ' * @return Sum of a and b */'#13#10 + 'int Add(int a, int b);'#13#10 + #13#10 +
+        '/* Comment right before the function name */'#13#10 + 'int Sub(int a, int b);'#13#10 + #13#10 +
+        '/* Another comment; consecutive lines merge */'#13#10 + 'double Mul(double a, double b);'#13#10 + #13#10 +
+        '/* Multiple parameters, different types */'#13#10 + 'char * MultipleParams(int a, char * b, double c);'#13#10 + #13#10 +
+        '/* const parameter */'#13#10 + 'void ReadOnlyConst(const char * Value);'#13#10 + #13#10 + '/* Integer default */'#13#10 +
+        'int WithDefaultInt(int a);'#13#10 + #13#10 + '/* String default (quoted) */'#13#10 + 'char * WithDefaultString(char * s);'#13#10 +
+        #13#10 + '/* Floating-point default */'#13#10 + 'double WithDefaultFloat(double pi);'#13#10 + #13#10 +
+        '/* Constant-expression default */'#13#10 + 'int WithDefaultConst(int x);'#13#10 + #13#10 + '/* const modifier, multiple same-type parameters */'#13#10 +
+        'int GroupConst(const int a, const int b, const int c);'#13#10 + #13#10 + '/* cdecl calling convention */'#13#10 +
+        'int CdeclFunc(int a);'#13#10 + #13#10 + '/* register */'#13#10 + 'int RegisterFunc(int a, int b);'#13#10 + #13#10 +
+        '/* external + name alias */'#13#10 + 'void ExternalAlias(void);'#13#10 + #13#10 + '/* external + index */'#13#10 +
+        'void ExternalIndex(void);'#13#10 + #13#10 + '/* overload */'#13#10 + 'int OverloadTest(int a);'#13#10 + #13#10 +
+        'int OverloadTest(int a, int b);'#13#10 + 'double OverloadTest(double a);'#13#10 + #13#10 + '/* String default containing quotes */'#13#10 +
+        'char * StringWithQuotes(char * s);'#13#10 + #13#10 + '#endif /* ComplexTestUnit_H */'#13#10;
 
     else SourceCodeEditor.Text := '';
   end;
@@ -590,17 +415,11 @@ procedure Tcode_decl_to_abi_json_form.InsertEmptyUnitClick(Sender: TObject);
 begin
   case CurrentSourceLanguage of
     TSourceLanguage.slPascal: SourceCodeEditor.Text :=
-        'unit untitled;' + #13#10 + #13#10 +
-        'interface' + #13#10 + #13#10 +
-        '// Paste declarations here.' + #13#10 + #13#10 +
-        'implementation' + #13#10 + #13#10 +
-        'end.' + #13#10;
+        'unit untitled;' + #13#10 + #13#10 + 'interface' + #13#10 + #13#10 + '// Paste declarations here.' + #13#10 + #13#10 +
+        'implementation' + #13#10 + #13#10 + 'end.' + #13#10;
     TSourceLanguage.slC: SourceCodeEditor.Text :=
-        '/* untitled.h */' + #13#10 +
-        '#ifndef UNTITLED_H' + #13#10 +
-        '#define UNTITLED_H' + #13#10 + #13#10 +
-        '/* Paste prototypes here. */' + #13#10 + #13#10 +
-        '#endif /* UNTITLED_H */' + #13#10;
+        '/* untitled.h */' + #13#10 + '#ifndef UNTITLED_H' + #13#10 + '#define UNTITLED_H' + #13#10 + #13#10 +
+        '/* Paste prototypes here. */' + #13#10 + #13#10 + '#endif /* UNTITLED_H */' + #13#10;
     else SourceCodeEditor.Text := '';
   end;
 end;
@@ -627,7 +446,7 @@ var
   func_model: TPascal_Func_Model;
   unit_name, app_dir: TP_String;
 
-  (* Persist the current content of an editor to disk, if non-empty. *)
+(* Persist the current content of an editor to disk, if non-empty. *)
   procedure SaveEditorSnapshot(editor: TSynEdit; const file_name: string);
   var
     tmp: TPascalStringList;
@@ -648,24 +467,26 @@ var
        <app_dir>/<unit_name><suffix>,
      and mirror the text into the target editor. Nil results mean the
      generator refused the model and are silently skipped. *)
-  procedure Emit(gen: TSourceGeneratorFunc;
-                 const suffix: string;
-                 editor: TSynEdit);
+  procedure Emit(gen: TSourceGeneratorFunc; const suffix: TP_String; editor: TSynEdit);
   var
-    text: TPascalStringList;
+    Text: TPascalStringList;
     full_name: TP_String;
   begin
-    text := gen(func_model);
-    if text = nil then
+    Text := gen(func_model);
+    if Text = nil then
       exit;
     try
-      full_name := umlCombineFileName(app_dir.Text, unit_name + suffix);
-      text.SaveToFile(full_name);
+      if suffix.Same('CMakeLists.txt', 'test_main___.cpp') then
+        full_name := umlCombineFileName(app_dir.Text, suffix)
+      else
+        full_name := umlCombineFileName(app_dir.Text, unit_name + suffix);
+
+      Text.SaveToFile(full_name);
       DoStatus('Saved: %s', [full_name.Text]);
-      text.AssignTo(editor.Lines);
+      Text.AssignTo(editor.Lines);
       editor.Hint := full_name.Text;
     finally
-      DisposeObject(text);
+      DisposeObject(Text);
     end;
   end;
 
@@ -696,47 +517,52 @@ begin
 
     (* ---- Pascal service / call ---- *)
     Emit(GenerateHTTPServicePascalCode,
-         '_http_json_service_unit.pas', PascalServiceCodeEditor);
+      '_http_json_service_unit.pas', PascalServiceCodeEditor);
     Emit(GenerateHTTPServicePascalReadme,
-         '_http_json_service_pascal.md', PascalServiceReadmeEditor);
+      '_http_json_service_pascal.md', PascalServiceReadmeEditor);
     Emit(GenerateHTTPCallPascalCode,
-         '_http_json_call_unit.pas', PascalCallCodeEditor);
+      '_http_json_call_unit.pas', PascalCallCodeEditor);
     Emit(GenerateHTTPCallPascalReadme,
-         '_http_json_call_pascal.md', PascalCallReadmeEditor);
+      '_http_json_call_pascal.md', PascalCallReadmeEditor);
 
     (* ---- JavaScript call (client library + HTML test page) ---- *)
     Emit(GenerateHTTPCallJsCode,
-         '_http_json_call.js', JavaScriptCallCodeEditor);
+      '_http_json_call.js', JavaScriptCallCodeEditor);
     Emit(GenerateHTTPCallJsReadme,
-         '_http_json_call_js.md', JavaScriptCallReadmeEditor);
+      '_http_json_call_js.md', JavaScriptCallReadmeEditor);
     Emit(GenerateHTTPCallJsHtmlCode,
-         '_http_json_call_test.html', JavaScriptTestHtmlEditor);
+      '_http_json_call_test.html', JavaScriptTestHtmlEditor);
 
     (* ---- Python service / call ---- *)
     Emit(GenerateHTTPServicePythonCode,
-         '_http_json_service.py', PythonServiceCodeEditor);
+      '_http_json_service.py', PythonServiceCodeEditor);
     Emit(GenerateHTTPServicePythonReadme,
-         '_http_json_service_python.md', PythonServiceReadmeEditor);
+      '_http_json_service_python.md', PythonServiceReadmeEditor);
     Emit(GenerateHTTPCallPythonCode,
-         '_http_json_call.py', PythonCallCodeEditor);
+      '_http_json_call.py', PythonCallCodeEditor);
     Emit(GenerateHTTPCallPythonReadme,
-         '_http_json_call_python.md', PythonCallReadmeEditor);
+      '_http_json_call_python.md', PythonCallReadmeEditor);
 
     (* ---- C++ service (.cpp + .hpp + README) ---- *)
     Emit(GenerateHTTPServiceCppCode,
-         '_http_json_service.cpp', CppServiceImplEditor);
+      '_http_json_service.cpp', CppServiceImplEditor);
     Emit(GenerateHTTPServiceCppHeader,
-         '_http_json_service.hpp', CppServiceHeaderEditor);
+      '_http_json_service.hpp', CppServiceHeaderEditor);
     Emit(GenerateHTTPServiceCppReadme,
-         '_http_json_service_cpp.md', CppServiceReadmeEditor);
+      '_http_json_service_cpp.md', CppServiceReadmeEditor);
 
     (* ---- C++ call (.cpp + .hpp + README) ---- *)
     Emit(GenerateHTTPCallCppCode,
-         '_http_json_call.cpp', CppCallImplEditor);
+      '_http_json_call.cpp', CppCallImplEditor);
     Emit(GenerateHTTPCallCppHeader,
-         '_http_json_call.hpp', CppCallHeaderEditor);
+      '_http_json_call.hpp', CppCallHeaderEditor);
     Emit(GenerateHTTPCallCppReadme,
-         '_http_json_call_cpp.md', CppCallReadmeEditor);
+      '_http_json_call_cpp.md', CppCallReadmeEditor);
+
+    Emit(GenerateCMakeScript,
+      'CMakeLists.txt', CMakeEditor);
+    Emit(GenerateTestMainCpp,
+      'test_main___.cpp', CMake_TestMain_Editor);
 
     DoStatus('All artifacts generated for unit "%s".', [unit_name.Text]);
     MainPageControl.ActivePage := FinalSourceTabSheet;
@@ -884,8 +710,6 @@ end;
  * ============================================================================ *)
 procedure Tcode_decl_to_abi_json_form.StatusRefreshTimerTick(Sender: TObject);
 begin
-  while LF___.LF_GetStatusCount() > 0 do
-    DoStatus(LF___.LF_GetStatusEx());
   Check_Soft_Thread_Synchronize;
   LF___.LF_Sync;
 end;
