@@ -73,14 +73,22 @@ unit code_decl_to_abi_cmdline;
   direction (service or call) is controlled by the --call flag; the
   default is service.
 
-  C++ OUTPUT NAMING (v2)
-  ----------------------
+  OUTPUT NAMING PER TARGET
+  ------------------------
 
-  For the C++ target the tool additionally produces a CMakeLists.txt
-  and two runnable test programs (one for the service side and one for
-  the call side). The CMake script references the generated .hpp/.cpp
-  files by a name derived from the source unit name. To keep that
-  reference valid, the CLI adopts the same naming rule as the GUI:
+  Pascal and Python honour the file name you provide as-is.
+
+  C++ and C# do NOT use your file name directly. They derive the real
+  names from the parsed source-unit name, because the companion CMake
+  script (C++) and the two console projects (C#) reference the files by
+  that canonical name. The DIRECTORY part of your output argument is
+  respected; the file name itself is replaced.
+
+  C++ OUTPUT NAMING
+  -----------------
+
+  For the C++ target the tool produces a header / implementation pair
+  plus a CMakeLists.txt and two runnable test programs:
 
       Service side writes:
           <UnitName>_abi_service.hpp
@@ -97,14 +105,36 @@ unit code_decl_to_abi_cmdline;
       <UnitName>_abi_service_main.cpp
       <UnitName>_abi_call_main.cpp
 
-  The directory part of the <output_file> argument is respected; the
-  file name itself is replaced with the canonical name above. The
-  generator emits the CMake script and the two test programs in both
+  The generator emits the CMake script and the two test programs in both
   modes, so running the CLI twice (once for the service side, once for
   the call side) leaves a consistent, buildable directory.
 
-  Every successful run also produces a companion Markdown README
-  describing the generated artefacts. The READMEs are the real
+  C# OUTPUT NAMING AND MODE
+  -------------------------
+
+  The C# backend produces the complete set in a SINGLE invocation. The
+  --call flag is accepted for interface compatibility but is IGNORED
+  when the output extension is .cs. Every run writes:
+
+      <UnitName>_abi_service.cs
+      <UnitName>_abi_service_csharp.md
+      <UnitName>_abi_call.cs
+      <UnitName>_abi_call_csharp.md
+      <UnitName>_abi_service_main_test___.cs
+      <UnitName>_abi_call_main_test___.cs
+      <UnitName>_abi_test_csharp.md
+
+  Rationale: the two console test programs reference both the service
+  library and the call library by namespace. Emitting only one of the
+  two libraries would leave the test projects uncompilable until a
+  second run completed the picture. Producing the full set in one go
+  keeps every artefact consistent.
+
+  README COMPANIONS
+  -----------------
+
+  Every successful run also produces one or more companion Markdown
+  READMEs describing the generated artefacts. The READMEs are the real
   build/deploy guides for the generated code and should be read before
   writing any build script.
 *)
@@ -154,7 +184,10 @@ uses
   py_abi_call_generator_tool,
   cpp_abi_service_generator_tool,
   cpp_abi_call_generator_tool,
-  cpp_abi_cmake_generator_tool;
+  cpp_abi_cmake_generator_tool,
+  csharp_abi_service_generator_tool,
+  csharp_abi_call_generator_tool,
+  csharp_abi_test_generator_tool;
 
 const
   EXIT_OK           = 0;
@@ -165,7 +198,7 @@ const
 
 type
   TSourceLang = (slPascal, slC, slUnknown);
-  TTargetLang = (tlPascal, tlPython, tlCpp, tlUnknown);
+  TTargetLang = (tlPascal, tlPython, tlCpp, tlCsharp, tlUnknown);
   TTargetMode = (tmService, tmCall);
 
 (* ------------------------------------------------------------------------ *)
@@ -207,16 +240,22 @@ begin
   DoStatus('  .py                           Python ABI module');
   DoStatus('  .hpp .hh .h                   C++ ABI header (service or call pair)');
   DoStatus('  .cpp .cc .cxx .c              C++ ABI implementation');
+  DoStatus('  .cs                           C# ABI library + tests (all in one run)');
   DoStatus('');
   DoStatus('TARGET DIRECTION (selected by the --call flag)');
   DoStatus('  (default)                     Service side: exposes the routines.');
   DoStatus('  --call                        Call side: invokes the routines.');
+  DoStatus('  Note: the .cs target ignores --call. It always emits the complete');
+  DoStatus('        set (service library + call library + two console tests +');
+  DoStatus('        test README) in a single invocation, because the test');
+  DoStatus('        programs reference BOTH libraries by namespace.');
   DoStatus('');
   DoStatus('OUTPUT NAMING');
   DoStatus('  Pascal / Python: the file name you provide is used as-is.');
-  DoStatus('  C++: the file name is derived from the source unit name, because');
-  DoStatus('  the generated CMakeLists.txt references the .hpp/.cpp files by');
-  DoStatus('  that name. The directory part of your output argument is kept.');
+  DoStatus('  C++ / C#: the file name is derived from the source unit name,');
+  DoStatus('  because the generated CMakeLists.txt (C++) and the two console');
+  DoStatus('  projects (C#) reference the files by that name. The directory');
+  DoStatus('  part of your output argument is kept.');
   DoStatus('');
   DoStatus('C++ ARTEFACTS');
   DoStatus('  Service side writes:');
@@ -232,6 +271,16 @@ begin
   DoStatus('      <UnitName>_abi_service_main.cpp');
   DoStatus('      <UnitName>_abi_call_main.cpp');
   DoStatus('');
+  DoStatus('C# ARTEFACTS');
+  DoStatus('  Every run writes the complete set (--call has no effect):');
+  DoStatus('      <UnitName>_abi_service.cs');
+  DoStatus('      <UnitName>_abi_service_csharp.md');
+  DoStatus('      <UnitName>_abi_call.cs');
+  DoStatus('      <UnitName>_abi_call_csharp.md');
+  DoStatus('      <UnitName>_abi_service_main_test___.cs');
+  DoStatus('      <UnitName>_abi_call_main_test___.cs');
+  DoStatus('      <UnitName>_abi_test_csharp.md');
+  DoStatus('');
   DoStatus('README');
   DoStatus('  A Markdown user guide is written next to the generated code.');
   DoStatus('  The README is the build/deployment guide for the artefact:');
@@ -245,6 +294,7 @@ begin
   DoStatus('  code_decl_to_abi --call ComplexTestUnit.h calculator_call.py');
   DoStatus('  code_decl_to_abi ComplexTestUnit.h out/ComplexTestUnit_abi_service.hpp');
   DoStatus('  code_decl_to_abi --call ComplexTestUnit.h out/ComplexTestUnit_abi_call.hpp');
+  DoStatus('  code_decl_to_abi ComplexTestUnit.h out/Calculator_abi_service.cs');
   DoStatus('');
   DoStatus('EXIT CODES');
   DoStatus('  0  Conversion succeeded.');
@@ -284,6 +334,8 @@ begin
   else if (Ext = '.hpp') or (Ext = '.hh') or (Ext = '.h')
        or (Ext = '.cpp') or (Ext = '.cc') or (Ext = '.cxx') or (Ext = '.c') then
     Result := tlCpp
+  else if Ext = '.cs' then
+    Result := tlCsharp
   else
     Result := tlUnknown;
 end;
@@ -542,6 +594,92 @@ begin
     Emit_List(CallMainPath, Tmp);
 end;
 
+(*
+  Generate the C# target.
+
+  The C# backend ignores the Mode parameter. Every invocation writes
+  the complete set: service library, call library, both console test
+  programs, and the shared test README. This is required because the
+  two console test programs reference BOTH libraries by namespace, so
+  producing only one of the two libraries would leave the test
+  projects uncompilable until a second run completed the picture.
+
+  The directory part of the caller's output argument is respected; the
+  file names themselves are replaced with the canonical names derived
+  from the source unit name.
+*)
+function Generate_Csharp(const Model: TPascal_Func_Model;
+  const Mode: TTargetMode;
+  const OutputFile: string): Integer;
+var
+  UnitName, OutDir: string;
+  ServiceCs, ServiceReadme: string;
+  CallCs, CallReadme: string;
+  ServiceTestCs, CallTestCs, TestReadme: string;
+  Tmp: TPascalStringList;
+begin
+  Result := EXIT_OK;
+  // Mode is intentionally not referenced below. See the function
+  // comment for the rationale.
+
+  UnitName := Model.UnitName.Text;
+  if UnitName = '' then
+  begin
+    DoStatus('Error: model UnitName is empty, cannot derive C# output file names.');
+    Exit(EXIT_GEN_FAILED);
+  end;
+
+  OutDir := ExtractFileDir(OutputFile);
+  if OutDir = '' then
+    OutDir := '.';
+
+  // ---- Service library + README ----------------------------------------
+  ServiceCs     := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service.cs';
+  ServiceReadme := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service_csharp.md';
+
+  Tmp := GenerateABIServiceCsharpCode(Model);
+  if (Tmp = nil) or (not Emit_List(ServiceCs, Tmp)) then
+    Exit(EXIT_GEN_FAILED);
+
+  Tmp := GenerateABIServiceCsharpReadme(Model);
+  if Tmp <> nil then
+    Emit_List(ServiceReadme, Tmp);
+
+  // ---- Call library + README -------------------------------------------
+  CallCs     := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call.cs';
+  CallReadme := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call_csharp.md';
+
+  Tmp := GenerateABICallCsharpCode(Model);
+  if (Tmp = nil) or (not Emit_List(CallCs, Tmp)) then
+    Exit(EXIT_GEN_FAILED);
+
+  Tmp := GenerateABICallCsharpReadme(Model);
+  if Tmp <> nil then
+    Emit_List(CallReadme, Tmp);
+
+  // ---- Test programs + shared test README ------------------------------
+  ServiceTestCs := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service_main_test___.cs';
+  CallTestCs    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call_main_test___.cs';
+  TestReadme    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_test_csharp.md';
+
+  Tmp := GenerateABIServiceMainTestCsharpCode(Model);
+  if Tmp <> nil then
+    Emit_List(ServiceTestCs, Tmp);
+
+  Tmp := GenerateABICallMainTestCsharpCode(Model);
+  if Tmp <> nil then
+    Emit_List(CallTestCs, Tmp);
+
+  Tmp := GenerateABICsharpTestReadme(Model);
+  if Tmp <> nil then
+    Emit_List(TestReadme, Tmp);
+
+  // The --call flag has no effect on the C# branch; note that in the
+  // run log so a reader of the transcript is not surprised.
+  if Mode = tmCall then
+    DoStatus('Note   : --call has no effect for the C# target; the complete set was written.');
+end;
+
 function Execute_Conversion(const InputFile, OutputFile: string;
   const Mode: TTargetMode): Integer;
 var
@@ -565,7 +703,7 @@ begin
   if TgtLang = tlUnknown then
   begin
     DoStatus('Error: cannot detect the target language from "%s".', [OutputFile]);
-    DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c');
+    DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c .cs');
     Exit(EXIT_BAD_ARGS);
   end;
 
@@ -631,6 +769,8 @@ begin
         Result := Generate_Python(Model, Mode, OutputFile);
       tlCpp:
         Result := Generate_Cpp(Model, Mode, OutputFile);
+      tlCsharp:
+        Result := Generate_Csharp(Model, Mode, OutputFile);
       else
         Result := EXIT_GEN_FAILED;
     end;

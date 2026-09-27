@@ -23,7 +23,12 @@ uses
   py_abi_call_generator_tool,
   cpp_abi_service_generator_tool,
   cpp_abi_call_generator_tool,
-  code_decl_to_abi_cmdline, code_decl_to_abi_mcp_api_tool_provider_unit, cpp_abi_cmake_generator_tool;
+  code_decl_to_abi_cmdline,
+  code_decl_to_abi_mcp_api_tool_provider_unit,
+  cpp_abi_cmake_generator_tool,
+  csharp_abi_service_generator_tool,
+  csharp_abi_call_generator_tool,
+  csharp_abi_test_generator_tool;
 
   {$R *.res}
 
@@ -35,7 +40,7 @@ begin
       exit;
     end;
     RequireDerivedFormResource := True;
-  Application.Scaled:=True;
+    Application.Scaled := True;
     {$PUSH}
     {$WARN 5044 OFF}
     Application.MainFormOnTaskbar := True;

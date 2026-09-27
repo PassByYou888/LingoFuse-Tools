@@ -53,7 +53,7 @@ uses
   Z.Parsing, Z.Expression, Z.ListEngine, Z.Notify, Z.UnicodeMixedLib, Z.Status,
   Z.MemoryStream, Z.Json, Z.HashList.Templet,
   pas_mcp_generator_tool, py_mcp_generator_tool, cpp_mcp_generator_tool,
-  code_decl_to_mcp_api_tool_provider_unit,
+  code_decl_to_mcp_api_tool_provider_unit, cmake_for_cpp_mcp_generator_tool, csharp_mcp_generator_tool,
   Z.Pascal_Func_Model, Z.Pascal_Func_Tool;
 
 type
@@ -63,30 +63,17 @@ type
   TCodeDeclToMcpForm = class(TForm)
     BackToJsonFromModelButton: TButton;
     BackToModelButton: TButton;
-
     BuildModelFromJsonButton: TButton;
-    CppFilesSplitter: TPairSplitter;
-    CppHeaderSplitterSide: TPairSplitterSide;
-    CppImplSplitterSide: TPairSplitterSide;
     EmptyUnitButtonSpacer: TBevel;
-    FinalCppHeaderEdit: TSynEdit;
-    FinalCppImplEdit: TSynEdit;
-    FinalCppReadmeEdit: TSynEdit;
-    FinalCppReadmeTab: TTabSheet;
-    FinalCppTab: TTabSheet;
-    FinalPascalReadmeEdit: TSynEdit;
-    FinalPascalReadmeTab: TTabSheet;
-    FinalPascalSourceEdit: TSynEdit;
-    FinalPascalTab: TTabSheet;
-    FinalPythonReadmeEdit: TSynEdit;
-    FinalPythonReadmeTab: TTabSheet;
-    FinalPythonSourceEdit: TSynEdit;
-    FinalPythonTab: TTabSheet;
     FinalSourceHintLabel: TLabel;
-    FinalSourcePageControl: TPageControl;
     FinalSourceSpacer: TBevel;
     FinalSourceTab: TTabSheet;
     FinalSourceToolbarPanel: TPanel;
+    final_Source_edit: TSynEdit;
+    final_source_file_ListView: TListView;
+    Final_source_left_PairSplitterSide: TPairSplitterSide;
+    Final_source_PairSplitter: TPairSplitter;
+    Final_source_right_PairSplitterSide: TPairSplitterSide;
     FormatButtonSpacer: TBevel;
     FormatSourceButton: TButton;
     GenerateAllCodeButton: TButton;
@@ -103,7 +90,6 @@ type
     ModelJsonTab: TTabSheet;
     ModelJsonToolbarPanel: TPanel;
     NewEmptyUnitButton: TButton;
-    OpenCodeRulesButton: TButton;
     ParseToJsonButton: TButton;
     RebuildSourceFromJsonButton: TButton;
     SourceEdit: TSynEdit;
@@ -115,8 +101,6 @@ type
     SourceJsonToolbarPanel: TPanel;
     SourceTab: TTabSheet;
     SourceToolbarPanel: TPanel;
-
-    { -- Non-visual components ----------------------------------------- }
     SysTimer: TTimer;
     FreePascalHighlighter: TSynFreePascalSyn;
     SynCppHighlighter: TSynCppSyn;
@@ -126,16 +110,13 @@ type
     WelcomeTab: TTabSheet;
     WelcomeTitleLabel: TLabel;
     WelcomeToolbarPanel: TPanel;
-
-    { -- Event handlers ------------------------------------------------- }
+    procedure final_source_file_ListViewSelectItem(Sender: TObject; Item: TListItem; Selected: Boolean);
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
-
     procedure GoToSourceButtonClick(Sender: TObject);
     procedure FormatSourceButtonClick(Sender: TObject);
     procedure ParseToJsonButtonClick(Sender: TObject);
     procedure NewEmptyUnitButtonClick(Sender: TObject);
     procedure LoadTestSampleButtonClick(Sender: TObject);
-    procedure OpenCodeRulesButtonClick(Sender: TObject);
     procedure LanguageSelectorLabelClick(Sender: TObject);
     procedure LanguageSelectorComboBoxChange(Sender: TObject);
     procedure RebuildSourceFromJsonButtonClick(Sender: TObject);
@@ -143,9 +124,7 @@ type
     procedure BackToJsonFromModelButtonClick(Sender: TObject);
     procedure GenerateAllCodeButtonClick(Sender: TObject);
     procedure BackToModelButtonClick(Sender: TObject);
-
     procedure SysTimerTick(Sender: TObject);
-
   private
     { Text shown in WelcomeEdit at construction time, saved for reset. }
     FBackupWelcomeText: TP_String;
@@ -159,13 +138,10 @@ type
     { -- Helpers for the code generation step -------------------------- }
 
     { Save a TSynEdit's content to a file inside FUnitOutputDir. }
-    procedure SaveEditorToFile(Editor: TSynEdit; const FileName: string; out SavedPath: TP_String);
+    procedure SaveEditorToFile(Editor: TSynEdit; const FileName: string; var SavedPath: TP_String);
 
     { Save a TPascalStringList to a file inside FUnitOutputDir. }
-    procedure SaveListToFile(List: TPascalStringList; const FileName: string; out SavedPath: TP_String);
-
-    { Display a generated artifact in its target editor. }
-    procedure ShowGeneratedList(List: TPascalStringList; Editor: TSynEdit; const SavedPath: TP_String);
+    procedure SaveListToFile(List: TPascalStringList; const FileName: string; var SavedPath: TP_String);
 
     { Save context files (source, LV0 JSON, LV1 JSON). }
     procedure SaveContextFiles;
@@ -203,9 +179,6 @@ type
 
     { Load a rich test sample matching the current language. }
     procedure LoadTestSample;
-
-    { Open the code-rule document for the current language. }
-    procedure OpenCodeRuleDocument;
   end;
 
 var
@@ -257,6 +230,25 @@ begin
   Hide;
 end;
 
+procedure TCodeDeclToMcpForm.final_source_file_ListViewSelectItem(Sender: TObject; Item: TListItem; Selected: Boolean);
+begin
+  if Selected then
+  begin
+    final_Source_edit.Lines.LoadFromFile(Item.SubItems[0]);
+    if umlMultipleMatch('*.pas;*.pp;*.lpr;*.dpr', Item.Caption) then
+      final_Source_edit.Highlighter := self.FreePascalHighlighter
+    else if umlMultipleMatch('*.cpp;*.c;*.hpp;*.h', Item.Caption) then
+      final_Source_edit.Highlighter := self.SynCppHighlighter
+    else
+      final_Source_edit.Highlighter := nil;
+  end
+  else
+  begin
+    final_Source_edit.Text := '';
+    final_Source_edit.Highlighter := nil;
+  end;
+end;
+
 procedure TCodeDeclToMcpForm.GoToSourceButtonClick(Sender: TObject);
 begin
   MainPageControl.ActivePage := SourceTab;
@@ -280,11 +272,6 @@ end;
 procedure TCodeDeclToMcpForm.LoadTestSampleButtonClick(Sender: TObject);
 begin
   LoadTestSample;
-end;
-
-procedure TCodeDeclToMcpForm.OpenCodeRulesButtonClick(Sender: TObject);
-begin
-  OpenCodeRuleDocument;
 end;
 
 procedure TCodeDeclToMcpForm.LanguageSelectorLabelClick(Sender: TObject);
@@ -597,31 +584,11 @@ begin
   end;
 end;
 
-procedure TCodeDeclToMcpForm.OpenCodeRuleDocument;
-var
-  BaseDir: U_String;
-  FileName: U_String;
-begin
-  BaseDir := umlGetFilePath(ParamStr(0));
-
-  case FCurrentLanguage of
-    TSourceLanguage.slPascal:
-      FileName := umlCombineFileName(BaseDir, 'pascal_code_mcp_rule.md');
-    TSourceLanguage.slC:
-      FileName := umlCombineFileName(BaseDir, 'C_code_mcp_rule.md');
-    else
-      Exit;
-  end;
-
-  if umlFileExists(FileName) then
-    OpenDocument(FileName.Text);
-end;
-
 { =========================================================================== }
 { Output helpers                                                               }
 { =========================================================================== }
 
-procedure TCodeDeclToMcpForm.SaveEditorToFile(Editor: TSynEdit; const FileName: string; out SavedPath: TP_String);
+procedure TCodeDeclToMcpForm.SaveEditorToFile(Editor: TSynEdit; const FileName: string; var SavedPath: TP_String);
 var
   Temp: TPascalStringList;
 begin
@@ -631,25 +598,31 @@ begin
     SavedPath := umlCombineFileName(FUnitOutputDir.Text, FileName);
     Temp.SaveToFile(SavedPath);
     DoStatus('Saved file: %s', [SavedPath.Text]);
-  finally
+
+  with final_source_file_ListView.Items.Add do
+  begin
+    Caption := FileName;
+    SubItems.Add(SavedPath);
+    ImageIndex := -1;
+    StateIndex := -1;
+  end;
+finally
     DisposeObject(Temp);
   end;
 end;
 
-procedure TCodeDeclToMcpForm.SaveListToFile(List: TPascalStringList; const FileName: string; out SavedPath: TP_String);
+procedure TCodeDeclToMcpForm.SaveListToFile(List: TPascalStringList; const FileName: string; var SavedPath: TP_String);
 begin
   SavedPath := umlCombineFileName(FUnitOutputDir.Text, FileName);
   List.SaveToFile(SavedPath);
   DoStatus('Saved file: %s', [SavedPath.Text]);
-end;
-
-procedure TCodeDeclToMcpForm.ShowGeneratedList(List: TPascalStringList; Editor: TSynEdit; const SavedPath: TP_String);
-begin
-  if List = nil then
-    Exit;
-
-  List.AssignTo(Editor.Lines);
-  Editor.Hint := SavedPath.Text;
+  with final_source_file_ListView.Items.Add do
+  begin
+    Caption := FileName;
+    SubItems.Add(SavedPath);
+    ImageIndex := -1;
+    StateIndex := -1;
+  end;
 end;
 
 procedure TCodeDeclToMcpForm.SaveContextFiles;
@@ -682,6 +655,10 @@ var
   SavedPath: TP_String;
   UnitName: TP_String;
 begin
+  MainPageControl.ActivePage := FinalSourceTab;
+  final_source_file_ListView.Items.Clear;
+  final_Source_edit.Text := '';
+
   { -- 1. Build the model from the LV1 JSON. ------------------------- }
   FuncModel := TPascal_Func_Model.Create;
   try
@@ -702,7 +679,6 @@ begin
       if L <> nil then
       begin
         SaveListToFile(L, UnitName + '_tool_provider_unit.pas', SavedPath);
-        ShowGeneratedList(L, FinalPascalSourceEdit, SavedPath);
       end;
     finally
       DisposeObjectAndNil(L);
@@ -713,7 +689,6 @@ begin
       if L <> nil then
       begin
         SaveListToFile(L, UnitName + '_tool_provider_pascal.md', SavedPath);
-        ShowGeneratedList(L, FinalPascalReadmeEdit, SavedPath);
       end;
     finally
       DisposeObjectAndNil(L);
@@ -725,7 +700,6 @@ begin
       if L <> nil then
       begin
         SaveListToFile(L, UnitName + '_tool_provider.py', SavedPath);
-        ShowGeneratedList(L, FinalPythonSourceEdit, SavedPath);
       end;
     finally
       DisposeObjectAndNil(L);
@@ -736,7 +710,6 @@ begin
       if L <> nil then
       begin
         SaveListToFile(L, UnitName + '_tool_provider_python.md', SavedPath);
-        ShowGeneratedList(L, FinalPythonReadmeEdit, SavedPath);
       end;
     finally
       DisposeObjectAndNil(L);
@@ -748,7 +721,6 @@ begin
       if L <> nil then
       begin
         SaveListToFile(L, UnitName + '_tool_provider.hpp', SavedPath);
-        ShowGeneratedList(L, FinalCppHeaderEdit, SavedPath);
       end;
     finally
       DisposeObjectAndNil(L);
@@ -759,7 +731,6 @@ begin
       if L <> nil then
       begin
         SaveListToFile(L, UnitName + '_tool_provider.cpp', SavedPath);
-        ShowGeneratedList(L, FinalCppImplEdit, SavedPath);
       end;
     finally
       DisposeObjectAndNil(L);
@@ -770,7 +741,122 @@ begin
       if L <> nil then
       begin
         SaveListToFile(L, UnitName + '_tool_provider_cpp.md', SavedPath);
-        ShowGeneratedList(L, FinalCppReadmeEdit, SavedPath);
+      end;
+    finally
+      DisposeObjectAndNil(L);
+    end;
+
+    { -- 6b. CMake build script. ------------------------------------ }
+    { Produces a standalone CMakeLists.txt placed next to the generated
+      .hpp / .cpp / .md files. The script:
+        - builds <unit>_tool_provider_test.cpp together with
+          <unit>_tool_provider.cpp,
+        - locates and links against the LingoFuse runtime library,
+        - makes both Debug and Release builds land in build/bin,
+        - on Windows, copies the runtime DLLs next to the executable,
+        - on Unix, sets RPATH so no LD_LIBRARY_PATH is required.
+
+      The resulting script requires no manual editing when the default
+      layout (all generated files and the LingoFuse runtime in one
+      directory) is used. }
+    L := GenerateCMakeLists(FuncModel);
+    try
+      if L <> nil then
+      begin
+        SaveListToFile(L, 'CMakeLists.txt', SavedPath);
+      end;
+    finally
+      DisposeObjectAndNil(L);
+    end;
+
+    { -- 6c. C++ test program. -------------------------------------- }
+    { Produces a runnable test main that:
+        - prints the effective provider configuration,
+        - calls Execute_And_Reg_all() to create the App, register every
+          supported API, connect to the IPC endpoint, and advertise
+          every API to the beacon as an MCP tool,
+        - waits for the user to press Enter,
+        - then performs an orderly LF_ExitMainThread / LF_Shutdown.
+
+      The file is compiled together with the generated provider
+      implementation by the CMakeLists.txt produced above. }
+    L := GenerateCPPTestMain(FuncModel);
+    try
+      if L <> nil then
+      begin
+        SaveListToFile(L, UnitName + '_tool_provider_test.cpp', SavedPath);
+      end;
+    finally
+      DisposeObjectAndNil(L);
+    end;
+
+    { -- 6d. C# provider class. ------------------------------------- }
+    { Produces the C# provider class file. It contains:
+        - the metadata constants (App name, endpoint, beacon app, ...),
+        - one InternalCall_<name> stub per supported Pascal routine,
+        - one Callback_<name> per supported Pascal routine,
+        - RegisterAPIs / RegisterTools / Execute_And_Reg_all / ShutdownClean.
+
+      The file deliberately contains NO Main method: the test entry point
+      is emitted separately below so that the provider class can be
+      reused by any .NET host application.
+
+      The class targets .NET 8.0 and depends only on the `LingoFuse`
+      .NET binding assembly. See the companion C# README for the binding
+      sourcing policy. }
+    L := GenerateCSharpCode(FuncModel);
+    try
+      if L <> nil then
+      begin
+        SaveListToFile(L, UnitName + '_tool_provider.cs', SavedPath);
+      end;
+    finally
+      DisposeObjectAndNil(L);
+    end;
+
+    { -- 6e. C# test program. --------------------------------------- }
+    { Produces the single Main entry point for the .NET console project
+      that hosts the provider class above. The test program:
+        - prints the effective configuration,
+        - calls Execute_And_Reg_all() to create the App, register every
+          supported API, connect to the IPC endpoint, and advertise
+          every API to the beacon as an MCP tool,
+        - waits for the user to press Enter,
+        - then performs the orderly teardown:
+              NetworkEvents.Clear
+              Framework.ExitMainThread
+              AppHandle.Dispose
+              Framework.Shutdown.
+
+      The two .cs files must be placed in the same .NET project. Only
+      this test file defines Main, so no CS0017 duplicate-entry-point
+      error can occur. }
+    L := GenerateCSharpTestProgram(FuncModel);
+    try
+      if L <> nil then
+      begin
+        SaveListToFile(L, UnitName + '_tool_provider_test.cs', SavedPath);
+      end;
+    finally
+      DisposeObjectAndNil(L);
+    end;
+
+    { -- 6f. C# README. --------------------------------------------- }
+    { Produces a detailed English Markdown guide. It documents:
+        - the fixed 4-step startup order
+              beacon -> provider -> mcp_api_tool -> agent
+        - the runtime architecture diagram and end-to-end data flow,
+        - .NET SDK prerequisites and the LingoFuse .NET binding sourcing
+          policy (NuGet vs. v3 fallback),
+        - the project layout and a minimal .csproj template,
+        - build, run, and troubleshooting instructions,
+        - a per-tool reference with JSON input/output examples,
+        - portability and deployment recipes (Docker, NSSM, systemd). }
+    L := GenerateCSharpReadme(FuncModel);
+    try
+      if L <> nil then
+      begin
+        SaveListToFile(L, UnitName + '_tool_provider_csharp.md', SavedPath);
       end;
     finally
       DisposeObjectAndNil(L);

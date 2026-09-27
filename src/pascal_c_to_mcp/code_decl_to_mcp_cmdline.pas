@@ -70,6 +70,26 @@ unit code_decl_to_mcp_cmdline;
   The source language is detected from the input file extension. The
   target language is detected from the output file extension. See the
   help text for the full list of supported extensions.
+
+  TARGET LANGUAGES
+  ----------------
+
+  This unit supports four target languages:
+
+      Pascal   (.pas / .pp / .p)   → GeneratePascalCode    + GeneratePascalReadme
+      Python   (.py)               → GeneratePythonCode    + GeneratePythonReadme
+      C++      (.hpp / .cpp / ...) → GenerateHPPCode +
+                                     GenerateCPPCode       + GenerateCPPReadme
+      C#       (.cs)               → GenerateCSharpCode   + GenerateCSharpReadme
+
+  C++ and C# emit only the main code artifact (plus its README). They
+  deliberately do not emit a test program or a CMakeLists.txt. Those
+  are build-time artifacts and are produced by the GUI wizard or by the
+  MCP-API mode, which both know the full output directory layout and
+  can therefore guarantee that the generated CMake source-file names
+  match the generated provider source-file names. The CLI, which lets
+  the user choose any output file name, cannot make that guarantee, so
+  it emits only the primary code file per target.
 *)
 
 interface
@@ -113,7 +133,8 @@ uses
   Z.Pascal_Func_Tool,
   pas_mcp_generator_tool,
   py_mcp_generator_tool,
-  cpp_mcp_generator_tool;
+  cpp_mcp_generator_tool,
+  csharp_mcp_generator_tool;
 
 const
   EXIT_OK           = 0;
@@ -124,11 +145,7 @@ const
 
 type
   TSourceLang = (slPascal, slC, slUnknown);
-  TTargetLang = (tlPascal, tlPython, tlCpp, tlUnknown);
-
-(* ------------------------------------------------------------------------ *)
-(* Console visibility helper                                                  *)
-(* ------------------------------------------------------------------------ *)
+  TTargetLang = (tlPascal, tlPython, tlCpp, tlCSharp, tlUnknown);
 
 (* ------------------------------------------------------------------------ *)
 (* Console output hook                                                        *)
@@ -168,11 +185,20 @@ begin
   DoStatus('  .py                           Python MCP tool provider module');
   DoStatus('  .hpp .hh .h                   C++ MCP tool provider header');
   DoStatus('  .cpp .cc .cxx .c              C++ MCP tool provider implementation');
+  DoStatus('  .cs                           C# MCP tool provider class');
   DoStatus('');
   DoStatus('C++ PAIRING');
   DoStatus('  When the target is C++, two files are written together: the');
   DoStatus('  header and the implementation. Naming either one causes the');
   DoStatus('  other to be written next to it under the same base name.');
+  DoStatus('  To also produce CMakeLists.txt and a C++ test program, use the');
+  DoStatus('  GUI wizard or the MCP-API mode.');
+  DoStatus('');
+  DoStatus('C# NOTE');
+  DoStatus('  The generated .cs file contains the provider class only. The');
+  DoStatus('  test program and the CMake/MSBuild scaffolding are produced by');
+  DoStatus('  the GUI wizard and the MCP-API mode, where the full output');
+  DoStatus('  directory layout is known.');
   DoStatus('');
   DoStatus('README');
   DoStatus('  A Markdown user guide is written next to the generated code');
@@ -182,6 +208,7 @@ begin
   DoStatus('  code_decl_to_mcp calculator.pas calculator_provider.pas');
   DoStatus('  code_decl_to_mcp ComplexTestUnit.h calculator_provider.py');
   DoStatus('  code_decl_to_mcp ComplexTestUnit.h calculator_provider.hpp');
+  DoStatus('  code_decl_to_mcp ComplexTestUnit.h CalculatorToolProvider.cs');
   DoStatus('');
   DoStatus('EXIT CODES');
   DoStatus('  0  Conversion succeeded.');
@@ -221,6 +248,8 @@ begin
   else if (Ext = '.hpp') or (Ext = '.hh') or (Ext = '.h')
        or (Ext = '.cpp') or (Ext = '.cc') or (Ext = '.cxx') or (Ext = '.c') then
     Result := tlCpp
+  else if Ext = '.cs' then
+    Result := tlCSharp
   else
     Result := tlUnknown;
 end;
@@ -265,6 +294,20 @@ begin
   end;
 end;
 
+(*
+  Companion README path.
+
+  The README is written next to the primary output file, with the same
+  base name and the suffix "_readme.md".
+
+      <output_dir>/<output_base>_readme.md
+
+  This rule is deliberately independent of the target language and of
+  the generator that produced the code file. It is the same rule that
+  the CLI has used since v1.0. The GUI wizard uses a different rule
+  (<UnitName>_tool_provider_<lang>.md); the CLI chooses its own rule
+  because the user names the primary output file explicitly.
+*)
 function Companion_Readme_Path(const OutputFile: string): string;
 var
   Dir, Base: string;
@@ -274,6 +317,16 @@ begin
   Result := IncludeTrailingPathDelimiter(Dir) + Base + '_readme.md';
 end;
 
+(*
+  C++ pairing helper.
+
+  When the target language is C++, two files are written together:
+  the header and the implementation. The user may name either one; the
+  other is derived from the same directory and base name.
+
+      /path/to/calc_provider.hpp  →  /path/to/calc_provider.cpp
+      /path/to/calc_provider.cpp  →  /path/to/calc_provider.hpp
+*)
 procedure Cpp_Paths_From_Output(const OutputFile: string; out HppPath, CppPath: string);
 var
   Dir, Base: string;
@@ -313,7 +366,7 @@ begin
   if TgtLang = tlUnknown then
   begin
     DoStatus('Error: cannot detect the target language from "%s".', [OutputFile]);
-    DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c');
+    DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c .cs');
     Exit(EXIT_BAD_ARGS);
   end;
 
@@ -390,6 +443,8 @@ begin
             ReadmePath := Companion_Readme_Path(OutputFile);
             if Write_Text_List(ReadmePath, ReadmeList) then
               DoStatus('Wrote  : %s', [ReadmePath]);
+            ReadmeList.Free;
+            ReadmeList := nil;
           end;
         end;
 
@@ -414,6 +469,8 @@ begin
             ReadmePath := Companion_Readme_Path(OutputFile);
             if Write_Text_List(ReadmePath, ReadmeList) then
               DoStatus('Wrote  : %s', [ReadmePath]);
+            ReadmeList.Free;
+            ReadmeList := nil;
           end;
         end;
 
@@ -453,6 +510,34 @@ begin
             ReadmePath := Companion_Readme_Path(HppPath);
             if Write_Text_List(ReadmePath, ReadmeList) then
               DoStatus('Wrote  : %s', [ReadmePath]);
+            ReadmeList.Free;
+            ReadmeList := nil;
+          end;
+        end;
+
+      tlCSharp:
+        begin
+          CodeList := GenerateCSharpCode(Model);
+          try
+            if (CodeList = nil) or (not Write_Text_List(OutputFile, CodeList)) then
+            begin
+              DoStatus('Error: cannot write "%s".', [OutputFile]);
+              Exit(EXIT_GEN_FAILED);
+            end;
+            DoStatus('Wrote  : %s', [OutputFile]);
+          finally
+            CodeList.Free;
+            CodeList := nil;
+          end;
+
+          ReadmeList := GenerateCSharpReadme(Model);
+          if ReadmeList <> nil then
+          begin
+            ReadmePath := Companion_Readme_Path(OutputFile);
+            if Write_Text_List(ReadmePath, ReadmeList) then
+              DoStatus('Wrote  : %s', [ReadmePath]);
+            ReadmeList.Free;
+            ReadmeList := nil;
           end;
         end;
 
@@ -461,6 +546,8 @@ begin
     Result := EXIT_OK;
 
   finally
+    if ReadmeList <> nil then
+      ReadmeList.Free;
     if Report <> nil then
       Report.Free;
     if Model <> nil then
@@ -479,8 +566,7 @@ var
   Arg1, Arg2: string;
   Code: Integer;
 begin
-  (* No arguments: hide the console window allocated by the console-
-     subsystem build and let the caller start the GUI normally. *)
+  (* No arguments: let the caller start the GUI normally. *)
   if ParamCount <= 0 then
   begin
     Result := True;

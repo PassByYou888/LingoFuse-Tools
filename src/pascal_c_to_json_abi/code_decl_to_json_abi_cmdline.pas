@@ -77,36 +77,28 @@ unit code_decl_to_json_abi_cmdline;
   default is service.
 
   Every successful run produces the generated code file plus a
-  companion Markdown README describing the artefact. When the target
-  is C++, two code files are produced (a header and an implementation)
-  and the README describes the pair as a single unit. When the target
-  is JavaScript, a self-contained HTML test page is produced alongside
-  the .js file, and the README describes all three artefacts.
+  companion Markdown README describing the artefact.
 
-  JavaScript is a CALL-SIDE ONLY target: naming .js as the output
-  without also passing --call is an argument error. The other targets
-  (Pascal, Python, C++) support both the service side and the call
-  side.
+  When the target is C++, two code files are produced (a header and an
+  implementation), the README describes the pair as a single unit, and
+  two fixed-name CMake artifacts (CMakeLists.txt + test_main___.cpp)
+  are written to the same directory.
 
-  C++ targets also produce two fixed-name companion files in the same
-  directory, because the generated C++ README references them by name:
+  When the target is JavaScript, a self-contained HTML test page is
+  produced alongside the .js file, and the README describes all three
+  artefacts. JavaScript is a CALL-SIDE ONLY target: naming .js as the
+  output without also passing --call is an argument error.
 
-      CMakeLists.txt      a ready-to-use CMake build script that
-                          builds both the service executable and the
-                          call test executable from the .hpp/.cpp
-                          pair produced by this run.
+  C# is a special case. Naming a .cs file as the output produces a
+  complete C# project (service code, call code, both test programs,
+  and all associated READMEs) in a single run, written next to the
+  output file. The output file name itself is only used to select the
+  target directory; the file is not created. The --call flag is
+  ignored for C# because the service half, the call half and their
+  test programs must be generated together.
 
-      test_main___.cpp    the call-side test driver referenced by the
-                          CMake script; it calls every wrapper function
-                          with default arguments and reports success
-                          or failure per call.
-
-  These two files are produced unconditionally for every C++ target,
-  whether the run is producing the service side or the call side. The
-  toolchain treats the two sides as halves of a single unit; the
-  CMake script builds both, and the test driver exercises the call
-  half against the service half. Producing both halves from the same
-  source text is the intended workflow.
+  The remaining targets (Pascal, Python, C++) support both the service
+  side and the call side, selected by --call.
 *)
 
 {$DEFINE FPC_DELPHI_MODE}
@@ -156,6 +148,9 @@ uses
   http_js_abi_call_generator_tool,
   http_py_abi_service_generator_tool,
   http_py_abi_call_generator_tool,
+  http_csharp_abi_service_generator_tool,
+  http_csharp_abi_call_generator_tool,
+  http_csharp_abi_test_generator_tool,
   http_cpp_abi_service_generator_tool,
   http_cpp_abi_call_generator_tool,
   http_cmake_generator_tool;
@@ -178,7 +173,7 @@ const
 
 type
   TSourceLang = (slPascal, slC, slUnknown);
-  TTargetLang = (tlPascal, tlPython, tlCpp, tlJavaScript, tlUnknown);
+  TTargetLang = (tlPascal, tlPython, tlCpp, tlJavaScript, tlCSharp, tlUnknown);
   TTargetMode = (tmService, tmCall);
 
 (* ------------------------------------------------------------------------ *)
@@ -221,12 +216,15 @@ begin
   DoStatus('  .hpp .hh .h                   C++ HTTP/JSON header');
   DoStatus('  .cpp .cc .cxx .c              C++ HTTP/JSON implementation');
   DoStatus('  .js                           JavaScript HTTP/JSON client (Call side only)');
+  DoStatus('  .cs                           C# HTTP/JSON project (service + call + test)');
   DoStatus('');
   DoStatus('TARGET DIRECTION (selected by the --call flag)');
   DoStatus('  (default)                     Service side: exposes the routines.');
   DoStatus('  --call                        Call side: invokes the routines.');
   DoStatus('  NOTE: JavaScript is a Call-side only target. Requesting a .js');
   DoStatus('        output without also passing --call is an argument error.');
+  DoStatus('  NOTE: C# ignores --call; a .cs output always produces the');
+  DoStatus('        complete project (service + call + test).');
   DoStatus('');
   DoStatus('C++ PAIRING');
   DoStatus('  When the target is C++, two files are written together: the');
@@ -262,6 +260,24 @@ begin
   DoStatus('  file. It embeds the generated client library and renders one');
   DoStatus('  interactive test card per exposed routine.');
   DoStatus('');
+  DoStatus('C# TARGET NOTES');
+  DoStatus('  A .cs output produces a complete C# project in one run.');
+  DoStatus('  Seven files are written to the directory of the output file.');
+  DoStatus('  The output file name itself is only used to select that');
+  DoStatus('  directory: <Unit> below is Model.UnitName.');
+  DoStatus('');
+  DoStatus('      <Unit>_http_json_service.cs');
+  DoStatus('      <Unit>_http_json_service_csharp.md');
+  DoStatus('      <Unit>_http_json_call.cs');
+  DoStatus('      <Unit>_http_json_call_csharp.md');
+  DoStatus('      <Unit>_http_json_service_main_test___.cs');
+  DoStatus('      <Unit>_http_json_call_main_test___.cs');
+  DoStatus('      <Unit>_http_json_test_csharp.md');
+  DoStatus('');
+  DoStatus('  The --call flag is ignored for C# because the service half,');
+  DoStatus('  the call half and their test programs must be generated');
+  DoStatus('  together.');
+  DoStatus('');
   DoStatus('README');
   DoStatus('  A Markdown user guide is written next to the generated code');
   DoStatus('  file. Its name is the output base name plus "_readme.md".');
@@ -277,6 +293,7 @@ begin
   DoStatus('  code_decl_to_json_abi ComplexTestUnit.h calculator_service.hpp');
   DoStatus('  code_decl_to_json_abi --call ComplexTestUnit.h calculator_call.hpp');
   DoStatus('  code_decl_to_json_abi --call ComplexTestUnit.h calculator_call.js');
+  DoStatus('  code_decl_to_json_abi ComplexTestUnit.h calculator_project.cs');
   DoStatus('');
   DoStatus('EXIT CODES');
   DoStatus('  0  Conversion succeeded.');
@@ -318,6 +335,8 @@ begin
     Result := tlCpp
   else if Ext = '.js' then
     Result := tlJavaScript
+  else if Ext = '.cs' then
+    Result := tlCSharp
   else
     Result := tlUnknown;
 end;
@@ -515,6 +534,145 @@ begin
   end;
 
   Write_Code_And_Readme(OutputFile, CodeList, ReadmeList);
+end;
+
+(*
+  Generate_CSharp - write the complete C# project.
+
+  Unlike every other target, C# is generated as an indivisible unit:
+  the service code, the call code, both test programs and every README
+  are produced together, because the test programs exercise both
+  halves and cannot be used in isolation. The --call flag is
+  therefore ignored for C#.
+
+  Seven files are written to the directory of OutputFile. The output
+  file name itself is only used to select that directory; the file is
+  not created. The <Unit> below is Model.UnitName:
+
+      <Unit>_http_json_service.cs
+      <Unit>_http_json_service_csharp.md
+      <Unit>_http_json_call.cs
+      <Unit>_http_json_call_csharp.md
+      <Unit>_http_json_service_main_test___.cs
+      <Unit>_http_json_call_main_test___.cs
+      <Unit>_http_json_test_csharp.md
+*)
+function Generate_CSharp(const Model: TPascal_Func_Model;
+  const Mode: TTargetMode;
+  const OutputFile: string): Integer;
+var
+  UnitName, OutDir: string;
+  ServiceCodeList, ServiceReadmeList: TPascalStringList;
+  CallCodeList, CallReadmeList: TPascalStringList;
+  ServiceTestList, CallTestList, TestReadmeList: TPascalStringList;
+  PathService, PathServiceReadme: string;
+  PathCall, PathCallReadme: string;
+  PathServiceTest, PathCallTest, PathTestReadme: string;
+begin
+  Result := EXIT_OK;
+
+  UnitName := Model.UnitName.Text;
+  if UnitName = '' then
+  begin
+    DoStatus('Error: Model.UnitName is empty. Cannot generate C# artifacts.');
+    Exit(EXIT_GEN_FAILED);
+  end;
+
+  OutDir := ExtractFileDir(OutputFile);
+
+  PathService       := JoinPath(OutDir, UnitName + '_http_json_service.cs');
+  PathServiceReadme := JoinPath(OutDir, UnitName + '_http_json_service_csharp.md');
+  PathCall          := JoinPath(OutDir, UnitName + '_http_json_call.cs');
+  PathCallReadme    := JoinPath(OutDir, UnitName + '_http_json_call_csharp.md');
+  PathServiceTest   := JoinPath(OutDir, UnitName + '_http_json_service_main_test___.cs');
+  PathCallTest      := JoinPath(OutDir, UnitName + '_http_json_call_main_test___.cs');
+  PathTestReadme    := JoinPath(OutDir, UnitName + '_http_json_test_csharp.md');
+
+  (* ---- Service code ---- *)
+  ServiceCodeList := GenerateHTTPServiceCsharpCode(Model);
+  try
+    if (ServiceCodeList = nil) or (not Write_Text_List(PathService, ServiceCodeList)) then
+    begin
+      DoStatus('Error: cannot write "%s".', [PathService]);
+      Exit(EXIT_GEN_FAILED);
+    end;
+    DoStatus('Wrote  : %s', [PathService]);
+  finally
+    ServiceCodeList.Free;
+  end;
+
+  (* ---- Service README ---- *)
+  ServiceReadmeList := GenerateHTTPServiceCsharpReadme(Model);
+  if ServiceReadmeList <> nil then
+  begin
+    try
+      if Write_Text_List(PathServiceReadme, ServiceReadmeList) then
+        DoStatus('Wrote  : %s', [PathServiceReadme]);
+    finally
+      ServiceReadmeList.Free;
+    end;
+  end;
+
+  (* ---- Call code ---- *)
+  CallCodeList := GenerateHTTPCallCsharpCode(Model);
+  try
+    if (CallCodeList = nil) or (not Write_Text_List(PathCall, CallCodeList)) then
+    begin
+      DoStatus('Error: cannot write "%s".', [PathCall]);
+      Exit(EXIT_GEN_FAILED);
+    end;
+    DoStatus('Wrote  : %s', [PathCall]);
+  finally
+    CallCodeList.Free;
+  end;
+
+  (* ---- Call README ---- *)
+  CallReadmeList := GenerateHTTPCallCsharpReadme(Model);
+  if CallReadmeList <> nil then
+  begin
+    try
+      if Write_Text_List(PathCallReadme, CallReadmeList) then
+        DoStatus('Wrote  : %s', [PathCallReadme]);
+    finally
+      CallReadmeList.Free;
+    end;
+  end;
+
+  (* ---- Service test program ---- *)
+  ServiceTestList := GenerateHTTPServiceCsharpTestCode(Model);
+  if ServiceTestList <> nil then
+  begin
+    try
+      if Write_Text_List(PathServiceTest, ServiceTestList) then
+        DoStatus('Wrote  : %s', [PathServiceTest]);
+    finally
+      ServiceTestList.Free;
+    end;
+  end;
+
+  (* ---- Call test program ---- *)
+  CallTestList := GenerateHTTPCallCsharpTestCode(Model);
+  if CallTestList <> nil then
+  begin
+    try
+      if Write_Text_List(PathCallTest, CallTestList) then
+        DoStatus('Wrote  : %s', [PathCallTest]);
+    finally
+      CallTestList.Free;
+    end;
+  end;
+
+  (* ---- Test README ---- *)
+  TestReadmeList := GenerateHTTPCsharpTestReadme(Model);
+  if TestReadmeList <> nil then
+  begin
+    try
+      if Write_Text_List(PathTestReadme, TestReadmeList) then
+        DoStatus('Wrote  : %s', [PathTestReadme]);
+    finally
+      TestReadmeList.Free;
+    end;
+  end;
 end;
 
 (*
@@ -742,7 +900,7 @@ begin
   if TgtLang = tlUnknown then
   begin
     DoStatus('Error: cannot detect the target language from "%s".', [OutputFile]);
-    DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c .js');
+    DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c .js .cs');
     Exit(EXIT_BAD_ARGS);
   end;
 
@@ -756,6 +914,10 @@ begin
     DoStatus('    code_decl_to_json_abi --call %s %s', [InputFile, OutputFile]);
     Exit(EXIT_BAD_ARGS);
   end;
+
+  (* C# ignores --call; the full project is always produced. *)
+  if TgtLang = tlCSharp then
+    DoStatus('Note   : C# target ignores --call; the full project will be generated.');
 
   try
     SourceText := Read_Text_File(InputFile);
@@ -817,6 +979,7 @@ begin
       tlPython:      Result := Generate_Python(Model, Mode, OutputFile);
       tlCpp:         Result := Generate_Cpp(Model, Mode, OutputFile);
       tlJavaScript:  Result := Generate_JavaScript(Model, OutputFile);
+      tlCSharp:      Result := Generate_CSharp(Model, Mode, OutputFile);
       else           Result := EXIT_GEN_FAILED;
     end;
 

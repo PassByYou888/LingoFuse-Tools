@@ -57,667 +57,338 @@ function RegisterTools: Boolean;
 function Execute_And_Reg_all: Boolean;
 
 
-function internal_call_CodeDeclToMcp_SetSourceCode_CodeDeclToMcp_SetSourceCode(Source: string; Language: string): string;
-function internal_call_CodeDeclToMcp_ConvertToPascal_CodeDeclToMcp_ConvertToPascal(): string;
-function internal_call_CodeDeclToMcp_ConvertToPython_CodeDeclToMcp_ConvertToPython(): string;
-function internal_call_CodeDeclToMcp_ConvertToCpp_CodeDeclToMcp_ConvertToCpp(): string;
-function internal_call_CodeDeclToMcp_GetLastPascalCode_CodeDeclToMcp_GetLastPascalCode(): string;
-function internal_call_CodeDeclToMcp_GetLastPascalReadme_CodeDeclToMcp_GetLastPascalReadme(): string;
-function internal_call_CodeDeclToMcp_GetLastPythonCode_CodeDeclToMcp_GetLastPythonCode(): string;
-function internal_call_CodeDeclToMcp_GetLastPythonReadme_CodeDeclToMcp_GetLastPythonReadme(): string;
-function internal_call_CodeDeclToMcp_GetLastCppHeader_CodeDeclToMcp_GetLastCppHeader(): string;
-function internal_call_CodeDeclToMcp_GetLastCppImpl_CodeDeclToMcp_GetLastCppImpl(): string;
-function internal_call_CodeDeclToMcp_GetLastCppReadme_CodeDeclToMcp_GetLastCppReadme(): string;
+function internal_call_CodeDeclToMcp_GenerateAll_CodeDeclToMcp_GenerateAll(Source: string; Language: string): string;
+function internal_call_CodeDeclToMcp_ListTargets_CodeDeclToMcp_ListTargets(): string;
+function internal_call_CodeDeclToMcp_GetTarget_CodeDeclToMcp_GetTarget(FileName: string): string;
 
 implementation
 
 uses
-  Z.Core, Z.Json, Z.PascalStrings, Z.UPascalStrings, Z.Status, Z.UnicodeMixedLib, Z.ListEngine,
-  code_decl_to_mcp_frm;
+  Forms, StdCtrls, ComCtrls, SynEdit,
+  code_decl_to_mcp_frm,
+  Z.Core, Z.Json, Z.PascalStrings, Z.UPascalStrings, Z.Status, Z.UnicodeMixedLib, Z.ListEngine;
+
+
+{$Region 'gui_bridge_'}
+// ============================================================================
+// GUI bridge helpers
+// ----------------------------------------------------------------------------
+// The three internal_* functions below are invoked on a LingoFuse worker
+// thread. Every operation they perform touches LCL controls (a TSynEdit,
+// a TComboBox and a TListView). LCL controls are not thread-safe, so all
+// GUI access is wrapped in TCompute.Sync and executed on the LCL main
+// thread.
+//
+// The bridge drives the GUI directly:
+//
+//   * The form instance is the global variable CodeDeclToMcpForm declared
+//     in unit code_decl_to_mcp_frm. This unit already references this unit
+//     through that unit's interface uses clause, so the reverse reference
+//     is placed in the implementation uses clause to form the standard
+//     FPC/Delphi circular-unit pattern.
+//
+//   * The three public workflow methods of TCodeDeclToMcpForm are called
+//     directly:
+//
+//         ParseSourceToLv0Json       (same as clicking "Next: Pascal/C -> JSON")
+//         BuildLv1ModelFromLv0Json   (same as clicking "Next: JSON <-> Model")
+//         GenerateAllArtifacts       (same as clicking "Next: generate source")
+//
+//     These are the exact methods the GUI buttons invoke, so no button
+//     Click is simulated and no control needs to be located by name.
+//
+//   * FCurrentLanguage, which decides how the source is parsed, is set by
+//     the combo box OnChange handler. Setting ItemIndex fires OnChange
+//     automatically, and the handler is invoked explicitly as a belt and
+//     braces measure in case the current index already equals the target
+//     index (in which case LCL would skip the event).
+//
+//   * The produced file list is read directly from
+//     CodeDeclToMcpForm.final_source_file_ListView: each item's Caption is
+//     the file NAME, and SubItems[0] is the absolute path on disk.
+// ============================================================================
+
+function JsonEscape(const S: string): string;
+begin
+  Result := StringReplace(S, '\', '\\', [rfReplaceAll]);
+  Result := StringReplace(Result, '"', '\"', [rfReplaceAll]);
+  Result := StringReplace(Result, #13, '\r', [rfReplaceAll]);
+  Result := StringReplace(Result, #10, '\n', [rfReplaceAll]);
+end;
+
+
+// ----------------------------------------------------------------------------
+// GUI work: generate every target from one source.
+// ----------------------------------------------------------------------------
+
+function GuiGenerateAll_OnMainThread(const Source, Language: string): string;
+var
+  LangLower: string;
+  ComboIndex, Count: integer;
+begin
+  if Source = '' then
+  begin
+    Result := '{"error":"Source is empty"}';
+    Exit;
+  end;
+
+  LangLower := LowerCase(Trim(Language));
+  ComboIndex := 0;
+  if LangLower = 'pascal' then
+    ComboIndex := 1
+  else if LangLower = 'c' then
+    ComboIndex := 2;
+
+  if ComboIndex = 0 then
+  begin
+    Result := '{"error":"Unrecognized Language; accepted values: pascal, c"}';
+    Exit;
+  end;
+
+  if CodeDeclToMcpForm = nil then
+  begin
+    Result := '{"error":"GUI form not available"}';
+    Exit;
+  end;
+
+  try
+    // Step 1: place the source text into the editor.
+    CodeDeclToMcpForm.SourceEdit.Text := Source;
+
+    // Step 2: select the source language. Setting ItemIndex normally
+    // fires OnChange, which updates FCurrentLanguage. We call the
+    // handler explicitly as well, because LCL skips OnChange when the
+    // new index equals the current one.
+    CodeDeclToMcpForm.LanguageSelectorComboBox.ItemIndex := ComboIndex;
+    CodeDeclToMcpForm.LanguageSelectorComboBoxChange(
+      CodeDeclToMcpForm.LanguageSelectorComboBox);
+
+    // Step 3: run the three workflow stages in the same order that a
+    // human user would click through the wizard.
+    CodeDeclToMcpForm.ParseSourceToLv0Json;
+    CodeDeclToMcpForm.BuildLv1ModelFromLv0Json;
+    CodeDeclToMcpForm.GenerateAllArtifacts;
+  except
+    on E: Exception do
+    begin
+      Result := '{"error":"GUI operation failed: ' +
+        JsonEscape(E.Message) + '"}';
+      Exit;
+    end;
+  end;
+
+  Count := CodeDeclToMcpForm.final_source_file_ListView.Items.Count;
+  if Count = 0 then
+    Result := '{"error":"No target files were produced; ' +
+      'the source may contain no supported routines"}'
+  else
+    Result := '{"status":"ok","count":' + IntToStr(Count) + '}';
+end;
+
+
+// ----------------------------------------------------------------------------
+// GUI work: list the target file names.
+// ----------------------------------------------------------------------------
+
+function GuiListTargets_OnMainThread: string;
+var
+  ListView: TListView;
+  i: integer;
+  First: boolean;
+  Temp: string;
+begin
+  if CodeDeclToMcpForm = nil then
+  begin
+    Result := '{"error":"GUI form not available"}';
+    Exit;
+  end;
+
+  ListView := CodeDeclToMcpForm.final_source_file_ListView;
+
+  try
+    Temp := '{"files":[';
+    First := True;
+    for i := 0 to ListView.Items.Count - 1 do
+    begin
+      if not First then
+        Temp := Temp + ',';
+      First := False;
+      Temp := Temp + '"' + JsonEscape(ListView.Items[i].Caption) + '"';
+    end;
+    Temp := Temp + '],"count":' + IntToStr(ListView.Items.Count) + '}';
+    Result := Temp;
+  except
+    on E: Exception do
+      Result := '{"error":"GUI operation failed: ' +
+        JsonEscape(E.Message) + '"}';
+  end;
+end;
+
+
+// ----------------------------------------------------------------------------
+// GUI work: read one target file by name.
+//
+// Uses the absolute path stored in the listview SubItems[0] rather than
+// relying on a selection-driven editor reload. This makes the result
+// independent of the current selection state and of the OnSelectItem
+// event's timing.
+// ----------------------------------------------------------------------------
+
+function GuiGetTarget_OnMainThread(const FileName: string): string;
+var
+  ListView: TListView;
+  i: integer;
+  Item: TListItem;
+  FullPath: string;
+  fs: TFileStream;
+  Bytes: TBytes;
+begin
+  if FileName = '' then
+  begin
+    Result := '{"error":"FileName is empty"}';
+    Exit;
+  end;
+
+  if CodeDeclToMcpForm = nil then
+  begin
+    Result := '{"error":"GUI form not available"}';
+    Exit;
+  end;
+
+  ListView := CodeDeclToMcpForm.final_source_file_ListView;
+
+  try
+    FullPath := '';
+    for i := 0 to ListView.Items.Count - 1 do
+    begin
+      Item := ListView.Items[i];
+      if Item.Caption = FileName then
+      begin
+        if Item.SubItems.Count > 0 then
+          FullPath := Item.SubItems[0];
+        Break;
+      end;
+    end;
+
+    if FullPath = '' then
+    begin
+      Result := '{"error":"FileName not in the current target set: ' +
+        JsonEscape(FileName) + '"}';
+      Exit;
+    end;
+
+    if not FileExists(FullPath) then
+    begin
+      Result := '{"error":"Target file not found on disk: ' +
+        JsonEscape(FullPath) + '"}';
+      Exit;
+    end;
+
+    fs := TFileStream.Create(FullPath, fmOpenRead or fmShareDenyNone);
+    try
+      SetLength(Bytes, fs.Size);
+      if fs.Size > 0 then
+        fs.ReadBuffer(Bytes[0], fs.Size);
+    finally
+      fs.Free;
+    end;
+
+    Result := TEncoding.UTF8.GetString(Bytes);
+  except
+    on E: Exception do
+      Result := '{"error":"GUI operation failed: ' +
+        JsonEscape(E.Message) + '"}';
+  end;
+end;
+
+{$EndRegion 'gui_bridge_'}
 
 
 // Forward declarations for all API callbacks
 function RegisterTool(const ToolDef: TZ_JsonObject): boolean; forward;
-procedure Callback_CodeDeclToMcp_SetSourceCode_CodeDeclToMcp_SetSourceCode(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_ConvertToPascal_CodeDeclToMcp_ConvertToPascal(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_ConvertToPython_CodeDeclToMcp_ConvertToPython(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_ConvertToCpp_CodeDeclToMcp_ConvertToCpp(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_GetLastPascalCode_CodeDeclToMcp_GetLastPascalCode(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_GetLastPascalReadme_CodeDeclToMcp_GetLastPascalReadme(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_GetLastPythonCode_CodeDeclToMcp_GetLastPythonCode(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_GetLastPythonReadme_CodeDeclToMcp_GetLastPythonReadme(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_GetLastCppHeader_CodeDeclToMcp_GetLastCppHeader(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_GetLastCppImpl_CodeDeclToMcp_GetLastCppImpl(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
-procedure Callback_CodeDeclToMcp_GetLastCppReadme_CodeDeclToMcp_GetLastCppReadme(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
+procedure Callback_CodeDeclToMcp_GenerateAll_CodeDeclToMcp_GenerateAll(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
+procedure Callback_CodeDeclToMcp_ListTargets_CodeDeclToMcp_ListTargets(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
+procedure Callback_CodeDeclToMcp_GetTarget_CodeDeclToMcp_GetTarget(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl; forward;
 
 
-
-// -----------------------------------------------------------------------------
-// JSON response helpers
-//
-// The generated callbacks wrap whatever these functions return inside a
-// {"result": "..."} envelope before writing it to _Out. So each of these
-// helpers returns a JSON string that is meant to be nested inside that
-// envelope; the client unwraps the outer "result" field and then parses
-// the inner JSON.
-// -----------------------------------------------------------------------------
-
-function JsonStatusOk: string;
+// ---- Internal wrapper for CodeDeclToMcp_GenerateAll ----
+// Runs on a LingoFuse worker thread. GUI access is marshalled to the LCL
+// main thread via TCompute.Sync. The worker thread blocks until the main
+// thread has finished the full generate-all pipeline.
+function internal_call_CodeDeclToMcp_GenerateAll_CodeDeclToMcp_GenerateAll(Source: string; Language: string): string;
+{$IFDEF FPC}
+  procedure Do_Sync___();
+  begin
+    Result := GuiGenerateAll_OnMainThread(Source, Language);
+  end;
+{$ELSE FPC}
 var
-  jo: TZ_JsonObject;
+  temp_: string;
+{$ENDIF FPC}
 begin
-  jo := TZ_JsonObject.Create;
-  try
-    jo.S['status'] := 'ok';
-    Result := TEncoding.UTF8.GetString(jo.ToBytes);
-  finally
-    jo.Free;
-  end;
+  Result := '';
+{$IFDEF FPC}
+  TCompute.Sync(Do_Sync___);
+{$ELSE FPC}
+  TCompute.Sync(procedure()
+  begin
+    temp_ := GuiGenerateAll_OnMainThread(Source, Language);
+  end);
+  Result := temp_;
+{$ENDIF FPC}
 end;
 
-function JsonError(const Msg: string): string;
+// ---- Internal wrapper for CodeDeclToMcp_ListTargets ----
+// Pure reader. No parameters. Runs on a LingoFuse worker thread; the
+// listview read is marshalled to the LCL main thread.
+function internal_call_CodeDeclToMcp_ListTargets_CodeDeclToMcp_ListTargets(): string;
+{$IFDEF FPC}
+  procedure Do_Sync___();
+  begin
+    Result := GuiListTargets_OnMainThread;
+  end;
+{$ELSE FPC}
 var
-  jo: TZ_JsonObject;
+  temp_: string;
+{$ENDIF FPC}
 begin
-  jo := TZ_JsonObject.Create;
-  try
-    jo.S['error'] := Msg;
-    Result := TEncoding.UTF8.GetString(jo.ToBytes);
-  finally
-    jo.Free;
-  end;
+  Result := '';
+{$IFDEF FPC}
+  TCompute.Sync(Do_Sync___);
+{$ELSE FPC}
+  TCompute.Sync(procedure()
+  begin
+    temp_ := GuiListTargets_OnMainThread;
+  end);
+  Result := temp_;
+{$ENDIF FPC}
 end;
 
-function JsonResult(const Path: string): string;
+// ---- Internal wrapper for CodeDeclToMcp_GetTarget ----
+// Pure reader. Runs on a LingoFuse worker thread; the listview lookup and
+// the file read are marshalled to the LCL main thread.
+function internal_call_CodeDeclToMcp_GetTarget_CodeDeclToMcp_GetTarget(FileName: string): string;
+{$IFDEF FPC}
+  procedure Do_Sync___();
+  begin
+    Result := GuiGetTarget_OnMainThread(FileName);
+  end;
+{$ELSE FPC}
 var
-  jo: TZ_JsonObject;
-begin
-  jo := TZ_JsonObject.Create;
-  try
-    jo.S['result'] := Path;
-    Result := TEncoding.UTF8.GetString(jo.ToBytes);
-  finally
-    jo.Free;
-  end;
-end;
-
-// -----------------------------------------------------------------------------
-// Pipeline helper
-//
-// Ensures the UI has a valid language selection before any conversion runs.
-// Returns True if it is safe to proceed.
-// -----------------------------------------------------------------------------
-function EnsureLanguageSelected: Boolean;
-begin
-  Result := (CodeDeclToMcpForm <> nil)
-        and (CodeDeclToMcpForm.LanguageSelectorComboBox.ItemIndex <> 0);
-end;
-
-
-// =============================================================================
-// Step 1 - SetSourceCode
-//
-// Mimics the human workflow: select the language in the combo box, paste the
-// source text into SourceEdit. Clears all downstream state so that the next
-// ConvertToXxx re-runs the full parse -> model -> generate pipeline.
-// =============================================================================
-function internal_call_CodeDeclToMcp_SetSourceCode_CodeDeclToMcp_SetSourceCode(Source: string; Language: string): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-    begin
-      Result := JsonError('Form not available');
-      Exit;
-    end;
-
-    if SameText(Language, 'pascal') then
-    begin
-      CodeDeclToMcpForm.LanguageSelectorComboBox.ItemIndex := 1;
-      CodeDeclToMcpForm.LanguageSelectorComboBoxChange(CodeDeclToMcpForm.LanguageSelectorComboBox);
-    end
-    else if SameText(Language, 'c') then
-    begin
-      CodeDeclToMcpForm.LanguageSelectorComboBox.ItemIndex := 2;
-      CodeDeclToMcpForm.LanguageSelectorComboBoxChange(CodeDeclToMcpForm.LanguageSelectorComboBox);
-    end
-    else
-    begin
-      Result := JsonError('Unsupported language. Use pascal or c.');
-      Exit;
-    end;
-
-    CodeDeclToMcpForm.SourceEdit.Text := Source;
-
-    // Clear downstream state: the next ConvertToXxx must rebuild the pipeline.
-    CodeDeclToMcpForm.SourceJsonEdit.Text := '';
-    CodeDeclToMcpForm.ModelJsonEdit.Text := '';
-    CodeDeclToMcpForm.FinalPascalSourceEdit.Text := '';
-    CodeDeclToMcpForm.FinalPascalReadmeEdit.Text := '';
-    CodeDeclToMcpForm.FinalPythonSourceEdit.Text := '';
-    CodeDeclToMcpForm.FinalPythonReadmeEdit.Text := '';
-    CodeDeclToMcpForm.FinalCppHeaderEdit.Text := '';
-    CodeDeclToMcpForm.FinalCppImplEdit.Text := '';
-    CodeDeclToMcpForm.FinalCppReadmeEdit.Text := '';
-
-    Result := JsonStatusOk;
-  end;
-{$ELSE FPC}
-var temp_: string;
+  temp_: string;
 {$ENDIF FPC}
 begin
+  Result := '';
 {$IFDEF FPC}
   TCompute.Sync(Do_Sync___);
 {$ELSE FPC}
   TCompute.Sync(procedure()
   begin
-    if CodeDeclToMcpForm = nil then
-    begin
-      temp_ := JsonError('Form not available');
-      Exit;
-    end;
-
-    if SameText(Language, 'pascal') then
-    begin
-      CodeDeclToMcpForm.LanguageSelectorComboBox.ItemIndex := 1;
-      CodeDeclToMcpForm.LanguageSelectorComboBoxChange(CodeDeclToMcpForm.LanguageSelectorComboBox);
-    end
-    else if SameText(Language, 'c') then
-    begin
-      CodeDeclToMcpForm.LanguageSelectorComboBox.ItemIndex := 2;
-      CodeDeclToMcpForm.LanguageSelectorComboBoxChange(CodeDeclToMcpForm.LanguageSelectorComboBox);
-    end
-    else
-    begin
-      temp_ := JsonError('Unsupported language. Use pascal or c.');
-      Exit;
-    end;
-
-    CodeDeclToMcpForm.SourceEdit.Text := Source;
-
-    CodeDeclToMcpForm.SourceJsonEdit.Text := '';
-    CodeDeclToMcpForm.ModelJsonEdit.Text := '';
-    CodeDeclToMcpForm.FinalPascalSourceEdit.Text := '';
-    CodeDeclToMcpForm.FinalPascalReadmeEdit.Text := '';
-    CodeDeclToMcpForm.FinalPythonSourceEdit.Text := '';
-    CodeDeclToMcpForm.FinalPythonReadmeEdit.Text := '';
-    CodeDeclToMcpForm.FinalCppHeaderEdit.Text := '';
-    CodeDeclToMcpForm.FinalCppImplEdit.Text := '';
-    CodeDeclToMcpForm.FinalCppReadmeEdit.Text := '';
-
-    temp_ := JsonStatusOk;
+    temp_ := GuiGetTarget_OnMainThread(FileName);
   end);
   Result := temp_;
 {$ENDIF FPC}
 end;
-
-// =============================================================================
-// Step 2 - ConvertToPascal
-//
-// Mimics the human workflow: click "下一步: 生成源码", then switch the final
-// page control to the Pascal tab. Returns the absolute path of the generated
-// provider unit, read back from FinalPascalSourceEdit.Hint.
-// =============================================================================
-function internal_call_CodeDeclToMcp_ConvertToPascal_CodeDeclToMcp_ConvertToPascal(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-    begin
-      Result := JsonError('Form not available');
-      Exit;
-    end;
-
-    if CodeDeclToMcpForm.SourceEdit.Text = '' then
-    begin
-      Result := JsonError('No source set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    if not EnsureLanguageSelected then
-    begin
-      Result := JsonError('Source language not set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    try
-      CodeDeclToMcpForm.ParseSourceToLv0Json;
-      CodeDeclToMcpForm.BuildLv1ModelFromLv0Json;
-      CodeDeclToMcpForm.GenerateAllArtifacts;
-    except
-      on E: Exception do
-      begin
-        Result := JsonError('ConvertToPascal failed: ' + E.Message);
-        Exit;
-      end;
-    end;
-
-    // Switch the final page control to the Pascal tab so the user sees it too.
-    CodeDeclToMcpForm.FinalSourcePageControl.ActivePage := CodeDeclToMcpForm.FinalPascalTab;
-
-    Result := JsonResult(CodeDeclToMcpForm.FinalPascalSourceEdit.Hint);
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-    begin
-      temp_ := JsonError('Form not available');
-      Exit;
-    end;
-
-    if CodeDeclToMcpForm.SourceEdit.Text = '' then
-    begin
-      temp_ := JsonError('No source set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    if not EnsureLanguageSelected then
-    begin
-      temp_ := JsonError('Source language not set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    try
-      CodeDeclToMcpForm.ParseSourceToLv0Json;
-      CodeDeclToMcpForm.BuildLv1ModelFromLv0Json;
-      CodeDeclToMcpForm.GenerateAllArtifacts;
-    except
-      on E: Exception do
-      begin
-        temp_ := JsonError('ConvertToPascal failed: ' + E.Message);
-        Exit;
-      end;
-    end;
-
-    CodeDeclToMcpForm.FinalSourcePageControl.ActivePage := CodeDeclToMcpForm.FinalPascalTab;
-
-    temp_ := JsonResult(CodeDeclToMcpForm.FinalPascalSourceEdit.Hint);
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
-// =============================================================================
-// Step 2 - ConvertToPython
-// =============================================================================
-function internal_call_CodeDeclToMcp_ConvertToPython_CodeDeclToMcp_ConvertToPython(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-    begin
-      Result := JsonError('Form not available');
-      Exit;
-    end;
-
-    if CodeDeclToMcpForm.SourceEdit.Text = '' then
-    begin
-      Result := JsonError('No source set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    if not EnsureLanguageSelected then
-    begin
-      Result := JsonError('Source language not set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    try
-      CodeDeclToMcpForm.ParseSourceToLv0Json;
-      CodeDeclToMcpForm.BuildLv1ModelFromLv0Json;
-      CodeDeclToMcpForm.GenerateAllArtifacts;
-    except
-      on E: Exception do
-      begin
-        Result := JsonError('ConvertToPython failed: ' + E.Message);
-        Exit;
-      end;
-    end;
-
-    CodeDeclToMcpForm.FinalSourcePageControl.ActivePage := CodeDeclToMcpForm.FinalPythonTab;
-
-    Result := JsonResult(CodeDeclToMcpForm.FinalPythonSourceEdit.Hint);
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-    begin
-      temp_ := JsonError('Form not available');
-      Exit;
-    end;
-
-    if CodeDeclToMcpForm.SourceEdit.Text = '' then
-    begin
-      temp_ := JsonError('No source set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    if not EnsureLanguageSelected then
-    begin
-      temp_ := JsonError('Source language not set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    try
-      CodeDeclToMcpForm.ParseSourceToLv0Json;
-      CodeDeclToMcpForm.BuildLv1ModelFromLv0Json;
-      CodeDeclToMcpForm.GenerateAllArtifacts;
-    except
-      on E: Exception do
-      begin
-        temp_ := JsonError('ConvertToPython failed: ' + E.Message);
-        Exit;
-      end;
-    end;
-
-    CodeDeclToMcpForm.FinalSourcePageControl.ActivePage := CodeDeclToMcpForm.FinalPythonTab;
-
-    temp_ := JsonResult(CodeDeclToMcpForm.FinalPythonSourceEdit.Hint);
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
-// =============================================================================
-// Step 2 - ConvertToCpp
-// =============================================================================
-function internal_call_CodeDeclToMcp_ConvertToCpp_CodeDeclToMcp_ConvertToCpp(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-    begin
-      Result := JsonError('Form not available');
-      Exit;
-    end;
-
-    if CodeDeclToMcpForm.SourceEdit.Text = '' then
-    begin
-      Result := JsonError('No source set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    if not EnsureLanguageSelected then
-    begin
-      Result := JsonError('Source language not set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    try
-      CodeDeclToMcpForm.ParseSourceToLv0Json;
-      CodeDeclToMcpForm.BuildLv1ModelFromLv0Json;
-      CodeDeclToMcpForm.GenerateAllArtifacts;
-    except
-      on E: Exception do
-      begin
-        Result := JsonError('ConvertToCpp failed: ' + E.Message);
-        Exit;
-      end;
-    end;
-
-    CodeDeclToMcpForm.FinalSourcePageControl.ActivePage := CodeDeclToMcpForm.FinalCppTab;
-
-    Result := JsonResult(CodeDeclToMcpForm.FinalCppHeaderEdit.Hint);
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-    begin
-      temp_ := JsonError('Form not available');
-      Exit;
-    end;
-
-    if CodeDeclToMcpForm.SourceEdit.Text = '' then
-    begin
-      temp_ := JsonError('No source set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    if not EnsureLanguageSelected then
-    begin
-      temp_ := JsonError('Source language not set. Call CodeDeclToMcp_SetSourceCode first.');
-      Exit;
-    end;
-
-    try
-      CodeDeclToMcpForm.ParseSourceToLv0Json;
-      CodeDeclToMcpForm.BuildLv1ModelFromLv0Json;
-      CodeDeclToMcpForm.GenerateAllArtifacts;
-    except
-      on E: Exception do
-      begin
-        temp_ := JsonError('ConvertToCpp failed: ' + E.Message);
-        Exit;
-      end;
-    end;
-
-    CodeDeclToMcpForm.FinalSourcePageControl.ActivePage := CodeDeclToMcpForm.FinalCppTab;
-
-    temp_ := JsonResult(CodeDeclToMcpForm.FinalCppHeaderEdit.Hint);
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
-// =============================================================================
-// Step 3 - Pascal readers
-// =============================================================================
-function internal_call_CodeDeclToMcp_GetLastPascalCode_CodeDeclToMcp_GetLastPascalCode(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-      Result := ''
-    else
-      Result := CodeDeclToMcpForm.FinalPascalSourceEdit.Text;
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-      temp_ := ''
-    else
-      temp_ := CodeDeclToMcpForm.FinalPascalSourceEdit.Text;
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
-function internal_call_CodeDeclToMcp_GetLastPascalReadme_CodeDeclToMcp_GetLastPascalReadme(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-      Result := ''
-    else
-      Result := CodeDeclToMcpForm.FinalPascalReadmeEdit.Text;
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-      temp_ := ''
-    else
-      temp_ := CodeDeclToMcpForm.FinalPascalReadmeEdit.Text;
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
-// =============================================================================
-// Step 3 - Python readers
-// =============================================================================
-function internal_call_CodeDeclToMcp_GetLastPythonCode_CodeDeclToMcp_GetLastPythonCode(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-      Result := ''
-    else
-      Result := CodeDeclToMcpForm.FinalPythonSourceEdit.Text;
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-      temp_ := ''
-    else
-      temp_ := CodeDeclToMcpForm.FinalPythonSourceEdit.Text;
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
-function internal_call_CodeDeclToMcp_GetLastPythonReadme_CodeDeclToMcp_GetLastPythonReadme(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-      Result := ''
-    else
-      Result := CodeDeclToMcpForm.FinalPythonReadmeEdit.Text;
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-      temp_ := ''
-    else
-      temp_ := CodeDeclToMcpForm.FinalPythonReadmeEdit.Text;
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
-// =============================================================================
-// Step 3 - C++ readers
-// =============================================================================
-function internal_call_CodeDeclToMcp_GetLastCppHeader_CodeDeclToMcp_GetLastCppHeader(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-      Result := ''
-    else
-      Result := CodeDeclToMcpForm.FinalCppHeaderEdit.Text;
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-      temp_ := ''
-    else
-      temp_ := CodeDeclToMcpForm.FinalCppHeaderEdit.Text;
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
-function internal_call_CodeDeclToMcp_GetLastCppImpl_CodeDeclToMcp_GetLastCppImpl(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-      Result := ''
-    else
-      Result := CodeDeclToMcpForm.FinalCppImplEdit.Text;
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-      temp_ := ''
-    else
-      temp_ := CodeDeclToMcpForm.FinalCppImplEdit.Text;
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
-function internal_call_CodeDeclToMcp_GetLastCppReadme_CodeDeclToMcp_GetLastCppReadme(): string;
-{$IFDEF FPC}
-  procedure Do_Sync___();
-  begin
-    if CodeDeclToMcpForm = nil then
-      Result := ''
-    else
-      Result := CodeDeclToMcpForm.FinalCppReadmeEdit.Text;
-  end;
-{$ELSE FPC}
-var temp_: string;
-{$ENDIF FPC}
-begin
-{$IFDEF FPC}
-  TCompute.Sync(Do_Sync___);
-{$ELSE FPC}
-  TCompute.Sync(procedure()
-  begin
-    if CodeDeclToMcpForm = nil then
-      temp_ := ''
-    else
-      temp_ := CodeDeclToMcpForm.FinalCppReadmeEdit.Text;
-  end);
-  Result := temp_;
-{$ENDIF FPC}
-end;
-
 
 
 {$Region 'internal_'}
@@ -771,8 +442,8 @@ end;
 
 {$EndRegion 'internal_'}
 {$Region 'callback_'}
-// ---- CodeDeclToMcp_SetSourceCode (API: CodeDeclToMcp_SetSourceCode) ----
-procedure Callback_CodeDeclToMcp_SetSourceCode_CodeDeclToMcp_SetSourceCode(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
+// ---- CodeDeclToMcp_GenerateAll (API: CodeDeclToMcp_GenerateAll) ----
+procedure Callback_CodeDeclToMcp_GenerateAll_CodeDeclToMcp_GenerateAll(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
 var
   jsonBytes: TBytes;
   jo: TZ_JsonObject;
@@ -785,7 +456,7 @@ begin
   try
     jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
     if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_SetSourceCode] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
+      DoStatus('[CodeDeclToMcp_GenerateAll] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
 
     if Length(jsonBytes) = 0 then
     begin
@@ -795,8 +466,8 @@ begin
       LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
       if DEBUG_LOG then
       begin
-        DoStatus('[CodeDeclToMcp_SetSourceCode] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_SetSourceCode] Error: ' + errMsg);
+        DoStatus('[CodeDeclToMcp_GenerateAll] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToMcp_GenerateAll] Error: ' + errMsg);
       end;
       Exit;
     end;
@@ -808,22 +479,22 @@ begin
       LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
       if DEBUG_LOG then
       begin
-        DoStatus('[CodeDeclToMcp_SetSourceCode] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_SetSourceCode] Error: ' + errMsg);
+        DoStatus('[CodeDeclToMcp_GenerateAll] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToMcp_GenerateAll] Error: ' + errMsg);
       end;
       Exit;
     end;
     Source := jo.S['Source'];
     Language := jo.S['Language'];
 
-    ret := internal_call_CodeDeclToMcp_SetSourceCode_CodeDeclToMcp_SetSourceCode(Source, Language);
+    ret := internal_call_CodeDeclToMcp_GenerateAll_CodeDeclToMcp_GenerateAll(Source, Language);
     jo.Clear;
     jo.S['result'] := ret;
     LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
     if DEBUG_LOG then
     begin
-      DoStatus('[CodeDeclToMcp_SetSourceCode] called with %s -> result: %s', [Source, Language, ret2str(ret)]);
-      SendLogAsync(PFormat('[CodeDeclToMcp_SetSourceCode] called with %s', [Source, Language]) + ' -> result: ' + ret2str(ret));
+      DoStatus('[CodeDeclToMcp_GenerateAll] called with %s -> result: %s', [Source, Language, ret2str(ret)]);
+      SendLogAsync(PFormat('[CodeDeclToMcp_GenerateAll] called with %s', [Source, Language]) + ' -> result: ' + ret2str(ret));
     end;
   except
     on E: Exception do
@@ -833,16 +504,16 @@ begin
       LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
       if DEBUG_LOG then
       begin
-        DoStatus('[CodeDeclToMcp_SetSourceCode] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_SetSourceCode] Exception: ' + E.Message);
+        DoStatus('[CodeDeclToMcp_GenerateAll] Exception: %s', [E.Message]);
+        SendLogAsync('[CodeDeclToMcp_GenerateAll] Exception: ' + E.Message);
       end;
     end;
   end;
   jo.Free;
 end;
 
-// ---- CodeDeclToMcp_ConvertToPascal (API: CodeDeclToMcp_ConvertToPascal) ----
-procedure Callback_CodeDeclToMcp_ConvertToPascal_CodeDeclToMcp_ConvertToPascal(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
+// ---- CodeDeclToMcp_ListTargets (API: CodeDeclToMcp_ListTargets) ----
+procedure Callback_CodeDeclToMcp_ListTargets_CodeDeclToMcp_ListTargets(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
 var
   jsonBytes: TBytes;
   jo: TZ_JsonObject;
@@ -853,7 +524,7 @@ begin
   try
     jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
     if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_ConvertToPascal] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
+      DoStatus('[CodeDeclToMcp_ListTargets] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
 
     if Length(jsonBytes) = 0 then
     begin
@@ -863,8 +534,8 @@ begin
       LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
       if DEBUG_LOG then
       begin
-        DoStatus('[CodeDeclToMcp_ConvertToPascal] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_ConvertToPascal] Error: ' + errMsg);
+        DoStatus('[CodeDeclToMcp_ListTargets] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToMcp_ListTargets] Error: ' + errMsg);
       end;
       Exit;
     end;
@@ -876,20 +547,20 @@ begin
       LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
       if DEBUG_LOG then
       begin
-        DoStatus('[CodeDeclToMcp_ConvertToPascal] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_ConvertToPascal] Error: ' + errMsg);
+        DoStatus('[CodeDeclToMcp_ListTargets] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToMcp_ListTargets] Error: ' + errMsg);
       end;
       Exit;
     end;
     // No parameters
-    ret := internal_call_CodeDeclToMcp_ConvertToPascal_CodeDeclToMcp_ConvertToPascal();
+    ret := internal_call_CodeDeclToMcp_ListTargets_CodeDeclToMcp_ListTargets();
     jo.Clear;
     jo.S['result'] := ret;
     LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
     if DEBUG_LOG then
     begin
-      DoStatus('[CodeDeclToMcp_ConvertToPascal] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_ConvertToPascal] called (no params) -> result: ' + ret2str(ret));
+      DoStatus('[CodeDeclToMcp_ListTargets] called (no params) -> result: %s', [ret2str(ret)]);
+      SendLogAsync('[CodeDeclToMcp_ListTargets] called (no params) -> result: ' + ret2str(ret));
     end;
   except
     on E: Exception do
@@ -899,19 +570,20 @@ begin
       LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
       if DEBUG_LOG then
       begin
-        DoStatus('[CodeDeclToMcp_ConvertToPascal] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_ConvertToPascal] Exception: ' + E.Message);
+        DoStatus('[CodeDeclToMcp_ListTargets] Exception: %s', [E.Message]);
+        SendLogAsync('[CodeDeclToMcp_ListTargets] Exception: ' + E.Message);
       end;
     end;
   end;
   jo.Free;
 end;
 
-// ---- CodeDeclToMcp_ConvertToPython (API: CodeDeclToMcp_ConvertToPython) ----
-procedure Callback_CodeDeclToMcp_ConvertToPython_CodeDeclToMcp_ConvertToPython(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
+// ---- CodeDeclToMcp_GetTarget (API: CodeDeclToMcp_GetTarget) ----
+procedure Callback_CodeDeclToMcp_GetTarget_CodeDeclToMcp_GetTarget(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
 var
   jsonBytes: TBytes;
   jo: TZ_JsonObject;
+  FileName: string;
   ret: string;
   errMsg: string;
 begin
@@ -919,7 +591,7 @@ begin
   try
     jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
     if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_ConvertToPython] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
+      DoStatus('[CodeDeclToMcp_GetTarget] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
 
     if Length(jsonBytes) = 0 then
     begin
@@ -929,8 +601,8 @@ begin
       LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
       if DEBUG_LOG then
       begin
-        DoStatus('[CodeDeclToMcp_ConvertToPython] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_ConvertToPython] Error: ' + errMsg);
+        DoStatus('[CodeDeclToMcp_GetTarget] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToMcp_GetTarget] Error: ' + errMsg);
       end;
       Exit;
     end;
@@ -942,20 +614,21 @@ begin
       LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
       if DEBUG_LOG then
       begin
-        DoStatus('[CodeDeclToMcp_ConvertToPython] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_ConvertToPython] Error: ' + errMsg);
+        DoStatus('[CodeDeclToMcp_GetTarget] Error: %s', [errMsg]);
+        SendLogAsync('[CodeDeclToMcp_GetTarget] Error: ' + errMsg);
       end;
       Exit;
     end;
-    // No parameters
-    ret := internal_call_CodeDeclToMcp_ConvertToPython_CodeDeclToMcp_ConvertToPython();
+    FileName := jo.S['FileName'];
+
+    ret := internal_call_CodeDeclToMcp_GetTarget_CodeDeclToMcp_GetTarget(FileName);
     jo.Clear;
     jo.S['result'] := ret;
     LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
     if DEBUG_LOG then
     begin
-      DoStatus('[CodeDeclToMcp_ConvertToPython] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_ConvertToPython] called (no params) -> result: ' + ret2str(ret));
+      DoStatus('[CodeDeclToMcp_GetTarget] called with %s -> result: %s', [FileName, ret2str(ret)]);
+      SendLogAsync(PFormat('[CodeDeclToMcp_GetTarget] called with %s', [FileName]) + ' -> result: ' + ret2str(ret));
     end;
   except
     on E: Exception do
@@ -965,536 +638,8 @@ begin
       LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
       if DEBUG_LOG then
       begin
-        DoStatus('[CodeDeclToMcp_ConvertToPython] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_ConvertToPython] Exception: ' + E.Message);
-      end;
-    end;
-  end;
-  jo.Free;
-end;
-
-// ---- CodeDeclToMcp_ConvertToCpp (API: CodeDeclToMcp_ConvertToCpp) ----
-procedure Callback_CodeDeclToMcp_ConvertToCpp_CodeDeclToMcp_ConvertToCpp(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
-var
-  jsonBytes: TBytes;
-  jo: TZ_JsonObject;
-  ret: string;
-  errMsg: string;
-begin
-  jo := TZ_JsonObject.Create;
-  try
-    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
-    if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_ConvertToCpp] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
-
-    if Length(jsonBytes) = 0 then
-    begin
-      errMsg := 'Empty input';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_ConvertToCpp] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_ConvertToCpp] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    if not jo.Parae(jsonBytes) then
-    begin
-      errMsg := 'Invalid JSON';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_ConvertToCpp] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_ConvertToCpp] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    // No parameters
-    ret := internal_call_CodeDeclToMcp_ConvertToCpp_CodeDeclToMcp_ConvertToCpp();
-    jo.Clear;
-    jo.S['result'] := ret;
-    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-    if DEBUG_LOG then
-    begin
-      DoStatus('[CodeDeclToMcp_ConvertToCpp] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_ConvertToCpp] called (no params) -> result: ' + ret2str(ret));
-    end;
-  except
-    on E: Exception do
-    begin
-      jo.Clear;
-      jo.S['error'] := E.Message;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_ConvertToCpp] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_ConvertToCpp] Exception: ' + E.Message);
-      end;
-    end;
-  end;
-  jo.Free;
-end;
-
-// ---- CodeDeclToMcp_GetLastPascalCode (API: CodeDeclToMcp_GetLastPascalCode) ----
-procedure Callback_CodeDeclToMcp_GetLastPascalCode_CodeDeclToMcp_GetLastPascalCode(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
-var
-  jsonBytes: TBytes;
-  jo: TZ_JsonObject;
-  ret: string;
-  errMsg: string;
-begin
-  jo := TZ_JsonObject.Create;
-  try
-    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
-    if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_GetLastPascalCode] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
-
-    if Length(jsonBytes) = 0 then
-    begin
-      errMsg := 'Empty input';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPascalCode] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPascalCode] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    if not jo.Parae(jsonBytes) then
-    begin
-      errMsg := 'Invalid JSON';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPascalCode] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPascalCode] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    // No parameters
-    ret := internal_call_CodeDeclToMcp_GetLastPascalCode_CodeDeclToMcp_GetLastPascalCode();
-    jo.Clear;
-    jo.S['result'] := ret;
-    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-    if DEBUG_LOG then
-    begin
-      DoStatus('[CodeDeclToMcp_GetLastPascalCode] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_GetLastPascalCode] called (no params) -> result: ' + ret2str(ret));
-    end;
-  except
-    on E: Exception do
-    begin
-      jo.Clear;
-      jo.S['error'] := E.Message;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPascalCode] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPascalCode] Exception: ' + E.Message);
-      end;
-    end;
-  end;
-  jo.Free;
-end;
-
-// ---- CodeDeclToMcp_GetLastPascalReadme (API: CodeDeclToMcp_GetLastPascalReadme) ----
-procedure Callback_CodeDeclToMcp_GetLastPascalReadme_CodeDeclToMcp_GetLastPascalReadme(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
-var
-  jsonBytes: TBytes;
-  jo: TZ_JsonObject;
-  ret: string;
-  errMsg: string;
-begin
-  jo := TZ_JsonObject.Create;
-  try
-    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
-    if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_GetLastPascalReadme] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
-
-    if Length(jsonBytes) = 0 then
-    begin
-      errMsg := 'Empty input';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPascalReadme] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPascalReadme] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    if not jo.Parae(jsonBytes) then
-    begin
-      errMsg := 'Invalid JSON';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPascalReadme] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPascalReadme] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    // No parameters
-    ret := internal_call_CodeDeclToMcp_GetLastPascalReadme_CodeDeclToMcp_GetLastPascalReadme();
-    jo.Clear;
-    jo.S['result'] := ret;
-    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-    if DEBUG_LOG then
-    begin
-      DoStatus('[CodeDeclToMcp_GetLastPascalReadme] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_GetLastPascalReadme] called (no params) -> result: ' + ret2str(ret));
-    end;
-  except
-    on E: Exception do
-    begin
-      jo.Clear;
-      jo.S['error'] := E.Message;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPascalReadme] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPascalReadme] Exception: ' + E.Message);
-      end;
-    end;
-  end;
-  jo.Free;
-end;
-
-// ---- CodeDeclToMcp_GetLastPythonCode (API: CodeDeclToMcp_GetLastPythonCode) ----
-procedure Callback_CodeDeclToMcp_GetLastPythonCode_CodeDeclToMcp_GetLastPythonCode(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
-var
-  jsonBytes: TBytes;
-  jo: TZ_JsonObject;
-  ret: string;
-  errMsg: string;
-begin
-  jo := TZ_JsonObject.Create;
-  try
-    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
-    if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_GetLastPythonCode] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
-
-    if Length(jsonBytes) = 0 then
-    begin
-      errMsg := 'Empty input';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPythonCode] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPythonCode] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    if not jo.Parae(jsonBytes) then
-    begin
-      errMsg := 'Invalid JSON';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPythonCode] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPythonCode] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    // No parameters
-    ret := internal_call_CodeDeclToMcp_GetLastPythonCode_CodeDeclToMcp_GetLastPythonCode();
-    jo.Clear;
-    jo.S['result'] := ret;
-    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-    if DEBUG_LOG then
-    begin
-      DoStatus('[CodeDeclToMcp_GetLastPythonCode] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_GetLastPythonCode] called (no params) -> result: ' + ret2str(ret));
-    end;
-  except
-    on E: Exception do
-    begin
-      jo.Clear;
-      jo.S['error'] := E.Message;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPythonCode] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPythonCode] Exception: ' + E.Message);
-      end;
-    end;
-  end;
-  jo.Free;
-end;
-
-// ---- CodeDeclToMcp_GetLastPythonReadme (API: CodeDeclToMcp_GetLastPythonReadme) ----
-procedure Callback_CodeDeclToMcp_GetLastPythonReadme_CodeDeclToMcp_GetLastPythonReadme(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
-var
-  jsonBytes: TBytes;
-  jo: TZ_JsonObject;
-  ret: string;
-  errMsg: string;
-begin
-  jo := TZ_JsonObject.Create;
-  try
-    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
-    if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_GetLastPythonReadme] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
-
-    if Length(jsonBytes) = 0 then
-    begin
-      errMsg := 'Empty input';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPythonReadme] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPythonReadme] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    if not jo.Parae(jsonBytes) then
-    begin
-      errMsg := 'Invalid JSON';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPythonReadme] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPythonReadme] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    // No parameters
-    ret := internal_call_CodeDeclToMcp_GetLastPythonReadme_CodeDeclToMcp_GetLastPythonReadme();
-    jo.Clear;
-    jo.S['result'] := ret;
-    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-    if DEBUG_LOG then
-    begin
-      DoStatus('[CodeDeclToMcp_GetLastPythonReadme] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_GetLastPythonReadme] called (no params) -> result: ' + ret2str(ret));
-    end;
-  except
-    on E: Exception do
-    begin
-      jo.Clear;
-      jo.S['error'] := E.Message;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastPythonReadme] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_GetLastPythonReadme] Exception: ' + E.Message);
-      end;
-    end;
-  end;
-  jo.Free;
-end;
-
-// ---- CodeDeclToMcp_GetLastCppHeader (API: CodeDeclToMcp_GetLastCppHeader) ----
-procedure Callback_CodeDeclToMcp_GetLastCppHeader_CodeDeclToMcp_GetLastCppHeader(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
-var
-  jsonBytes: TBytes;
-  jo: TZ_JsonObject;
-  ret: string;
-  errMsg: string;
-begin
-  jo := TZ_JsonObject.Create;
-  try
-    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
-    if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_GetLastCppHeader] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
-
-    if Length(jsonBytes) = 0 then
-    begin
-      errMsg := 'Empty input';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastCppHeader] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastCppHeader] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    if not jo.Parae(jsonBytes) then
-    begin
-      errMsg := 'Invalid JSON';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastCppHeader] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastCppHeader] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    // No parameters
-    ret := internal_call_CodeDeclToMcp_GetLastCppHeader_CodeDeclToMcp_GetLastCppHeader();
-    jo.Clear;
-    jo.S['result'] := ret;
-    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-    if DEBUG_LOG then
-    begin
-      DoStatus('[CodeDeclToMcp_GetLastCppHeader] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_GetLastCppHeader] called (no params) -> result: ' + ret2str(ret));
-    end;
-  except
-    on E: Exception do
-    begin
-      jo.Clear;
-      jo.S['error'] := E.Message;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastCppHeader] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_GetLastCppHeader] Exception: ' + E.Message);
-      end;
-    end;
-  end;
-  jo.Free;
-end;
-
-// ---- CodeDeclToMcp_GetLastCppImpl (API: CodeDeclToMcp_GetLastCppImpl) ----
-procedure Callback_CodeDeclToMcp_GetLastCppImpl_CodeDeclToMcp_GetLastCppImpl(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
-var
-  jsonBytes: TBytes;
-  jo: TZ_JsonObject;
-  ret: string;
-  errMsg: string;
-begin
-  jo := TZ_JsonObject.Create;
-  try
-    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
-    if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_GetLastCppImpl] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
-
-    if Length(jsonBytes) = 0 then
-    begin
-      errMsg := 'Empty input';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastCppImpl] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastCppImpl] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    if not jo.Parae(jsonBytes) then
-    begin
-      errMsg := 'Invalid JSON';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastCppImpl] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastCppImpl] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    // No parameters
-    ret := internal_call_CodeDeclToMcp_GetLastCppImpl_CodeDeclToMcp_GetLastCppImpl();
-    jo.Clear;
-    jo.S['result'] := ret;
-    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-    if DEBUG_LOG then
-    begin
-      DoStatus('[CodeDeclToMcp_GetLastCppImpl] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_GetLastCppImpl] called (no params) -> result: ' + ret2str(ret));
-    end;
-  except
-    on E: Exception do
-    begin
-      jo.Clear;
-      jo.S['error'] := E.Message;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastCppImpl] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_GetLastCppImpl] Exception: ' + E.Message);
-      end;
-    end;
-  end;
-  jo.Free;
-end;
-
-// ---- CodeDeclToMcp_GetLastCppReadme (API: CodeDeclToMcp_GetLastCppReadme) ----
-procedure Callback_CodeDeclToMcp_GetLastCppReadme_CodeDeclToMcp_GetLastCppReadme(_Trigger___: Pointer; _In___, _Out___: TDataHnd___); cdecl;
-var
-  jsonBytes: TBytes;
-  jo: TZ_JsonObject;
-  ret: string;
-  errMsg: string;
-begin
-  jo := TZ_JsonObject.Create;
-  try
-    jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
-    if DEBUG_LOG then
-      DoStatus('[CodeDeclToMcp_GetLastCppReadme] Input JSON: %s', [TEncoding.UTF8.GetString(jsonBytes)]);
-
-    if Length(jsonBytes) = 0 then
-    begin
-      errMsg := 'Empty input';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastCppReadme] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastCppReadme] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    if not jo.Parae(jsonBytes) then
-    begin
-      errMsg := 'Invalid JSON';
-      jo.Clear;
-      jo.S['error'] := errMsg;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastCppReadme] Error: %s', [errMsg]);
-        SendLogAsync('[CodeDeclToMcp_GetLastCppReadme] Error: ' + errMsg);
-      end;
-      Exit;
-    end;
-    // No parameters
-    ret := internal_call_CodeDeclToMcp_GetLastCppReadme_CodeDeclToMcp_GetLastCppReadme();
-    jo.Clear;
-    jo.S['result'] := ret;
-    LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-    if DEBUG_LOG then
-    begin
-      DoStatus('[CodeDeclToMcp_GetLastCppReadme] called (no params) -> result: %s', [ret2str(ret)]);
-      SendLogAsync('[CodeDeclToMcp_GetLastCppReadme] called (no params) -> result: ' + ret2str(ret));
-    end;
-  except
-    on E: Exception do
-    begin
-      jo.Clear;
-      jo.S['error'] := E.Message;
-      LF_WriteStringBytes(TDataHnd(_Out___), jo.ToBytes);
-      if DEBUG_LOG then
-      begin
-        DoStatus('[CodeDeclToMcp_GetLastCppReadme] Exception: %s', [E.Message]);
-        SendLogAsync('[CodeDeclToMcp_GetLastCppReadme] Exception: ' + E.Message);
+        DoStatus('[CodeDeclToMcp_GetTarget] Exception: %s', [E.Message]);
+        SendLogAsync('[CodeDeclToMcp_GetTarget] Exception: ' + E.Message);
       end;
     end;
   end;
@@ -1579,23 +724,23 @@ begin
   if DEBUG_LOG then
     DoStatus('[RegisterTools] Beacon is available. Starting tool registration...');
   try
-    // Tool: CodeDeclToMcp_SetSourceCode -> CodeDeclToMcp_SetSourceCode
+    // Tool: CodeDeclToMcp_GenerateAll -> CodeDeclToMcp_GenerateAll
     ToolDef := TZ_JsonObject.Create;
     try
-      ToolDef.S['name'] := 'CodeDeclToMcp_SetSourceCode';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 1/3 - Store source text. Does NOT convert. Stores the source text and its SOURCE language into the generator. This is a setup call: it does NOT produce any output file and does NOT decide which target language will be generated. After this call succeeds you MUST invoke exactly one of the Step 2 tools to actually produce a result: CodeDeclToMcp_ConvertToPascal CodeDeclToMcp_ConvertToPython CodeDeclToMcp_ConvertToCpp The stored source stays in effect for the rest of the session. To switch target languages you do NOT call this tool again; you just call another Step 2 tool. Source: complete source text. For Language='#39'pascal'#39' pass a full Pascal unit that starts with a unit declaration and contains an interface section. For Language='#39'c'#39' pass a full C header that starts with the include guard and contains the function prototypes. Language: the SOURCE language of the text passed in Source. Accepted values are '#39'pascal'#39' and '#39'c'#39' only, compared case-insensitively. Do NOT pass a target language such as '#39'python'#39' or '#39'cpp'#39'; the target language is selected by calling the corresponding CodeDeclToMcp_ConvertToXxx tool in Step 2. Return value: JSON string. On success: {"status":"ok"}. On failure: {"error":"<message>"}. )';
+      ToolDef.S['name'] := 'CodeDeclToMcp_GenerateAll';
+      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 1/3 - Generate every target from one source. This is the ONLY write call in the workflow. It performs the entire pipeline in a single round trip: 1. Parse the source text according to Language. 2. Build the internal function model. 3. Run every code generator and every README generator. 4. Write every produced file to disk. 5. Return the total number of target files written. A successful call REPLACES the entire target set produced by any previous CodeDeclToMcp_GenerateAll call. It is safe to call this function repeatedly with different sources. Source: The complete source text. For Language='#39'pascal'#39' pass a full Pascal unit that starts with a unit declaration and contains an interface section. For Language='#39'c'#39' pass a full C header that starts with the include guard and contains the function prototypes. All parameters of every supported routine must use one of the normalized types: int64, double, or string. Any routine whose signature uses any other type (Boolean, Variant, arrays, records, classes, interfaces, enums, sets, pointers, TDateTime, ...) is silently dropped from the generated output. If you need to pass a complex value, serialize it into a string on the source side. Language: The SOURCE language of the text passed in Source. Accepted values, compared case-insensitively, are: pascal   the source text is a Pascal unit c        the source text is a C header Do NOT pass a target language such as '#39'python'#39', '#39'cpp'#39' or '#39'csharp'#39'. All target languages are produced automatically; there is no per-target selection parameter. Return value: a JSON string. On success: {"status":"ok","count":<N>} where <N> is the total number of target files written. Use CodeDeclToMcp_ListTargets to obtain their names, and CodeDeclToMcp_GetTarget to read any one of them. On failure: {"error":"<message>"} Typical failure reasons: empty Source, unrecognized Language, parser rejected the source, or every routine in the source was filtered out by the type whitelist. )';
       ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_SetSourceCode';
+      ToolDef.S['target_api'] := 'CodeDeclToMcp_GenerateAll';
 
       ParamsObj := ToolDef.O['parameters'];
       ParamsObj.S['type'] := 'object';
       PropsObj := ParamsObj.O['properties'];
       PropObj := PropsObj.O['Source'];
       PropObj.S['type'] := 'string';
-      PropObj.S['description'] := 'complete source text. For Language='#39'pascal'#39' pass a full Pascal'#10'          unit that starts with a unit declaration and contains an'#10'          interface section. For Language='#39'c'#39' pass a full C header that'#10'          starts with the include guard and contains the function'#10'          prototypes.';
+      PropObj.S['description'] := '      The complete source text. For Language='#39'pascal'#39' pass a full'#10'      Pascal unit that starts with a unit declaration and contains an'#10'      interface section. For Language='#39'c'#39' pass a full C header that'#10'      starts with the include guard and contains the function'#10'      prototypes.';
       PropObj := PropsObj.O['Language'];
       PropObj.S['type'] := 'string';
-      PropObj.S['description'] := 'the SOURCE language of the text passed in Source. Accepted'#10'          values are '#39'pascal'#39' and '#39'c'#39' only, compared case-insensitively.'#10'          Do NOT pass a target language such as '#39'python'#39' or '#39'cpp'#39'; the'#10'          target language is selected by calling the corresponding'#10'          CodeDeclToMcp_ConvertToXxx tool in Step 2.';
+      PropObj.S['description'] := '      The SOURCE language of the text passed in Source. Accepted'#10'      values, compared case-insensitively, are:'#10', parser rejected the source, or every routine in';
       RequiredArr := ParamsObj.a['required'];
       RequiredArr.Add('Source');
       RequiredArr.Add('Language');
@@ -1603,20 +748,20 @@ begin
       if Success then Inc(regCount);
       if DEBUG_LOG then
         if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_SetSourceCode')
+          DoStatus('[RegisterTools] OK: CodeDeclToMcp_GenerateAll')
         else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_SetSourceCode');
+          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_GenerateAll');
     finally
       ToolDef.Free;
     end;
 
-    // Tool: CodeDeclToMcp_ConvertToPascal -> CodeDeclToMcp_ConvertToPascal
+    // Tool: CodeDeclToMcp_ListTargets -> CodeDeclToMcp_ListTargets
     ToolDef := TZ_JsonObject.Create;
     try
-      ToolDef.S['name'] := 'CodeDeclToMcp_ConvertToPascal';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 2/3 - Pascal branch. Produce a Pascal MCP tool provider from the source stored by CodeDeclToMcp_SetSourceCode. Prerequisite: CodeDeclToMcp_SetSourceCode must have succeeded earlier in this session. If it has not, this call returns an error. Calling this tool does NOT require calling SetSourceCode again. After success, read the produced files with: CodeDeclToMcp_GetLastPascalCode    (the provider unit) CodeDeclToMcp_GetLastPascalReadme  (the user guide) The Pascal branch is independent from the Python and C++ branches. You may call all three Step 2 tools in any order after one SetSourceCode. No parameters. Return value: JSON string. On success: {"result":"<absolute file path>"}. On failure: {"error":"<message>"}. )';
+      ToolDef.S['name'] := 'CodeDeclToMcp_ListTargets';
+      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 2/3 - List the target file names. Returns the names of every target file produced by the most recent successful CodeDeclToMcp_GenerateAll call. Only the file NAME is returned; the directory is not included, and neither is any file content. This is a pure reader. It never triggers a new generation and it never requires the caller to re-supply the source. Prerequisite: At least one successful CodeDeclToMcp_GenerateAll call must have happened earlier in the session. If it has not, the response is an empty file list, not an error. Return value: a JSON string. On success: {"files":["<name1>","<name2>",...],"count":<N>} The "files" array is the authoritative list of file names. The order is the order in which the files were written. The "count" value matches the length of the "files" array and, on a successful Step 1, matches the "count" returned by CodeDeclToMcp_GenerateAll. On failure: {"error":"<message>"} Typical usage: 1. Call CodeDeclToMcp_GenerateAll(Source, Language). 2. Call CodeDeclToMcp_ListTargets and iterate over the "files" array. 3. For each name you actually need, call CodeDeclToMcp_GetTarget(name). )';
       ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_ConvertToPascal';
+      ToolDef.S['target_api'] := 'CodeDeclToMcp_ListTargets';
 
       ParamsObj := ToolDef.O['parameters'];
       ParamsObj.S['type'] := 'object';
@@ -1625,214 +770,43 @@ begin
       if Success then Inc(regCount);
       if DEBUG_LOG then
         if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_ConvertToPascal')
+          DoStatus('[RegisterTools] OK: CodeDeclToMcp_ListTargets')
         else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_ConvertToPascal');
+          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_ListTargets');
     finally
       ToolDef.Free;
     end;
 
-    // Tool: CodeDeclToMcp_ConvertToPython -> CodeDeclToMcp_ConvertToPython
+    // Tool: CodeDeclToMcp_GetTarget -> CodeDeclToMcp_GetTarget
     ToolDef := TZ_JsonObject.Create;
     try
-      ToolDef.S['name'] := 'CodeDeclToMcp_ConvertToPython';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 2/3 - Python branch. Produce a Python MCP tool provider from the source stored by CodeDeclToMcp_SetSourceCode. Prerequisite: CodeDeclToMcp_SetSourceCode must have succeeded earlier in this session. If it has not, this call returns an error. Calling this tool does NOT require calling SetSourceCode again. After success, read the produced files with: CodeDeclToMcp_GetLastPythonCode    (the module) CodeDeclToMcp_GetLastPythonReadme  (the user guide) The Python branch is independent from the Pascal and C++ branches. You may call all three Step 2 tools in any order after one SetSourceCode. No parameters. Return value: JSON string. On success: {"result":"<absolute file path>"}. On failure: {"error":"<message>"}. )';
+      ToolDef.S['name'] := 'CodeDeclToMcp_GetTarget';
+      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 3/3 - Read one target file by name. Given a file name returned by CodeDeclToMcp_ListTargets, returns the full text of that file. This is a pure reader. It never triggers a new generation, it never requires the caller to re-supply the source, and it does not modify any file on disk. Prerequisite: CodeDeclToMcp_GenerateAll must have succeeded earlier in the session, and FileName must be one of the names returned by the matching CodeDeclToMcp_ListTargets call. FileName: The exact file name, character for character, as returned by CodeDeclToMcp_ListTargets. Do NOT pass an absolute path, a relative path, or a wildcard. Do NOT add or remove the directory portion. Just the bare name. Return value: a string. On success: The full text of the requested file. This is the raw file content, not a JSON envelope, so it can be very large (a README is typically tens of kilobytes, and generated source files can be larger). On failure: A JSON error object of the form {"error":"<message>"}. Typical failure reasons: no successful Step 1 call yet, or FileName does not match any name in the current target set. Distinguishing success from failure: A successful response is the raw file text. A failed response is a single-line JSON object whose first non-whitespace character is '#39'{'#39' and which contains an "error" key. Since none of the generated target files start with that exact pattern, the caller can reliably tell the two apart. )';
       ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_ConvertToPython';
+      ToolDef.S['target_api'] := 'CodeDeclToMcp_GetTarget';
 
       ParamsObj := ToolDef.O['parameters'];
       ParamsObj.S['type'] := 'object';
       PropsObj := ParamsObj.O['properties'];
+      PropObj := PropsObj.O['FileName'];
+      PropObj.S['type'] := 'string';
+      PropObj.S['description'] := '      The exact file name, character for character, as returned by'#10'      CodeDeclToMcp_ListTargets. Do NOT pass an absolute path, a'#10'      relative path, or a wildcard. Do NOT add or remove the'#10'      directory portion. Just the bare name.'#10'does not match any name in the current target set.';
+      RequiredArr := ParamsObj.a['required'];
+      RequiredArr.Add('FileName');
       Success := RegisterTool(ToolDef);
       if Success then Inc(regCount);
       if DEBUG_LOG then
         if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_ConvertToPython')
+          DoStatus('[RegisterTools] OK: CodeDeclToMcp_GetTarget')
         else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_ConvertToPython');
+          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_GetTarget');
     finally
       ToolDef.Free;
     end;
 
-    // Tool: CodeDeclToMcp_ConvertToCpp -> CodeDeclToMcp_ConvertToCpp
-    ToolDef := TZ_JsonObject.Create;
-    try
-      ToolDef.S['name'] := 'CodeDeclToMcp_ConvertToCpp';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 2/3 - C++ branch. Produce a C++ MCP tool provider from the source stored by CodeDeclToMcp_SetSourceCode. Prerequisite: CodeDeclToMcp_SetSourceCode must have succeeded earlier in this session. If it has not, this call returns an error. Calling this tool does NOT require calling SetSourceCode again. Two files are produced: a header (.hpp) and an implementation (.cpp) that sits next to it with the same base name. After success, read the produced files with: CodeDeclToMcp_GetLastCppHeader  (the header) CodeDeclToMcp_GetLastCppImpl    (the implementation) CodeDeclToMcp_GetLastCppReadme  (the user guide) The C++ branch is independent from the Pascal and Python branches. You may call all three Step 2 tools in any order after one SetSourceCode. No parameters. Return value: JSON string. On success: {"result":"<absolute file path of the .hpp>"}. On failure: {"error":"<message>"}. )';
-      ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_ConvertToCpp';
-
-      ParamsObj := ToolDef.O['parameters'];
-      ParamsObj.S['type'] := 'object';
-      PropsObj := ParamsObj.O['properties'];
-      Success := RegisterTool(ToolDef);
-      if Success then Inc(regCount);
-      if DEBUG_LOG then
-        if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_ConvertToCpp')
-        else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_ConvertToCpp');
-    finally
-      ToolDef.Free;
-    end;
-
-    // Tool: CodeDeclToMcp_GetLastPascalCode -> CodeDeclToMcp_GetLastPascalCode
-    ToolDef := TZ_JsonObject.Create;
-    try
-      ToolDef.S['name'] := 'CodeDeclToMcp_GetLastPascalCode';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 3/3 - Pascal reader. Returns the full text of the Pascal provider unit produced by the most recent successful CodeDeclToMcp_ConvertToPascal call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToPascal must have succeeded first. No parameters. Return value: string with the full Pascal unit text, or an empty string if nothing has been generated yet. )';
-      ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_GetLastPascalCode';
-
-      ParamsObj := ToolDef.O['parameters'];
-      ParamsObj.S['type'] := 'object';
-      PropsObj := ParamsObj.O['properties'];
-      Success := RegisterTool(ToolDef);
-      if Success then Inc(regCount);
-      if DEBUG_LOG then
-        if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_GetLastPascalCode')
-        else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_GetLastPascalCode');
-    finally
-      ToolDef.Free;
-    end;
-
-    // Tool: CodeDeclToMcp_GetLastPascalReadme -> CodeDeclToMcp_GetLastPascalReadme
-    ToolDef := TZ_JsonObject.Create;
-    try
-      ToolDef.S['name'] := 'CodeDeclToMcp_GetLastPascalReadme';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 3/3 - Pascal reader. Returns the full text of the Pascal README produced by the most recent successful CodeDeclToMcp_ConvertToPascal call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToPascal must have succeeded first. No parameters. Return value: string with the Markdown README, or an empty string if nothing has been generated yet. )';
-      ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_GetLastPascalReadme';
-
-      ParamsObj := ToolDef.O['parameters'];
-      ParamsObj.S['type'] := 'object';
-      PropsObj := ParamsObj.O['properties'];
-      Success := RegisterTool(ToolDef);
-      if Success then Inc(regCount);
-      if DEBUG_LOG then
-        if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_GetLastPascalReadme')
-        else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_GetLastPascalReadme');
-    finally
-      ToolDef.Free;
-    end;
-
-    // Tool: CodeDeclToMcp_GetLastPythonCode -> CodeDeclToMcp_GetLastPythonCode
-    ToolDef := TZ_JsonObject.Create;
-    try
-      ToolDef.S['name'] := 'CodeDeclToMcp_GetLastPythonCode';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 3/3 - Python reader. Returns the full text of the Python module produced by the most recent successful CodeDeclToMcp_ConvertToPython call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToPython must have succeeded first. No parameters. Return value: string with the full Python module text, or an empty string if nothing has been generated yet. )';
-      ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_GetLastPythonCode';
-
-      ParamsObj := ToolDef.O['parameters'];
-      ParamsObj.S['type'] := 'object';
-      PropsObj := ParamsObj.O['properties'];
-      Success := RegisterTool(ToolDef);
-      if Success then Inc(regCount);
-      if DEBUG_LOG then
-        if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_GetLastPythonCode')
-        else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_GetLastPythonCode');
-    finally
-      ToolDef.Free;
-    end;
-
-    // Tool: CodeDeclToMcp_GetLastPythonReadme -> CodeDeclToMcp_GetLastPythonReadme
-    ToolDef := TZ_JsonObject.Create;
-    try
-      ToolDef.S['name'] := 'CodeDeclToMcp_GetLastPythonReadme';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 3/3 - Python reader. Returns the full text of the Python README produced by the most recent successful CodeDeclToMcp_ConvertToPython call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToPython must have succeeded first. No parameters. Return value: string with the Markdown README, or an empty string if nothing has been generated yet. )';
-      ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_GetLastPythonReadme';
-
-      ParamsObj := ToolDef.O['parameters'];
-      ParamsObj.S['type'] := 'object';
-      PropsObj := ParamsObj.O['properties'];
-      Success := RegisterTool(ToolDef);
-      if Success then Inc(regCount);
-      if DEBUG_LOG then
-        if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_GetLastPythonReadme')
-        else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_GetLastPythonReadme');
-    finally
-      ToolDef.Free;
-    end;
-
-    // Tool: CodeDeclToMcp_GetLastCppHeader -> CodeDeclToMcp_GetLastCppHeader
-    ToolDef := TZ_JsonObject.Create;
-    try
-      ToolDef.S['name'] := 'CodeDeclToMcp_GetLastCppHeader';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 3/3 - C++ reader. Returns the full text of the C++ header produced by the most recent successful CodeDeclToMcp_ConvertToCpp call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToCpp must have succeeded first. No parameters. Return value: string with the full C++ header text, or an empty string if nothing has been generated yet. )';
-      ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_GetLastCppHeader';
-
-      ParamsObj := ToolDef.O['parameters'];
-      ParamsObj.S['type'] := 'object';
-      PropsObj := ParamsObj.O['properties'];
-      Success := RegisterTool(ToolDef);
-      if Success then Inc(regCount);
-      if DEBUG_LOG then
-        if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_GetLastCppHeader')
-        else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_GetLastCppHeader');
-    finally
-      ToolDef.Free;
-    end;
-
-    // Tool: CodeDeclToMcp_GetLastCppImpl -> CodeDeclToMcp_GetLastCppImpl
-    ToolDef := TZ_JsonObject.Create;
-    try
-      ToolDef.S['name'] := 'CodeDeclToMcp_GetLastCppImpl';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 3/3 - C++ reader. Returns the full text of the C++ implementation produced by the most recent successful CodeDeclToMcp_ConvertToCpp call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToCpp must have succeeded first. No parameters. Return value: string with the full C++ implementation text, or an empty string if nothing has been generated yet. )';
-      ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_GetLastCppImpl';
-
-      ParamsObj := ToolDef.O['parameters'];
-      ParamsObj.S['type'] := 'object';
-      PropsObj := ParamsObj.O['properties'];
-      Success := RegisterTool(ToolDef);
-      if Success then Inc(regCount);
-      if DEBUG_LOG then
-        if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_GetLastCppImpl')
-        else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_GetLastCppImpl');
-    finally
-      ToolDef.Free;
-    end;
-
-    // Tool: CodeDeclToMcp_GetLastCppReadme -> CodeDeclToMcp_GetLastCppReadme
-    ToolDef := TZ_JsonObject.Create;
-    try
-      ToolDef.S['name'] := 'CodeDeclToMcp_GetLastCppReadme';
-      ToolDef.S['description'] := '(* [code_decl_to_mcp] Step 3/3 - C++ reader. Returns the full text of the C++ README produced by the most recent successful CodeDeclToMcp_ConvertToCpp call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToCpp must have succeeded first. No parameters. Return value: string with the Markdown README, or an empty string if nothing has been generated yet. )';
-      ToolDef.S['target_app'] := MY_APP_NAME;
-      ToolDef.S['target_api'] := 'CodeDeclToMcp_GetLastCppReadme';
-
-      ParamsObj := ToolDef.O['parameters'];
-      ParamsObj.S['type'] := 'object';
-      PropsObj := ParamsObj.O['properties'];
-      Success := RegisterTool(ToolDef);
-      if Success then Inc(regCount);
-      if DEBUG_LOG then
-        if Success then
-          DoStatus('[RegisterTools] OK: CodeDeclToMcp_GetLastCppReadme')
-        else
-          DoStatus('[RegisterTools] FAIL: CodeDeclToMcp_GetLastCppReadme');
-    finally
-      ToolDef.Free;
-    end;
-
-    Result := (regCount = 11);
+    Result := (regCount = 3);
     if DEBUG_LOG then
-      DoStatus('[RegisterTools] Registered %d out of %d tools.', [regCount, 11]);
+      DoStatus('[RegisterTools] Registered %d out of %d tools.', [regCount, 3]);
   finally
   end;
 end;
@@ -1847,19 +821,11 @@ begin
   if DEBUG_LOG then
     DoStatus('[RegisterAPIs] Application "%s" created.', [MY_APP_NAME]);
 
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_SetSourceCode', '(* [code_decl_to_mcp] Step 1/3 - Store source text. Does NOT convert. Stores the source text and its SOURCE language into the generator. This is a setup call: it does NOT produce any output file and does NOT decide which target language will be generated. After this call succeeds you MUST invoke exactly one of the Step 2 tools to actually produce a result: CodeDeclToMcp_ConvertToPascal CodeDeclToMcp_ConvertToPython CodeDeclToMcp_ConvertToCpp The stored source stays in effect for the rest of the session. To switch target languages you do NOT call this tool again; you just call another Step 2 tool. Source: complete source text. For Language='#39'pascal'#39' pass a full Pascal unit that starts with a unit declaration and contains an interface section. For Language='#39'c'#39' pass a full C header that starts with the include guard and contains the function prototypes. Language: the SOURCE language of the text passed in Source. Accepted values are '#39'pascal'#39' and '#39'c'#39' only, compared case-insensitively. Do NOT pass a target language such as '#39'python'#39' or '#39'cpp'#39'; the target language is selected by calling the corresponding CodeDeclToMcp_ConvertToXxx tool in Step 2. Return value: JSON string. On success: {"status":"ok"}. On failure: {"error":"<message>"}. )', nil, @Callback_CodeDeclToMcp_SetSourceCode_CodeDeclToMcp_SetSourceCode);  // Register API: CodeDeclToMcp_SetSourceCode -> CodeDeclToMcp_SetSourceCode
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_ConvertToPascal', '(* [code_decl_to_mcp] Step 2/3 - Pascal branch. Produce a Pascal MCP tool provider from the source stored by CodeDeclToMcp_SetSourceCode. Prerequisite: CodeDeclToMcp_SetSourceCode must have succeeded earlier in this session. If it has not, this call returns an error. Calling this tool does NOT require calling SetSourceCode again. After success, read the produced files with: CodeDeclToMcp_GetLastPascalCode    (the provider unit) CodeDeclToMcp_GetLastPascalReadme  (the user guide) The Pascal branch is independent from the Python and C++ branches. You may call all three Step 2 tools in any order after one SetSourceCode. No parameters. Return value: JSON string. On success: {"result":"<absolute file path>"}. On failure: {"error":"<message>"}. )', nil, @Callback_CodeDeclToMcp_ConvertToPascal_CodeDeclToMcp_ConvertToPascal);  // Register API: CodeDeclToMcp_ConvertToPascal -> CodeDeclToMcp_ConvertToPascal
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_ConvertToPython', '(* [code_decl_to_mcp] Step 2/3 - Python branch. Produce a Python MCP tool provider from the source stored by CodeDeclToMcp_SetSourceCode. Prerequisite: CodeDeclToMcp_SetSourceCode must have succeeded earlier in this session. If it has not, this call returns an error. Calling this tool does NOT require calling SetSourceCode again. After success, read the produced files with: CodeDeclToMcp_GetLastPythonCode    (the module) CodeDeclToMcp_GetLastPythonReadme  (the user guide) The Python branch is independent from the Pascal and C++ branches. You may call all three Step 2 tools in any order after one SetSourceCode. No parameters. Return value: JSON string. On success: {"result":"<absolute file path>"}. On failure: {"error":"<message>"}. )', nil, @Callback_CodeDeclToMcp_ConvertToPython_CodeDeclToMcp_ConvertToPython);  // Register API: CodeDeclToMcp_ConvertToPython -> CodeDeclToMcp_ConvertToPython
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_ConvertToCpp', '(* [code_decl_to_mcp] Step 2/3 - C++ branch. Produce a C++ MCP tool provider from the source stored by CodeDeclToMcp_SetSourceCode. Prerequisite: CodeDeclToMcp_SetSourceCode must have succeeded earlier in this session. If it has not, this call returns an error. Calling this tool does NOT require calling SetSourceCode again. Two files are produced: a header (.hpp) and an implementation (.cpp) that sits next to it with the same base name. After success, read the produced files with: CodeDeclToMcp_GetLastCppHeader  (the header) CodeDeclToMcp_GetLastCppImpl    (the implementation) CodeDeclToMcp_GetLastCppReadme  (the user guide) The C++ branch is independent from the Pascal and Python branches. You may call all three Step 2 tools in any order after one SetSourceCode. No parameters. Return value: JSON string. On success: {"result":"<absolute file path of the .hpp>"}. On failure: {"error":"<message>"}. )', nil, @Callback_CodeDeclToMcp_ConvertToCpp_CodeDeclToMcp_ConvertToCpp);  // Register API: CodeDeclToMcp_ConvertToCpp -> CodeDeclToMcp_ConvertToCpp
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_GetLastPascalCode', '(* [code_decl_to_mcp] Step 3/3 - Pascal reader. Returns the full text of the Pascal provider unit produced by the most recent successful CodeDeclToMcp_ConvertToPascal call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToPascal must have succeeded first. No parameters. Return value: string with the full Pascal unit text, or an empty string if nothing has been generated yet. )', nil, @Callback_CodeDeclToMcp_GetLastPascalCode_CodeDeclToMcp_GetLastPascalCode);  // Register API: CodeDeclToMcp_GetLastPascalCode -> CodeDeclToMcp_GetLastPascalCode
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_GetLastPascalReadme', '(* [code_decl_to_mcp] Step 3/3 - Pascal reader. Returns the full text of the Pascal README produced by the most recent successful CodeDeclToMcp_ConvertToPascal call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToPascal must have succeeded first. No parameters. Return value: string with the Markdown README, or an empty string if nothing has been generated yet. )', nil, @Callback_CodeDeclToMcp_GetLastPascalReadme_CodeDeclToMcp_GetLastPascalReadme);  // Register API: CodeDeclToMcp_GetLastPascalReadme -> CodeDeclToMcp_GetLastPascalReadme
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_GetLastPythonCode', '(* [code_decl_to_mcp] Step 3/3 - Python reader. Returns the full text of the Python module produced by the most recent successful CodeDeclToMcp_ConvertToPython call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToPython must have succeeded first. No parameters. Return value: string with the full Python module text, or an empty string if nothing has been generated yet. )', nil, @Callback_CodeDeclToMcp_GetLastPythonCode_CodeDeclToMcp_GetLastPythonCode);  // Register API: CodeDeclToMcp_GetLastPythonCode -> CodeDeclToMcp_GetLastPythonCode
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_GetLastPythonReadme', '(* [code_decl_to_mcp] Step 3/3 - Python reader. Returns the full text of the Python README produced by the most recent successful CodeDeclToMcp_ConvertToPython call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToPython must have succeeded first. No parameters. Return value: string with the Markdown README, or an empty string if nothing has been generated yet. )', nil, @Callback_CodeDeclToMcp_GetLastPythonReadme_CodeDeclToMcp_GetLastPythonReadme);  // Register API: CodeDeclToMcp_GetLastPythonReadme -> CodeDeclToMcp_GetLastPythonReadme
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_GetLastCppHeader', '(* [code_decl_to_mcp] Step 3/3 - C++ reader. Returns the full text of the C++ header produced by the most recent successful CodeDeclToMcp_ConvertToCpp call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToCpp must have succeeded first. No parameters. Return value: string with the full C++ header text, or an empty string if nothing has been generated yet. )', nil, @Callback_CodeDeclToMcp_GetLastCppHeader_CodeDeclToMcp_GetLastCppHeader);  // Register API: CodeDeclToMcp_GetLastCppHeader -> CodeDeclToMcp_GetLastCppHeader
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_GetLastCppImpl', '(* [code_decl_to_mcp] Step 3/3 - C++ reader. Returns the full text of the C++ implementation produced by the most recent successful CodeDeclToMcp_ConvertToCpp call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToCpp must have succeeded first. No parameters. Return value: string with the full C++ implementation text, or an empty string if nothing has been generated yet. )', nil, @Callback_CodeDeclToMcp_GetLastCppImpl_CodeDeclToMcp_GetLastCppImpl);  // Register API: CodeDeclToMcp_GetLastCppImpl -> CodeDeclToMcp_GetLastCppImpl
-  LF_RegisterCallEx(App, 'CodeDeclToMcp_GetLastCppReadme', '(* [code_decl_to_mcp] Step 3/3 - C++ reader. Returns the full text of the C++ README produced by the most recent successful CodeDeclToMcp_ConvertToCpp call. Pure reader: never triggers a new conversion, never requires calling CodeDeclToMcp_SetSourceCode again. Prerequisite: CodeDeclToMcp_ConvertToCpp must have succeeded first. No parameters. Return value: string with the Markdown README, or an empty string if nothing has been generated yet. )', nil, @Callback_CodeDeclToMcp_GetLastCppReadme_CodeDeclToMcp_GetLastCppReadme);  // Register API: CodeDeclToMcp_GetLastCppReadme -> CodeDeclToMcp_GetLastCppReadme
+  LF_RegisterCallEx(App, 'CodeDeclToMcp_GenerateAll', '(* [code_decl_to_mcp] Step 1/3 - Generate every target from one source. This is the ONLY write call in the workflow. It performs the entire pipeline in a single round trip: 1. Parse the source text according to Language. 2. Build the internal function model. 3. Run every code generator and every README generator. 4. Write every produced file to disk. 5. Return the total number of target files written. A successful call REPLACES the entire target set produced by any previous CodeDeclToMcp_GenerateAll call. It is safe to call this function repeatedly with different sources. Source: The complete source text. For Language='#39'pascal'#39' pass a full Pascal unit that starts with a unit declaration and contains an interface section. For Language='#39'c'#39' pass a full C header that starts with the include guard and contains the function prototypes. All parameters of every supported routine must use one of the normalized types: int64, double, or string. Any routine whose signature uses any other type (Boolean, Variant, arrays, records, classes, interfaces, enums, sets, pointers, TDateTime, ...) is silently dropped from the generated output. If you need to pass a complex value, serialize it into a string on the source side. Language: The SOURCE language of the text passed in Source. Accepted values, compared case-insensitively, are: pascal   the source text is a Pascal unit c        the source text is a C header Do NOT pass a target language such as '#39'python'#39', '#39'cpp'#39' or '#39'csharp'#39'. All target languages are produced automatically; there is no per-target selection parameter. Return value: a JSON string. On success: {"status":"ok","count":<N>} where <N> is the total number of target files written. Use CodeDeclToMcp_ListTargets to obtain their names, and CodeDeclToMcp_GetTarget to read any one of them. On failure: {"error":"<message>"} Typical failure reasons: empty Source, unrecognized Language, parser rejected the source, or every routine in the source was filtered out by the type whitelist. )', nil, @Callback_CodeDeclToMcp_GenerateAll_CodeDeclToMcp_GenerateAll);  // Register API: CodeDeclToMcp_GenerateAll -> CodeDeclToMcp_GenerateAll
+  LF_RegisterCallEx(App, 'CodeDeclToMcp_ListTargets', '(* [code_decl_to_mcp] Step 2/3 - List the target file names. Returns the names of every target file produced by the most recent successful CodeDeclToMcp_GenerateAll call. Only the file NAME is returned; the directory is not included, and neither is any file content. This is a pure reader. It never triggers a new generation and it never requires the caller to re-supply the source. Prerequisite: At least one successful CodeDeclToMcp_GenerateAll call must have happened earlier in the session. If it has not, the response is an empty file list, not an error. Return value: a JSON string. On success: {"files":["<name1>","<name2>",...],"count":<N>} The "files" array is the authoritative list of file names. The order is the order in which the files were written. The "count" value matches the length of the "files" array and, on a successful Step 1, matches the "count" returned by CodeDeclToMcp_GenerateAll. On failure: {"error":"<message>"} Typical usage: 1. Call CodeDeclToMcp_GenerateAll(Source, Language). 2. Call CodeDeclToMcp_ListTargets and iterate over the "files" array. 3. For each name you actually need, call CodeDeclToMcp_GetTarget(name). )', nil, @Callback_CodeDeclToMcp_ListTargets_CodeDeclToMcp_ListTargets);  // Register API: CodeDeclToMcp_ListTargets -> CodeDeclToMcp_ListTargets
+  LF_RegisterCallEx(App, 'CodeDeclToMcp_GetTarget', '(* [code_decl_to_mcp] Step 3/3 - Read one target file by name. Given a file name returned by CodeDeclToMcp_ListTargets, returns the full text of that file. This is a pure reader. It never triggers a new generation, it never requires the caller to re-supply the source, and it does not modify any file on disk. Prerequisite: CodeDeclToMcp_GenerateAll must have succeeded earlier in the session, and FileName must be one of the names returned by the matching CodeDeclToMcp_ListTargets call. FileName: The exact file name, character for character, as returned by CodeDeclToMcp_ListTargets. Do NOT pass an absolute path, a relative path, or a wildcard. Do NOT add or remove the directory portion. Just the bare name. Return value: a string. On success: The full text of the requested file. This is the raw file content, not a JSON envelope, so it can be very large (a README is typically tens of kilobytes, and generated source files can be larger). On failure: A JSON error object of the form {"error":"<message>"}. Typical failure reasons: no successful Step 1 call yet, or FileName does not match any name in the current target set. Distinguishing success from failure: A successful response is the raw file text. A failed response is a single-line JSON object whose first non-whitespace character is '#39'{'#39' and which contains an "error" key. Since none of the generated target files start with that exact pattern, the caller can reliably tell the two apart. )', nil, @Callback_CodeDeclToMcp_GetTarget_CodeDeclToMcp_GetTarget);  // Register API: CodeDeclToMcp_GetTarget -> CodeDeclToMcp_GetTarget
   if DEBUG_LOG then
-    DoStatus('[RegisterAPIs] Registered APIs: 11 functions');
+    DoStatus('[RegisterAPIs] Registered APIs: 3 functions');
   Result := App;
 end;
 

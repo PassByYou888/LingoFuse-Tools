@@ -23,7 +23,7 @@ uses
   http_cpp_abi_service_generator_tool,
   http_cpp_abi_call_generator_tool,
   code_decl_to_json_abi_mcp_api_tool_provider_unit,
-  code_decl_to_json_abi_cmdline, http_cmake_generator_tool;
+  code_decl_to_json_abi_cmdline, http_cmake_generator_tool, http_csharp_abi_service_generator_tool, http_csharp_abi_call_generator_tool, http_csharp_abi_test_generator_tool;
 
   {$R *.res}
 
@@ -36,7 +36,7 @@ begin
     end;
 
     RequireDerivedFormResource := True;
-    Application.Scaled := True;
+  Application.Scaled:=True;
     {$PUSH}
     {$WARN 5044 OFF}
     Application.MainFormOnTaskbar := True;

@@ -21,7 +21,7 @@ uses
   py_mcp_generator_tool,
   cpp_mcp_generator_tool,
   code_decl_to_mcp_api_tool_provider_unit,
-  code_decl_to_mcp_cmdline;
+  code_decl_to_mcp_cmdline, cmake_for_cpp_mcp_generator_tool, csharp_mcp_generator_tool;
 
   {$R *.res}
 
@@ -33,7 +33,7 @@ begin
       exit;
     end;
     RequireDerivedFormResource := True;
-    Application.Scaled := True;
+  Application.Scaled:=True;
     {$PUSH}
     {$WARN 5044 OFF}
     Application.MainFormOnTaskbar := True;

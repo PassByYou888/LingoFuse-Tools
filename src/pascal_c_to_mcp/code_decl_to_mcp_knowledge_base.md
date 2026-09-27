@@ -1,2677 +1,1469 @@
-# LingoFuse MCP Ecosystem — Knowledge Base
+# code_decl_to_mcp Developer Knowledge Base (v8.0 — Maintainer Edition)
 
-> **Document version**: v7.0 (Full-Ecosystem Edition)
-> **Audience**: AI assistants and human engineers who must use, extend, or debug the LingoFuse MCP ecosystem **without reading the source code**.
-> **Scope**: The entire ecosystem — the declaration-to-tool generator, the three language providers it emits, the beacon, the MCP gateway, the middleware, the LLM service trio, the HTTP bridge, the Python bindings, and the shared contracts that bind them all together.
-> **Diagram convention**: Every flowchart / architecture diagram / decision tree uses **Mermaid**. Large diagrams are split into smaller composable ones so that each can be read independently.
-> **Reading tip**: This document is organized as an ecosystem map, not as a tool manual. Read Chapter 1 first to build the mental model; use the later chapters as a reference.
+> **Document version**: v8.0 (Developer-First Edition)
+> **Goal**: Enable AI assistants and human engineers to **modify, upgrade, and maintain** the `code_decl_to_mcp` project **without reading the source code**.
+> **Promise**: Every conclusion in this document has been verified line-by-line against the source.
+> **Failure criterion**: If a reader cannot answer the 25 self-test questions in Chapter 17 after reading this document, this document is not fit for purpose.
+> **Diagram convention**: Every flowchart uses Mermaid.
+> **Severity markers**: 🔴 Fatal / 🟠 Serious / 🟡 Minor
 
 ---
 
 ## Table of Contents
 
-**Part I — Ecosystem Map**
-- [Chapter 1  What This Ecosystem Is](#chapter-1--what-this-ecosystem-is)
-- [Chapter 2  The Six Layers](#chapter-2--the-six-layers)
-- [Chapter 3  Component and Data-Flow Map](#chapter-3--component-and-data-flow-map)
+**Part I — Project Skeleton**
+- [1. File Map and Dependencies](#1-file-map-and-dependencies)
+- [2. The Three Entry Modes](#2-the-three-entry-modes)
+- [3. End-to-End Data Flow](#3-end-to-end-data-flow)
 
-**Part II — Declaration-to-Tool Pipeline**
-- [Chapter 4  Generator Toolchain Overview](#chapter-4--generator-toolchain-overview)
-- [Chapter 5  Three Work Modes (GUI / CLI / MCP-API)](#chapter-5--three-work-modes-gui--cli--mcp-api)
-- [Chapter 6  Code Generators](#chapter-6--code-generators)
-- [Chapter 7  README Generation System](#chapter-7--readme-generation-system)
+**Part II — Generators In Depth**
+- [4. Generator Interface Quick Reference](#4-generator-interface-quick-reference)
+- [5. Generator Internals and Naming Rules](#5-generator-internals-and-naming-rules)
+- [6. Output File Names and Directories](#6-output-file-names-and-directories)
 
-**Part III — Agent Interface Contract**
-- [Chapter 8  The 11 MCP Tools of code_decl_to_mcp](#chapter-8--the-11-mcp-tools-of-code_decl_to_mcp)
-- [Chapter 9  Comment Discipline — The Single Most Important Rule](#chapter-9--comment-discipline--the-single-most-important-rule)
+**Part III — Shared Logic**
+- [7. Type Whitelist and Type Mapping](#7-type-whitelist-and-type-mapping)
+- [8. Comment Extraction Rules](#8-comment-extraction-rules)
+- [9. Function Filtering and Duplicate Handling](#9-function-filtering-and-duplicate-handling)
 
-**Part IV — Python Agent Ecosystem**
-- [Chapter 10  mcp_api_tool.py — The MCP Gateway](#chapter-10--mcp_api_toolpy--the-mcp-gateway)
-- [Chapter 11  language_middleware.py — The Middleware](#chapter-11--language_middlewarepy--the-middleware)
-- [Chapter 12  The LLM Service Trio](#chapter-12--the-llm-service-trio)
-- [Chapter 13  bridge.py and HTTP Interop](#chapter-13--bridgepy-and-http-interop)
-- [Chapter 14  Startup Sequence Contract](#chapter-14--startup-sequence-contract)
+**Part IV — Modification Guide**
+- [10. Modification Task Cheat Sheet](#10-modification-task-cheat-sheet)
+- [11. Adding a New Target Language](#11-adding-a-new-target-language)
+- [12. Adding a New Output File](#12-adding-a-new-output-file)
+- [13. Modifying a README Section](#13-modifying-a-readme-section)
 
-**Part V — Build and Integration**
-- [Chapter 15  Pascal Provider Build](#chapter-15--pascal-provider-build)
-- [Chapter 16  Python Provider Build](#chapter-16--python-provider-build)
-- [Chapter 17  C++ Provider Build](#chapter-17--c-provider-build)
-- [Chapter 18  End-to-End Deployment](#chapter-18--end-to-end-deployment)
+**Part V — Consistency Red Lines**
+- [14. Known Inconsistencies (Be Warned)](#14-known-inconsistencies-be-warned)
+- [15. Consistency Constraints](#15-consistency-constraints)
 
-**Part VI — Contracts and Reference**
-- [Chapter 19  Wire Format and Protocol](#chapter-19--wire-format-and-protocol)
-- [Chapter 20  Type System and Mapping](#chapter-20--type-system-and-mapping)
-- [Chapter 21  Configuration Reference](#chapter-21--configuration-reference)
-- [Chapter 22  Lifecycle and State Machines](#chapter-22--lifecycle-and-state-machines)
-- [Chapter 23  Threading Model](#chapter-23--threading-model)
-- [Chapter 24  Anti-Patterns](#chapter-24--anti-patterns)
-- [Chapter 25  Troubleshooting Trees](#chapter-25--troubleshooting-trees)
-- [Chapter 26  Self-Check Checklists](#chapter-26--self-check-checklists)
+**Part VI — Self-Audit and Self-Test**
+- [16. Post-Modification Self-Audit Checklist](#16-post-modification-self-audit-checklist)
+- [17. Twenty-Five Self-Test Questions](#17-twenty-five-self-test-questions)
 
 **Appendices**
-- [Appendix A  Error Code and Message Index](#appendix-a--error-code-and-message-index)
-- [Appendix B  Honest Uncertainty List](#appendix-b--honest-uncertainty-list)
-- [Appendix C  Revision History](#appendix-c--revision-history)
+- [A. Precise Symbol Index](#a-precise-symbol-index)
+- [B. Constants and Defaults Master Table](#b-constants-and-defaults-master-table)
+- [C. Honest Uncertainty List](#c-honest-uncertainty-list)
 
 ---
 
-# Part I — Ecosystem Map
+# 1. File Map and Dependencies
 
-## Chapter 1  What This Ecosystem Is
+## 1.1 Complete File Inventory
 
-### 1.1 One Sentence
+The project consists of **9 Pascal files**. For each file: its responsibility, approximate line count, and how often it is modified.
 
-**LingoFuse MCP Ecosystem** is an end-to-end toolchain that turns **annotated Pascal or C function declarations** into **AI-callable MCP tools**, and then wires those tools into an agent runtime through a language-neutral RPC mesh.
+| # | File | Responsibility | Modified Often? | Notes |
+|:-:|------|----------------|:---------------:|-------|
+| 1 | `code_decl_to_mcp.lpr` | Program entry: command-line branch + GUI branch | Occasionally | `uses` clause must stay in sync with all generators |
+| 2 | `code_decl_to_mcp_cmdline.pas` | Command-line mode (`--help` / `<in> <out>`) | Occasionally | **Must** be updated when adding a new target language |
+| 3 | `code_decl_to_mcp_frm.pas` | GUI main form (5-tab wizard) | **Frequently** | The core file |
+| 4 | `code_decl_to_mcp_api_tool_provider_unit.pas` | 11 MCP tools exposed by the project itself | Occasionally | Used for bootstrap |
+| 5 | `pas_mcp_generator_tool.pas` | Pascal code + README generation | **Frequently** | Generator #1 |
+| 6 | `py_mcp_generator_tool.pas` | Python code + README generation | **Frequently** | Generator #2 |
+| 7 | `cpp_mcp_generator_tool.pas` | C++ HPP + CPP + README generation | **Frequently** | Generator #3 |
+| 8 | `cmake_for_cpp_mcp_generator_tool.pas` | CMakeLists + C++ test main generation | Occasionally | Only serves the C++ branch |
+| 9 | `csharp_mcp_generator_tool.pas` | C# code + test + README generation | Delivered, not integrated | Generator #4 (not yet wired) |
 
-The ecosystem is not "a code generator". The generator is one component. The ecosystem is the complete pipeline:
-
-```mermaid
-flowchart LR
-    A["Human<br/>writes declaration<br/>+ comments"] --> B["Generator"]
-    B --> C["Tool provider code<br/>(3 languages)"]
-    C --> D["Runtime mesh<br/>(beacon + gateway + middleware)"]
-    D --> E["AI agent<br/>discovers and calls tools"]
-    E -.->|feedback| A
-
-    style A fill:#4A90E2,stroke:#1E3A8A,stroke-width:2px,color:#FFFFFF
-    style B fill:#9B59B6,stroke:#6C3483,stroke-width:3px,color:#FFFFFF
-    style E fill:#F5A623,stroke:#B7791F,stroke-width:3px,color:#FFFFFF
-```
-
-### 1.2 The Two GitHub Repositories
-
-The ecosystem spans **two official repositories**:
-
-| Repository | Status | Role |
-|------------|--------|------|
-| [`PassByYou888/LingoFuse-pasAgent-v3`](https://github.com/PassByYou888/LingoFuse-pasAgent-v3) | Published | Pascal agent runtime: beacon, MCP gateway, LTB, examples, Python `lingofuse` package, `code_decl_to_mcp` toolchain |
-| [`PassByYou888/LingoFuse-cppAgent`](https://github.com/PassByYou888/LingoFuse-cppAgent) | **Not yet published** | Official C++ binding: `LingoFuse.h`, CMake config, sample provider |
-
-**Consequence for users**: The Pascal branch is fully deployable today. The C++ branch relies on a fallback `LingoFuse.h` embedded in generated README files until `cppAgent` is released.
-
-### 1.3 What "Full Ecosystem" Means
-
-A user who only runs `code_decl_to_mcp.exe` has used **10% of the ecosystem**. The remaining 90% is the runtime that makes the generated tools actually reachable by an AI agent. The ecosystem includes:
+## 1.2 Dependency Graph
 
 ```mermaid
-flowchart TB
-    subgraph GenLayer["Generation Layer"]
-        G1["code_decl_to_mcp (GUI/CLI)"]
-        G2["pas_mcp_generator_tool"]
-        G3["py_mcp_generator_tool"]
-        G4["cpp_mcp_generator_tool"]
-    end
+flowchart TD
+    LPR["code_decl_to_mcp.lpr"]
+    CMD["code_decl_to_mcp_cmdline"]
+    FRM["code_decl_to_mcp_frm"]
+    PROV["code_decl_to_mcp_api_tool_provider_unit"]
+    PAS["pas_mcp_generator_tool"]
+    PY["py_mcp_generator_tool"]
+    CPP["cpp_mcp_generator_tool"]
+    CMAKE["cmake_for_cpp_mcp_generator_tool"]
+    CS["csharp_mcp_generator_tool"]
 
-    subgraph ProviderLayer["Provider Layer"]
-        P1["Pascal provider (user-filled)"]
-        P2["Python provider (user-filled)"]
-        P3["C++ provider (user-filled)"]
-    end
+    LPR --> CMD
+    LPR --> FRM
+    LPR --> PROV
+    LPR --> PAS
+    LPR --> PY
+    LPR --> CPP
+    LPR --> CMAKE
+    LPR -.->|Not yet wired| CS
 
-    subgraph RuntimeLayer["Runtime Layer"]
-        R1["pascal_agent_service (beacon)"]
-        R2["mcp_api_tool (MCP gateway)"]
-        R3["language_middleware"]
-    end
+    CMD --> PAS
+    CMD --> PY
+    CMD --> CPP
 
-    subgraph LLMLayer["LLM Layer"]
-        L1["llm_service"]
-        L2["llm_proxy"]
-        L3["llm_proxy_tool (LTB)"]
-        L4["llm_test"]
-    end
+    FRM --> PAS
+    FRM --> PY
+    FRM --> CPP
+    FRM --> CMAKE
+    FRM --> PROV
 
-    subgraph BridgeLayer["Bridge Layer"]
-        B1["bridge.py"]
-        B2["lf_http_bridge_client.pas"]
-    end
-
-    subgraph ClientLayer["Client Layer"]
-        C1["LM Studio"]
-        C2["Claude Desktop"]
-        C3["Pascal GUI client"]
-    end
-
-    GenLayer --> ProviderLayer
-    ProviderLayer --> RuntimeLayer
-    RuntimeLayer --> ClientLayer
-    RuntimeLayer --> LLMLayer
-    BridgeLayer -.-> RuntimeLayer
-    LLMLayer --> ClientLayer
+    style LPR fill:#e3f2fd,stroke:#1565c0,stroke-width:3px
+    style FRM fill:#fff3e0,stroke:#e65100,stroke-width:3px
+    style CS fill:#ffebee,stroke:#c62828,stroke-dasharray: 5 5
 ```
 
-### 1.4 The Core Value Proposition
+**Key facts**:
+- **`code_decl_to_mcp_cmdline.pas` is independent of the GUI**: it does not reference `frm`, does not start the LCL, and can run headless.
+- **`code_decl_to_mcp_frm.pas` and `code_decl_to_mcp_cmdline.pas` are parallel paths**: the same functionality, two different drivers.
+- **`csharp_mcp_generator_tool` is not wired in**: it appears neither in the `.lpr` `uses` nor in `GenerateAllArtifacts` nor in `Execute_Conversion`.
 
-| Without This Ecosystem | With This Ecosystem |
-|------------------------|---------------------|
-| Hand-write MCP tool schemas for each language | Auto-generate from one declaration |
-| Maintain three provider implementations separately | One source, three providers kept in sync |
-| Manual test programs per language | README embeds a runnable test program |
-| Agent cannot discover new tools without restart | Dynamic tool registration via beacon |
-| Tool descriptions drift from source comments | Descriptions extracted from source comments |
+## 1.3 Infrastructure Shared by All Generators
+
+Modules that the generators depend on but do **not own**:
+
+| Module | Purpose |
+|--------|---------|
+| `Z.Pascal_Func_Model` | `TPascal_Func_Model` / `TFunctionStructure` / `TParamStructure` / `TParamArray` |
+| `Z.Pascal_Func_Tool` | `tpascal_func_decl_tool` (LV0 parser) |
+| `Z.Parsing` | `TTextParsing` / `DetectSourceLanguage` |
+| `Z.Json` | `TZ_JsonObject` / `TZ_JsonArray` / `TZ_JsonString` |
+| `Z.PascalStrings` / `Z.UPascalStrings` | `TPascalString` / `TUPascalString` / `TP_String = TUPascalString` |
+| `Z.UnicodeMixedLib` | `umlMultipleMatch` / `umlSeparatorText` / `umlIntToStr` / `umlCombinePath`, etc. |
+| `Z.ListEngine` | `TPascalStringList` / `TListPascalString` |
+| `Z.Status` | `DoStatus` |
+| `Z.Core` | `TCompute` / `DisposeObject` / `DisposeObjectAndNil` |
 
 ---
 
-## Chapter 2  The Six Layers
+# 2. The Three Entry Modes
 
-The ecosystem is organized into **six layers**. Each layer has a clear responsibility and a clear interface with its neighbors.
-
-### 2.1 Layer Overview
+## 2.1 Entry Point Selection
 
 ```mermaid
-flowchart TB
-    L0["Layer 0 — Source<br/>Pascal / C declaration text"]
-    L1["Layer 1 — Unified Declaration<br/>Standard Pascal text"]
-    L2["Layer 2 — Low-Level Records<br/>tfunc_decl"]
-    L3["Layer 3 — Normalized Model<br/>TPascal_Func_Model (LV1)"]
-    L4["Layer 4 — Generated Artifacts<br/>Code + README (3 languages)"]
-    L5["Layer 5 — Runtime Mesh<br/>Beacon + Gateway + Middleware + Agents"]
+flowchart TD
+    Start["Process start"] --> A["code_decl_to_mcp.lpr::main"]
+    A --> B{"Process_CommandLine()?"}
+    B -- "Returns True (no args)" --> C["Application.Run → GUI"]
+    B -- "Returns False (handled)" --> D["exit(CommandLine_ExitCode)"]
+    C --> E["TCodeDeclToMcpForm.Create"]
+    E --> F["Begin_MCP_Service (TCompute)"]
+    E --> G["User interaction"]
 
-    L0 --> L1
-    L1 --> L2
-    L2 --> L3
-    L3 --> L4
-    L4 --> L5
-
-    style L0 fill:#e3f2fd,stroke:#1565c0
-    style L3 fill:#fff3e0,stroke:#e65100,stroke-width:3px
-    style L5 fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
+    style C fill:#e8f5e9,stroke:#2e7d32
+    style D fill:#fff3e0,stroke:#e65100
 ```
 
-### 2.2 Layer 0 — Source Declaration
+**Contract**: `Process_CommandLine()` returns `True` = **no arguments at all**, please continue with the GUI. Returns `False` = **command line already handled**, please exit with `CommandLine_ExitCode`.
 
-The human writes a Pascal unit or C header containing function declarations with comments. **The comments are the single most important part of this layer** (see Chapter 9).
+## 2.2 GUI Mode (Default)
 
-### 2.3 Layer 1 — Unified Declaration
+| Trigger | `code_decl_to_mcp.exe` (no arguments) |
+|---------|---------------------------------------|
+| Entry point | `TCodeDeclToMcpForm` |
+| 5 tabs | Welcome / Source / Source-JSON / JSON-Model / Final Source |
+| Key method | `GenerateAllArtifacts` |
+| Output directory | `<exe-dir>/<UnitName>/` |
+| MCP service start | `Begin_MCP_Service` (inside `TCompute.RunM_NP`) |
 
-Whatever the source language, the declaration is parsed into a **standard Pascal text representation**. This is what makes the toolchain language-neutral.
+## 2.3 CLI Mode
 
-### 2.4 Layer 2 — Low-Level Records
+| Trigger | `code_decl_to_mcp.exe --help` or `<input> <output>` |
+|---------|-----------------------------------------------------|
+| Entry point | `code_decl_to_mcp_cmdline.Process_CommandLine` |
+| Key method | `Execute_Conversion` |
+| Output directory | **Specified by the caller** (directly writes `<output>`) |
+| Exit codes | `EXIT_OK=0` / `EXIT_BAD_ARGS=1` / `EXIT_PARSE_FAILED=2` / `EXIT_GEN_FAILED=3` / `EXIT_IO_ERROR=4` |
+| Status output redirection | `OnDoStatusHook := @CmdLine_DoStatus_Hook` |
 
-The parser produces `tfunc_decl` records: raw function metadata straight from the syntax tree.
+## 2.4 MCP-API Mode
 
-### 2.5 Layer 3 — Normalized Model (`TPascal_Func_Model`)
+After the GUI starts, it **automatically** registers 11 MCP tools (`code_decl_to_mcp_api_tool_provider_unit`). An AI agent can drive the generator remotely through the MCP gateway.
 
-This is the **single source of truth** for the rest of the pipeline:
-
-```mermaid
-flowchart LR
-    M["TPascal_Func_Model<br/>(LV1)"] --> C1["Pascal code gen"]
-    M --> C2["Python code gen"]
-    M --> C3["C++ code gen"]
-    M --> R1["Pascal README gen"]
-    M --> R2["Python README gen"]
-    M --> R3["C++ README gen"]
-
-    style M fill:#fff3e0,stroke:#e65100,stroke-width:4px
-```
-
-**Key insight**: Because code and documentation are generated from the **same model**, they **cannot drift apart**.
-
-### 2.6 Layer 4 — Generated Artifacts
-
-For each input unit, the generator produces **7 files**:
-
-| # | File | Type |
-|:-:|------|------|
-| 1 | `<unit>_tool_provider_unit.pas` | Pascal code |
-| 2 | `<unit>_tool_provider.py` | Python code |
-| 3 | `<unit>_tool_provider.hpp` | C++ header |
-| 4 | `<unit>_tool_provider.cpp` | C++ implementation |
-| 5 | `<unit>_tool_provider_pascal.md` | Pascal README |
-| 6 | `<unit>_tool_provider_python.md` | Python README |
-| 7 | `<unit>_tool_provider_cpp.md` | C++ README |
-
-Plus 3 context files: `source.pas`, `source.json` (LV0), `source_model.json` (LV1).
-
-### 2.7 Layer 5 — Runtime Mesh
-
-The runtime mesh is what connects the generated providers to AI clients:
-
-```mermaid
-flowchart LR
-    subgraph RuntimeMesh["Runtime Mesh"]
-        BEACON["Beacon<br/>(pascal_agent_service)"]
-        GW["MCP Gateway<br/>(mcp_api_tool)"]
-        MW["Middleware<br/>(language_middleware)"]
-    end
-
-    P1["Pascal Provider"] --> BEACON
-    P2["Python Provider"] --> BEACON
-    P3["C++ Provider"] --> BEACON
-    BEACON --> GW
-    GW --> MW
-    MW --> CLIENT["AI Client"]
-```
+**Key fact**: MCP-API mode **depends on the GUI being alive**. It signals unavailability via the `Form not available` error.
 
 ---
 
-## Chapter 3  Component and Data-Flow Map
+# 3. End-to-End Data Flow
 
-### 3.1 Component Inventory
-
-```mermaid
-flowchart TB
-    subgraph G["Generator Group"]
-        G1["code_decl_to_mcp.lpr"]
-        G2["code_decl_to_mcp_frm.pas"]
-        G3["code_decl_to_mcp_cmdline.pas"]
-        G4["code_decl_to_mcp_api_tool_provider_unit.pas"]
-        G5["pas_mcp_generator_tool.pas"]
-        G6["py_mcp_generator_tool.pas"]
-        G7["cpp_mcp_generator_tool.pas"]
-    end
-
-    subgraph R["Runtime Group"]
-        R1["pascal_agent_service.exe"]
-        R2["mcp_api_tool.py"]
-        R3["mcp_api_proxy.py"]
-        R4["language_middleware.py"]
-        R5["generate_agent_json.py"]
-    end
-
-    subgraph L["LLM Group"]
-        L1["llm_service.py"]
-        L2["llm_proxy.py"]
-        L3["llm_proxy_tool.py"]
-        L4["llm_test.py"]
-    end
-
-    subgraph B["Bridge Group"]
-        B1["bridge.py"]
-        B2["lf_http_bridge_client.pas"]
-    end
-
-    subgraph PY["Python Package"]
-        PY1["lingofuse/__init__.py"]
-        PY2["lingofuse/core.py"]
-        PY3["lingofuse/server.py"]
-        PY4["lingofuse/client.py"]
-        PY5["lingofuse/lf_io.py"]
-        PY6["lingofuse/_lf_native.py"]
-        PY7["lingofuse/json_repair_preprocess.py"]
-    end
-
-    subgraph SH["Shared Modules"]
-        SH1["llm_common/"]
-        SH2["lingofuse/json_repair/"]
-    end
-```
-
-### 3.2 Runtime Data Flow (Path A — MCP)
-
-```mermaid
-sequenceDiagram
-    participant Client as AI Client
-    participant GW as MCP Gateway
-    participant MW as Middleware
-    participant Beacon as Beacon
-    participant Provider as Tool Provider
-
-    Client->>GW: tools/list
-    GW->>MW: get_tools()
-    MW->>Beacon: LF_Call agent_main
-    Beacon-->>MW: {"tools":[...]}
-    MW-->>GW: tool list
-    GW-->>Client: MCP tool schema
-
-    Client->>GW: tools/call
-    GW->>MW: call_tool(name, args)
-    MW->>Beacon: LF_Call target_api
-    Beacon->>Provider: Callback execution
-    Provider-->>Beacon: {"result": ...}
-    Beacon-->>MW: response
-    MW-->>GW: response
-    GW-->>Client: MCP result
-```
-
-### 3.3 Runtime Data Flow (Path B — LTB)
-
-```mermaid
-sequenceDiagram
-    participant Client as Pascal Client
-    participant LTB as llm_proxy_tool
-    participant Backend as OpenAI Backend
-    participant Beacon as Beacon
-
-    Client->>LTB: generate
-    LTB->>Backend: POST /chat/completions (with tools)
-    Backend-->>LTB: SSE stream (tool_calls)
-    LTB->>Beacon: LF_Call target_api
-    Beacon-->>LTB: tool result
-    LTB->>Backend: POST /chat/completions (with tool results)
-    Backend-->>LTB: SSE stream (final answer)
-    LTB-->>Client: chunk/think/finish stream
-```
-
-### 3.4 Runtime Data Flow (Path C — HTTP Bridge)
-
-```mermaid
-sequenceDiagram
-    participant HTTP as HTTP Client
-    participant Bridge as bridge.py
-    participant Beacon as Beacon
-    participant Provider as Tool Provider
-
-    HTTP->>Bridge: POST /<app>/<api>
-    Bridge->>Bridge: normalize_json_bytes()
-    Bridge->>Beacon: LF_Call <api>
-    Beacon->>Provider: Callback
-    Provider-->>Beacon: response
-    Beacon-->>Bridge: response
-    Bridge-->>HTTP: HTTP 200 + body
-```
-
----
-
-# Part II — Declaration-to-Tool Pipeline
-
-## Chapter 4  Generator Toolchain Overview
-
-### 4.1 The Pipeline
+## 3.1 Core Pipeline
 
 ```mermaid
 flowchart LR
     S0["Source<br/>Pascal / C"] --> P0["Parser"]
-    P0 --> S1["LV0 JSON<br/>raw parse result"]
-    S1 --> P1["Model Builder"]
-    P1 --> S2["LV1 JSON<br/>normalized model"]
-    S2 --> P2["Code Generators<br/>(3 languages)"]
-    S2 --> P3["README Generators<br/>(3 languages)"]
-    P2 --> OUT1["Code files"]
-    P3 --> OUT2["README files"]
+    P0 --> L0["LV0 JSON"]
+    L0 --> P1["Model Builder"]
+    P1 --> L1["LV1 JSON"]
+    L1 --> CG["Code Generators"]
+    L1 --> RG["README Generators"]
+    CG --> OF["Output Files"]
+    RG --> OF
 
-    style S2 fill:#fff3e0,stroke:#e65100,stroke-width:3px
+    style L1 fill:#fff3e0,stroke:#e65100,stroke-width:3px
 ```
 
-### 4.2 Supported Input Languages
+**LV1 (`TPascal_Func_Model`) is the single source of truth**: all code and documentation are derived from it. When modifying any generator, **do not bypass LV1**.
 
-| Language | Extensions | Parser Entry |
-|----------|-----------|--------------|
-| Pascal | `.pas`, `.pp`, `.p` | `tpascal_func_decl_tool.CreateFrom_Pascal_Code` |
-| C | `.h`, `.hpp`, `.hh`, `.c`, `.cpp`, `.cc`, `.cxx` | `tpascal_func_decl_tool.CreateFrom_C_Code` |
-
-### 4.3 Output Target Selection
-
-The target language is determined by **the output file extension**:
-
-| Extension | Target |
-|-----------|--------|
-| `.pas`, `.pp`, `.p` | Pascal provider |
-| `.py` | Python provider |
-| `.hpp`, `.hh`, `.h` | C++ header (auto-pairs `.cpp`) |
-| `.cpp`, `.cc`, `.cxx`, `.c` | C++ implementation (auto-pairs `.hpp`) |
-
-### 4.4 Type Whitelist
-
-Only three normalized types are supported:
+## 3.2 GUI Internal Data Flow (Exact)
 
 ```mermaid
-flowchart LR
-    T1["int64"] --> JSON1["integer"]
-    T2["double"] --> JSON2["number"]
-    T3["string"] --> JSON3["string"]
+flowchart TD
+    A["SourceEdit (user pastes source)"] --> B["ParseSourceToLv0Json"]
+    B --> C["SourceJsonEdit (LV0)"]
+    C --> D["BuildLv1ModelFromLv0Json"]
+    D --> E["ModelJsonEdit (LV1)"]
+    E --> F["GenerateAllArtifacts"]
+    F --> G["12 files written to <exe>/<Unit>/"]
 
-    style T1 fill:#e3f2fd
-    style T2 fill:#e3f2fd
-    style T3 fill:#e3f2fd
+    C -.->|reverse| A2["RebuildSourceFromLv0Json → SourceEdit"]
+    E -.->|reverse| C2["BackToLv0JsonFromModel → SourceJsonEdit"]
+    A -->|format| A3["FormatSourceInPlace"]
+
+    style F fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
 ```
 
-**Every declaration containing an unsupported type is dropped entirely** — not just the offending parameter.
+## 3.3 Exact Artifact List of `GenerateAllArtifacts`
 
-### 4.5 Normalization Table
+In execution order, the files written are (total **12**):
 
-| Source Pascal Type | Normalized To |
-|---------------------|---------------|
+| # | Filename | Source | Content |
+|:-:|----------|--------|---------|
+| 1 | `source.pas` or `source.h` | `SaveContextFiles` | User's current source |
+| 2 | `source.json` | `SaveContextFiles` | LV0 |
+| 3 | `source_model.json` | `SaveContextFiles` | LV1 |
+| 4 | `<Unit>_tool_provider_unit.pas` | `GeneratePascalCode` | Pascal code |
+| 5 | `<Unit>_tool_provider_pascal.md` | `GeneratePascalReadme` | Pascal guide |
+| 6 | `<Unit>_tool_provider.py` | `GeneratePythonCode` | Python code |
+| 7 | `<Unit>_tool_provider_python.md` | `GeneratePythonReadme` | Python guide |
+| 8 | `<Unit>_tool_provider.hpp` | `GenerateHPPCode` | C++ header |
+| 9 | `<Unit>_tool_provider.cpp` | `GenerateCPPCode` | C++ implementation |
+| 10 | `<Unit>_tool_provider_cpp.md` | `GenerateCPPReadme` | C++ guide |
+| 11 | `CMakeLists.txt` | `GenerateCMakeLists` | CMake build |
+| 12 | `<Unit>_tool_provider_test.cpp` | `GenerateCPPTestMain` | C++ test main |
+
+**If C# is wired in** (delivered but not integrated), three more files should be added:
+
+| # | Filename | Source |
+|:-:|----------|--------|
+| 13 | `<Unit>_tool_provider.cs` | `GenerateCSharpCode` |
+| 14 | `<Unit>_tool_provider_test.cs` | `GenerateCSharpTestProgram` |
+| 15 | `<Unit>_tool_provider_csharp.md` | `GenerateCSharpReadme` |
+
+## 3.4 CLI Internal Data Flow (Exact)
+
+```mermaid
+flowchart TD
+    A["argv[1..2]"] --> B["Detect_Source_Lang(argv[1])"]
+    A --> C["Detect_Target_Lang(argv[2])"]
+    B --> D["Execute_Conversion"]
+    C --> D
+    D --> E{"Dispatch"}
+    E -- slPascal --> F1["tpascal_func_decl_tool.CreateFrom_Pascal_Code"]
+    E -- slC --> F2["tpascal_func_decl_tool.CreateFrom_C_Code"]
+    F1 --> G["TPascal_Func_Model.LoadFromParser"]
+    F2 --> G
+    G --> H{"Target language"}
+    H -- tlPascal --> I1["GeneratePascalCode + GeneratePascalReadme"]
+    H -- tlPython --> I2["GeneratePythonCode + GeneratePythonReadme"]
+    H -- tlCpp --> I3["GenerateHPPCode + GenerateCPPCode + GenerateCPPReadme"]
+
+    style D fill:#fff3e0,stroke:#e65100,stroke-width:3px
+```
+
+**🔴 CLI key limitations**:
+- **CLI supports only 3 target languages**: Pascal / Python / C++.
+- **CLI does not generate CMakeLists or a C++ test program.**
+- **CLI does not call any C# generator.**
+
+---
+
+# 4. Generator Interface Quick Reference
+
+## 4.1 All 9 Public Functions
+
+| File | Signature | Input | Returns | `nil` input behaviour |
+|------|-----------|-------|---------|-----------------------|
+| `pas_mcp_generator_tool` | `GeneratePascalCode(Model: TPascal_Func_Model): TPascalStringList` | Model | New list (caller frees) | Returns `nil` |
+| `pas_mcp_generator_tool` | `GeneratePascalReadme(Model): TPascalStringList` | Model | New list | Returns **degraded text** (non-nil) |
+| `py_mcp_generator_tool` | `GeneratePythonCode(Model): TPascalStringList` | Model | New list | Returns `nil` |
+| `py_mcp_generator_tool` | `GeneratePythonReadme(Model): TPascalStringList` | Model | New list | Returns **degraded text** |
+| `cpp_mcp_generator_tool` | `GenerateHPPCode(Model): TPascalStringList` | Model | New list | Returns `nil` |
+| `cpp_mcp_generator_tool` | `GenerateCPPCode(Model): TPascalStringList` | Model | New list | Returns `nil` |
+| `cpp_mcp_generator_tool` | `GenerateCPPReadme(Model): TPascalStringList` | Model | New list | Returns **degraded text** |
+| `cmake_for_cpp_mcp_generator_tool` | `GenerateCMakeLists(Model): TPascalStringList` | Model | New list | Returns **degraded text** |
+| `cmake_for_cpp_mcp_generator_tool` | `GenerateCPPTestMain(Model): TPascalStringList` | Model | New list | Returns **degraded text** |
+| `csharp_mcp_generator_tool` | `GenerateCSharpCode(Model): TPascalStringList` | Model | New list | Returns `nil` |
+| `csharp_mcp_generator_tool` | `GenerateCSharpTestProgram(Model): TPascalStringList` | Model | New list | Returns `nil` |
+| `csharp_mcp_generator_tool` | `GenerateCSharpReadme(Model): TPascalStringList` | Model | New list | Returns **degraded text** |
+
+**Contract summary**:
+- **Code generators** return `nil` when `Model = nil` or `Model.UnitName = ''`.
+- **README generators** return **non-nil degraded text** under the same conditions (first line `# README generation skipped` plus a reason).
+- Every returned `TPascalStringList` is **owned by the caller**.
+
+## 4.2 Global Logging Switch Constant
+
+Each generator unit declares a switch in the **interface section**:
+
+| Unit | Declaration form | Value |
+|------|------------------|-------|
+| `pas_mcp_generator_tool` | `const GenerateCode_LogEnabled: boolean = False;` | `const` |
+| `py_mcp_generator_tool` | `const GenerateCode_LogEnabled: boolean = False;` | `const` |
+| `cpp_mcp_generator_tool` | **`var GenerateCode_LogEnabled: boolean = False;`** | **`var` (the only one)** |
+| `cmake_for_cpp_mcp_generator_tool` | `const GenerateCode_LogEnabled: boolean = False;` | `const` |
+| `csharp_mcp_generator_tool` | `const GenerateCode_LogEnabled: boolean = False;` | `const` |
+
+🟠 **Consistency defect**: `cpp` uses `var`; the others use `const`. Note this when modifying logging semantics. The `const` versions are **not runtime-mutable** (Delphi compilation mode will reject assignment).
+
+## 4.3 Shared Constant Convention
+
+Every generator declares internally:
+
+```pascal
+const
+  DEFAULT_BEACON_APP     = 'agent_main_app';
+  DEFAULT_REGISTER_API   = 'register_agent';
+  DEFAULT_AGENT_LOG_API  = 'agent_log';
+  DEFAULT_IPC_ENDPOINT   = 'ipc:agent';
+```
+
+**C++ generator** additionally declares:
+
+```pascal
+DEFAULT_APP_DESC = 'Tool provider generated by cpp_mcp_generator_tool';
+```
+
+🟠 **Inconsistency**: the default App description string differs across generators (some use literals, C++ uses a named constant).
+
+---
+
+# 5. Generator Internals and Naming Rules
+
+## 5.1 Internal Function Inventory per Generator
+
+Each generator maintains its **own copy** of helper functions. These are **not shared**.
+
+### `pas_mcp_generator_tool.pas`
+
+| Function | Purpose |
+|----------|---------|
+| `Log(Msg)` | `if GenerateCode_LogEnabled then DoStatus(...)` |
+| `IsSupportedType(Typ)` | `Typ.Same('int64','double','string')` |
+| `PascalTypeToJsonType(Typ)` | `int64→integer` / `double→number` / `string→string` |
+| `PascalTypeToJsonLiteral(Typ)` | `int64→0` / `double→0.0` / `string→""` |
+| `MakeApiName(FuncName)` | `FuncName.ReplaceChar(#32#9'./\@', '_')` — **character replacement** (not a whitelist) |
+| `MakeCallbackName(FuncName)` | `'Callback_' + MakeApiName(FuncName)` |
+| `MakeInternalCallName(FuncName)` | `'internal_call_' + MakeApiName(FuncName)` |
+| `PascalStrLit(S)` | `TTextParsing.Translate_Text_To_Pascal_Decl(S)` |
+| `GetFullDescription(Comment)` | Uses `TPascalStringList.AsText` |
+| `GetTableCellText(Comment)` | Post-processes `GetFullDescription` |
+| `CollectValidFunctions(Model)` | Returns `TValidFuncArray` |
+| `MakeAppNameFromUnit(UnitName)` | Generic App name generation |
+| `GeneratePascalCode` | Contains nested `BuildParamDecl` / `BuildArgList` |
+| `GeneratePascalReadme` | Contains 10 nested emitters |
+
+### `py_mcp_generator_tool.pas`
+
+| Function | Purpose |
+|----------|---------|
+| `Log(Msg)` | Same as above |
+| `IsSupportedType(Typ)` | Same |
+| `PascalTypeToPythonType(Typ)` | `int64→int` / `double→float` / `string→str` |
+| `PascalTypeToJsonSchemaType(Typ)` | Same |
+| `PascalTypeDefaultValue(Typ)` | `int64→0` / `double→0.0` / `string→""` |
+| `PascalTypeToJsonLiteral(Typ)` | Same |
+| `PyStrLit(S)` | Per-`TP_Char` escaping |
+| `IsPythonIdentChar(c)` | Whitelist check |
+| `MakePythonIdentifier(Name)` | **Whitelist filter** |
+| `GetFullDescription(Comment)` | **Operates directly on `TP_String` (UTF-16 safe)** |
+| `GetTableCellText(Comment)` | Post-process |
+| `CollectValidFunctions(Model)` | Same |
+| `UniqueApiName(BaseName, UsedList)` | **Standalone function** (inlined in Pascal version) |
+| `MakeAppNameFromUnit(UnitName)` | Same |
+| `GeneratePythonCode` | Nested `BuildParamDeclPython` / `BuildArgListPython` |
+| `GeneratePythonReadme` | Same structure as the Pascal version |
+
+### `cpp_mcp_generator_tool.pas`
+
+| Function | Purpose | Notes |
+|----------|---------|-------|
+| `Log(Msg)` / `LogFmt(Fmt, Args)` | Two overloads | The only generator with `LogFmt` |
+| `IsSupportedType(Typ)` | Same | |
+| `PascalTypeToCPPType(Typ, AsReturn)` | `int64→std::int64_t` / `double→double` / `string→std::string` or `const std::string&` | **Has an `AsReturn` parameter** |
+| `PascalTypeToDefaultValue(Typ)` | `int64→0` / `double→0.0` / `string→std::string()` | |
+| `PascalTypeToJsonSchemaType(Typ)` | Same | |
+| `PascalTypeToJsonLiteral(Typ)` | Same | |
+| `MakeApiName(FuncName)` | **Whitelist filter** (differs from Pascal version!) | |
+| `MakeCallbackName(ApiName)` | `'callback_' + MakeApiName(ApiName)` — 🟠 **lowercase `callback_`!** | |
+| `MakeInternalCallName(ApiName)` | `'internal_call_' + MakeApiName(ApiName)` | |
+| `MakeIncludeGuardName(UnitName)` | Produces `UPPERCASE_HPP` | C++-only |
+| `MakeSourceFileName(UnitName)` | Lowercase + `_tool_provider` | C++-only |
+| `MakeAppNameFromUnit(UnitName)` | Same | |
+| `CPPStrLit(S)` | C++ escaping | |
+| `CleanComment_Local(Comment)` | Uses `TTextParsing` + `TokenData` | C++-only |
+| `GetFullDescription(Comment)` | Uses `CleanComment_Local` | C++ implementation differs |
+| `GetTableCellText(Comment)` | Post-process | |
+| `IsDeclSupported(F)` | **Stricter than the Pascal version** (checks Name and every parameter name) | |
+| `CollectValidFunctions(Model)` | **Discards duplicate function names** | 🟠 Behaviour differs from others |
+| `BuildCPPParamDecl(F)` | Standalone function (not nested) | |
+| `BuildCPPArgList(F)` | Standalone function | |
+| `EmitHelpers(L)` | Standalone procedure | |
+| `EmitInternalCalls(L, Funcs)` | Standalone procedure | |
+| `EmitCallbacks(L, Funcs)` | Standalone procedure | |
+| `EmitRegistration(L, Funcs)` | Standalone procedure | |
+| `GenerateHPPCode` / `GenerateCPPCode` / `GenerateCPPReadme` | Main entries | |
+
+### `cmake_for_cpp_mcp_generator_tool.pas`
+
+| Function | Purpose |
+|----------|---------|
+| `Log(Msg)` / `Log(Fmt, Args)` | Two overloads |
+| `MakeSourceBaseName(UnitName)` | `UnitName + '_tool_provider'` (**no `_unit`**) |
+| `MakeTargetBaseName(UnitName)` | CMake identifier whitelist |
+| `EmitRuntimeLoadPrelude(Lines)` | Emits the `LF_LoadLibrary()` block |
+| `GenerateCMakeLists` | Main entry #1 |
+| `GenerateCPPTestMain` | Main entry #2 |
+
+### `csharp_mcp_generator_tool.pas`
+
+| Function | Purpose |
+|----------|---------|
+| `Log(Msg)` | |
+| `IsSupportedType(Typ)` | |
+| `PascalTypeToCSharpType(Typ)` | `int64→long` / `double→double` / `string→string` |
+| `PascalTypeToJsonSchemaType(Typ)` | |
+| `PascalTypeDefaultValue(Typ)` | `int64→0L` / `double→0.0` / `string→string.Empty` |
+| `PascalTypeToJsonLiteral(Typ)` | |
+| `CSharpStrLit(S)` | Per-`TP_Char` escaping |
+| `IsCSharpIdentChar(c)` / `MakeCSharpIdentifier(Name)` | Whitelist |
+| `GetFullDescription(Comment)` | **Operates directly on `TP_String`** (matches Python version) |
+| `GetTableCellText(Comment)` | |
+| `CollectValidFunctions(Model)` | |
+| `UniqueApiName(BaseName, UsedList)` | |
+| `MakeAppNameFromUnit(UnitName)` | |
+| `MakeProviderClassName(AppName)` | `MakeCSharpIdentifier(AppName) + 'ToolProvider'` |
+| `GenerateCSharpCode` | Main entry #1 |
+| `GenerateCSharpTestProgram` | Main entry #2 |
+| `GenerateCSharpReadme` | Main entry #3 |
+
+## 5.2 Cross-Language Naming Comparison
+
+| Dimension | Pascal | Python | C++ | C# |
+|-----------|--------|--------|-----|-----|
+| Callback prefix | `Callback_` | `callback_` | `callback_` | `Callback_` |
+| Internal stub prefix | `internal_call_` | `internal_call_` | `internal_call_` | `InternalCall_` |
+| Identifier sanitization | `ReplaceChar` (char replacement) | Whitelist | Whitelist | Whitelist |
+| Type mapping function | `PascalTypeToJsonType` | `PascalTypeToPythonType` | `PascalTypeToCPPType(Typ, AsReturn)` | `PascalTypeToCSharpType` |
+| Multi-line comment handling | Uses `TPascalStringList.AsText` | Per-`TP_Char` | `CleanComment_Local` | Per-`TP_Char` |
+
+🟠 **Pascal generator's `MakeApiName` uses character replacement** (`#32#9'./\@'` → `_`), which **lets through** other special characters (such as `+` and `!`). The other three generators use **whitelist filtering**, which is stricter.
+
+---
+
+# 6. Output File Names and Directories
+
+## 6.1 GUI Mode Output Directory
+
+```
+<exe-dir>/<UnitName>/
+```
+
+Decided by two lines in `GenerateAllArtifacts`:
+```pascal
+FUnitOutputDir.Text := umlCombinePath(umlGetFilePath(ParamStr(0)), UnitName);
+umlCreateDirectory(FUnitOutputDir.Text);
+```
+
+## 6.2 GUI Mode Output Filenames (Exact)
+
+| Filename | Generator function |
+|----------|-------------------|
+| `source.pas` (Pascal input) or `source.h` (C input) | `SaveContextFiles` |
+| `source.json` | `SaveContextFiles` |
+| `source_model.json` | `SaveContextFiles` |
+| `<UnitName>_tool_provider_unit.pas` | `GeneratePascalCode` |
+| `<UnitName>_tool_provider_pascal.md` | `GeneratePascalReadme` |
+| `<UnitName>_tool_provider.py` | `GeneratePythonCode` |
+| `<UnitName>_tool_provider_python.md` | `GeneratePythonReadme` |
+| `<UnitName>_tool_provider.hpp` | `GenerateHPPCode` |
+| `<UnitName>_tool_provider.cpp` | `GenerateCPPCode` |
+| `<UnitName>_tool_provider_cpp.md` | `GenerateCPPReadme` |
+| `CMakeLists.txt` | `GenerateCMakeLists` |
+| `<UnitName>_tool_provider_test.cpp` | `GenerateCPPTestMain` |
+
+**Key observations**:
+- **Pascal has the `_unit` suffix**: `<U>_tool_provider_unit.pas`.
+- **Other languages do not have `_unit`**: `<U>_tool_provider.py` / `.hpp` / `.cpp`.
+- **The C++ test file is `<U>_tool_provider_test.cpp`**, matching what CMake expects.
+
+## 6.3 CLI Mode Output Filenames (🟠 Inconsistent with GUI)
+
+Inside `code_decl_to_mcp_cmdline.pas`, the `Companion_Readme_Path` function:
+
+```pascal
+function Companion_Readme_Path(const OutputFile: string): string;
+begin
+  Dir := ExtractFileDir(OutputFile);
+  Base := ChangeFileExt(ExtractFileName(OutputFile), '');
+  Result := IncludeTrailingPathDelimiter(Dir) + Base + '_readme.md';
+end;
+```
+
+In other words: **CLI README name = `<output base>_readme.md`**.
+
+Examples:
+
+| Scenario | GUI output | CLI output |
+|----------|-----------|------------|
+| Pascal → Pascal | `<U>_tool_provider_unit.pas` + `<U>_tool_provider_pascal.md` | user-specified `.pas` + `<base>_readme.md` |
+| C → Python | `<U>_tool_provider.py` + `<U>_tool_provider_python.md` | user-specified `.py` + `<base>_readme.md` |
+
+🔴 **This is a significant inconsistency**: the GUI and CLI use different README naming rules. A CLI user gets `<base>_readme.md`; a GUI user gets `<U>_tool_provider_pascal.md`.
+
+---
+
+# 7. Type Whitelist and Type Mapping
+
+## 7.1 Whitelist Trio
+
+**The only legal normalized types**:
+
+```
+'int64'  |  'double'  |  'string'
+```
+
+## 7.2 Predicate (one copy per generator)
+
+```pascal
+function IsSupportedType(const Typ: TP_String): boolean;
+begin
+  Result := Typ.Same('int64', 'double', 'string');
+end;
+```
+
+`Same` is **case-insensitive**.
+
+## 7.3 Four-Language Mapping Table
+
+| Normalized | Pascal | Python | C++ | C# | JSON Schema | JSON literal |
+|:----------:|:------:|:------:|:---:|:--:|:-----------:|:------------:|
+| `int64` | same | `int` | `std::int64_t` | `long` | `integer` | `0` |
+| `double` | same | `float` | `double` | `double` | `number` | `0.0` |
+| `string` | same | `str` | `std::string` / `const std::string&` | `string` | `string` | `""` |
+
+**C++ specifics**:
+- Return type → `std::string`
+- Parameter type → `const std::string&`
+- Selected by the `AsReturn` parameter of `PascalTypeToCPPType(Typ, AsReturn: boolean)`.
+
+**Default return values**:
+
+| Type | Pascal default | Python default | C++ default | C# default |
+|------|---------------|----------------|-------------|------------|
+| `int64` | `0` | `0` | `0` | `0L` |
+| `double` | `0` | `0.0` | `0.0` | `0.0` |
+| `string` | `''` | `""` | `std::string()` | `string.Empty` |
+
+🟠 **Inconsistency**: the Pascal default for `double` is written as `0` (not `0.0`). Pascal will implicitly convert, but it is semantically sloppy.
+
+## 7.4 Normalization Rules (Raw Pascal Type → Normalized Type)
+
+| Raw Pascal type | Normalized to |
+|-----------------|:-------------:|
 | `Integer` / `LongInt` / `Word` / `Byte` / `Cardinal` / `SmallInt` / `ShortInt` / `Int64` / `UInt64` / `LongWord` / `DWord` | `int64` |
 | `Single` / `Double` / `Extended` / `Real` | `double` |
 | `string` / `AnsiString` / `UnicodeString` / `WideString` / `PChar` / `PAnsiChar` / `PWideChar` / `TP_String` / `TPascalString` / `TUPascalString` | `string` |
 
-### 4.6 Unsupported Type Categories
+Normalization is performed by `TPascal_Func_Model.LoadFromParser` in the `Z.Pascal_Func_Model` unit — **not** by the four generators in this project.
 
-```mermaid
-flowchart TD
-    Root["Unsupported Types"]
-    Root --> A["Boolean family<br/>Boolean / LongBool / ByteBool / WordBool"]
-    Root --> B["Variant / OleVariant"]
-    Root --> C["Arrays<br/>array of X / array[0..N] of X"]
-    Root --> D["Records / structs"]
-    Root --> E["Date/time<br/>TDateTime / TDate / TTime"]
-    Root --> F["Classes / interfaces"]
-    Root --> G["Enums / sets / generics"]
-    Root --> H["Pointers / events / anonymous methods"]
+## 7.5 Unsupported Raw Types
 
-    style Root fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
-```
+**Any one parameter or return type hitting the following list causes the entire declaration to be dropped**:
 
----
+- `Boolean` / `LongBool` / `ByteBool` / `WordBool`
+- `Variant` / `OleVariant`
+- `array of X` / `array[a..b] of X`
+- `record` / `class` / `interface`
+- `TDateTime` / `TDate` / `TTime`
+- `Pointer`
+- Enums / sets / generics
+- Anonymous methods / event types
 
-## Chapter 5  Three Work Modes (GUI / CLI / MCP-API)
+## 7.6 Ripple Effects of Changing the Type Whitelist
 
-### 5.1 Decision Diagram
+**When adding a new normalized type (e.g. `bool`), you must modify**:
 
-```mermaid
-flowchart TD
-    Start["Need to generate a provider"]
-    Start --> Q{"Who drives the tool?"}
-    Q -- "Human, interactively" --> GUI["GUI Mode"]
-    Q -- "Script / CI" --> CLI["CLI Mode"]
-    Q -- "AI agent remotely" --> MCP["MCP-API Mode"]
+| # | Location | Change |
+|:-:|----------|--------|
+| 1 | `Z.Pascal_Func_Model` normalization logic | Add `bool` mapping |
+| 2 | `pas_mcp_generator_tool.IsSupportedType` | Add `'bool'` |
+| 3 | `pas_mcp_generator_tool.PascalTypeToJsonType` | Add `bool→boolean` |
+| 4 | `pas_mcp_generator_tool.PascalTypeToJsonLiteral` | Add `bool→false` |
+| 5 | `pas_mcp_generator_tool`'s `jo.I64` / `jo.F` / `jo.S` branches | Add `jo.B` |
+| 6 | `py_mcp_generator_tool` — the same 4 places | |
+| 7 | `cpp_mcp_generator_tool` — the same 4 places | |
+| 8 | `csharp_mcp_generator_tool` — the same 4 places | |
+| 9 | The type tables in all four README generators | |
+| 10 | `pascal_code_mcp_rule.md` / `C_code_mcp_rule.md` | |
 
-    style GUI fill:#D6EAF8,stroke:#1A5490
-    style CLI fill:#D5F5E3,stroke:#1E8449
-    style MCP fill:#FADBD8,stroke:#922B21
-```
-
-### 5.2 GUI Mode
-
-**Entry**: `code_decl_to_mcp.exe` with no arguments.
-
-**State machine**:
-
-```mermaid
-stateDiagram-v2
-    [*] --> Welcome
-    Welcome --> Source: next
-    Source --> SourceJson: next (parse)
-    SourceJson --> ModelJson: next (normalize)
-    ModelJson --> FinalSource: next (generate)
-    FinalSource --> ModelJson: back
-    ModelJson --> SourceJson: back
-    SourceJson --> Source: back
-```
-
-**Five tabs**:
-
-| Tab | Name | Purpose |
-|:---:|------|---------|
-| 1 | Welcome | Introduction, rule-doc links |
-| 2 | Source Code | Paste Pascal / C source |
-| 3 | Source ↔ JSON | LV0 JSON (raw parse) |
-| 4 | JSON ↔ Model | LV1 model JSON |
-| 5 | Final Source | Generated code + README |
-
-**Key buttons**:
-
-| Button | Effect |
-|--------|--------|
-| Select Language | Auto-detect source language |
-| Format | Keep only top-level declarations |
-| Empty unit | Insert minimal skeleton |
-| Test unit | Insert rich syntax sample |
-| Next: Pascal/C → JSON | Parse to LV0 |
-| Next: JSON ↔ Model | Normalize to LV1 |
-| Next: generate source | Generate all artifacts |
-
-### 5.3 CLI Mode
-
-**Entry**: `code_decl_to_mcp.exe <input> <output>`
-
-**Behavior**:
-- Source language detected from input extension
-- Target language detected from output extension
-- README auto-written next to generated code
-- Console subsystem: no GUI created
-
-**Exit codes**:
-
-| Code | Meaning |
-|:----:|---------|
-| 0 | Success |
-| 1 | Missing / invalid arguments |
-| 2 | Source parsing failed |
-| 3 | Code generation failed |
-| 4 | File I/O error |
-
-**Example invocations**:
-
-```bash
-# C header → Python provider
-code_decl_to_mcp.exe ComplexTestUnit.h calculator_provider.py
-
-# Pascal unit → C++ provider (auto-pairs .hpp + .cpp)
-code_decl_to_mcp.exe calculator.pas calculator_provider.hpp
-
-# Pascal unit → Pascal provider
-code_decl_to_mcp.exe calculator.pas calculator_provider.pas
-```
-
-### 5.4 MCP-API Mode
-
-**Entry**: AI agent drives the 11 MCP tools exposed by `code_decl_to_mcp` itself.
-
-**Prerequisites**:
-- `code_decl_to_mcp.exe` GUI is running
-- `mcp_api_tool.exe` (or the beacon + gateway chain) is running
-- An AI client is connected to the gateway
-
-**Tool sequence** (see Chapter 8 for full details):
-
-```mermaid
-flowchart LR
-    A["SetSourceCode"] --> B["ConvertToXxxMCP"]
-    B --> C["GetLastXxx"]
-
-    style A fill:#e3f2fd
-    style B fill:#fff3e0
-    style C fill:#e8f5e9
-```
-
-### 5.5 Comparison Table
-
-| Dimension | GUI | CLI | MCP-API |
-|-----------|:---:|:---:|:-------:|
-| Requires GUI running | Yes | No | **Yes** |
-| Requires beacon | Yes | No | Yes |
-| Requires MCP gateway | No | No | Yes |
-| Suitable for CI | No | **Yes** | No |
-| Intermediate steps visible | Yes | No | No |
-| Drives all 3 targets | Yes | Yes | Yes |
-| Headless | No | Yes | No |
+🔴 **Missing any one place** means that only one language's generated provider rejects the declaration while the other languages still support it — the four-language output becomes **asymmetric**.
 
 ---
 
-## Chapter 6  Code Generators
+# 8. Comment Extraction Rules
 
-### 6.1 Generator Signatures
+## 8.1 Three Independent Implementations
 
-```pascal
-function GeneratePascalCode(Model: TPascal_Func_Model): TPascalStringList;
-function GeneratePythonCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateHPPCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateCPPCode(Model: TPascal_Func_Model): TPascalStringList;
-```
+Each generator has **its own copy** of `GetFullDescription`, and the implementations differ:
 
-**Common contract**:
-- Input must be a `TPascal_Func_Model` in `tnf_Json` mode.
-- `Model = nil` or `Model.UnitName = ''` → returns `nil`.
-- Returned `TPascalStringList` **must be released by the caller**.
-- When no supported functions exist, an empty skeleton is returned.
+| Generator | Approach | UTF-16 safe |
+|-----------|----------|:-----------:|
+| Pascal | Line-based via `TPascalStringList.AsText` | 🟠 **Possibly unsafe** (`SystemString` round-trip) |
+| Python | Direct `TP_String` character-by-character | ✅ |
+| C++ | `CleanComment_Local` (uses `TTextParsing`) | ✅ |
+| C# | Direct `TP_String` character-by-character | ✅ |
 
-### 6.2 The Three-Generator Symmetry Rule
+## 8.2 Line Scanning Rules (Python / C# version)
 
-```mermaid
-flowchart TB
-    A["Change to type whitelist"]
-    B["Change to type mapping"]
-    C["Change to comment extraction"]
-    D["Change to JSON schema generation"]
+For each line:
 
-    A --> X["Must be applied to ALL THREE generators"]
-    B --> X
-    C --> X
-    D --> X
+1. Split on `#10` or `#13`.
+2. Strip leading and trailing whitespace (`#32#9`).
+3. **Skip** lines starting with `@` (Doxygen tags).
+4. **Strip** leading `*` (once or twice).
+5. If the result is non-empty, append it to `Result` (multiple lines joined by `' '`).
 
-    style X fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
-```
+## 8.3 C++ `CleanComment_Local` Difference
 
-### 6.3 Three-Language Difference Matrix
+C++ uses `TTextParsing.Create(Cmt, tsPascal)` to extract `ttComment` tokens, then decodes them with `Translate_Pascal_Decl_Comment_To_Text`.
 
-| Dimension | Pascal | Python | C++ |
-|-----------|--------|--------|-----|
-| Type whitelist | `Int64`/`Double`/`string` | same | same |
-| JSON Schema mapping | same | same | same |
-| Description extraction | via `TPascalStringList.AsText` | char-by-char on `TP_String` | via `CleanComment_Local` |
-| Duplicate tool names | numeric suffix | numeric suffix | **dropped** |
-| Description truncation | none | none | `MAX_DESC_LEN = 200` |
-| Callback macro | `cdecl` | `@LFCallFunc` | `LF_CDECL` |
-| Internal stub name | `internal_call_<Name>_<ApiName>` | `internal_call_<name>` | `internal_call_<Name>` |
-| Output files | `.pas` | `.py` | `.hpp` + `.cpp` |
+## 8.4 Description Truncation
 
-### 6.4 The `internal_call_*` Stub
-
-Every supported function generates a stub. **This is the only place where a human fills in real business logic.**
-
-```mermaid
-flowchart LR
-    A["Generated stub<br/>returns 0 / 0.0 / ''"] --> B["Human fills business logic"]
-    B --> C["Compiled provider"]
-    C --> D["Callback calls stub"]
-
-    style A fill:#ffebee
-    style B fill:#fff3e0,stroke:#e65100,stroke-width:3px
-    style C fill:#e8f5e9
-```
-
-**Contract (all three languages)**:
-- Do **not** modify the function signature.
-- Keep the `// call type: ...` comment on the Pascal side.
-- Keep the `TODO` comment on the Python and C++ sides.
-- The default return value is a **placeholder**, not a real answer.
-
----
-
-## Chapter 7  README Generation System
-
-### 7.1 Design Principles
-
-```mermaid
-flowchart TB
-    P1["One Model, One Truth<br/>Code and docs share TPascal_Func_Model"]
-    P2["All English<br/>Avoids Markdown rendering issues"]
-    P3["Copy-Paste Ready<br/>Each README embeds a runnable test"]
-    P4["Unified Skeleton<br/>10-section structure"]
-    P5["Mermaid-First<br/>All diagrams use Mermaid"]
-    P6["Recognizable Placeholders<br/>&lt;xxx-repo-url&gt;"]
-
-    style P1 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-```
-
-### 7.2 The 10-Section Skeleton
-
-| # | Section | Language-Specific? |
-|:-:|---------|:------------------:|
-| 1 | Overview | Yes |
-| 2 | Runtime Architecture | No |
-| 3 | Test Program | Yes |
-| 4 | Build & Test Procedure | Yes |
-| 5 | Tool Reference | No |
-| 6 | JSON Schema Specification | No |
-| 7 | Debugging & Troubleshooting | Yes |
-| 8 | Portability Notes | Yes |
-| 9 | Reference Resources | Yes |
-| 10 | (Header) | No |
-
-### 7.3 README Generator Contract
-
-```pascal
-function GeneratePascalReadme(Model: TPascal_Func_Model): TPascalStringList;
-function GeneratePythonReadme(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateCPPReadme(Model: TPascal_Func_Model): TPascalStringList;
-```
-
-**Contract**:
-- `Model = nil` or `Model.UnitName = ''` → **returns non-nil degraded text** (single line `# README generation skipped` + reason).
-- Never raises.
-- Does not depend on network, filesystem, or external processes.
-
-### 7.4 Language-Specific Content
-
-```mermaid
-flowchart TB
-    subgraph Pascal["Pascal README"]
-        P1["§1: ZCore + ZNetV2 + v3"]
-        P2["§3: Complete .lpr source"]
-        P3["§4: 6 steps"]
-        P4["§8: .lpr → .dpr conversion"]
-    end
-
-    subgraph Python["Python README"]
-        Y1["§1: py-lingofuse OR v3"]
-        Y2["§3: The generated .py IS the test"]
-        Y3["§4: 7 steps (incl. import verify)"]
-        Y4["§8: venv / PyInstaller"]
-    end
-
-    subgraph Cpp["C++ README"]
-        C1["§1: json.hpp + LingoFuse.h"]
-        C2["§3: main.cpp + fallback header"]
-        C3["§4: 7 steps (g++/cl/MinGW)"]
-        C4["§8: compiler matrix / CMake"]
-    end
-```
-
-### 7.5 Where the README Is Actually Used
-
-**The README is not optional documentation.** It is the actual deliverable for building the artifacts. The generated `.pas` / `.py` / `.hpp` / `.cpp` are skeletons; the paired `.md` tells the user how to build, test, and deploy each one.
-
-**Rule**: Always generate both code and README. Always read the README first.
-
----
-
-# Part III — Agent Interface Contract
-
-## Chapter 8  The 11 MCP Tools of code_decl_to_mcp
-
-### 8.1 Why the Generator Exposes MCP Tools
-
-The `code_decl_to_mcp` project itself exposes **11 MCP tools**. This lets an AI agent **drive the entire generation process**, which closes an important loop:
-
-```mermaid
-flowchart LR
-    A["AI Agent"] -->|MCP| B["11 Generator Tools"]
-    B -->|produce| C["New Tool Providers"]
-    C -->|register to| D["Beacon"]
-    D -.->|become new MCP tools| A
-
-    style A fill:#F5A623,stroke:#B7791F,stroke-width:2px
-    style B fill:#9B59B6,stroke:#6C3483,stroke-width:2px
-    style C fill:#27AE60,stroke:#145A32,stroke-width:2px
-```
-
-The agent can **generate new tools for itself**.
-
-### 8.2 The Three-Step Shape
-
-```mermaid
-flowchart TB
-    S1["Step 1: SetSourceCode<br/>Store source + language<br/>⚠️ Does NOT convert<br/>⚠️ Produces no file"]
-    S2["Step 2: ConvertToXxxMCP<br/>Pascal / Python / C++<br/>⚠️ Requires Step 1 success"]
-    S3["Step 3: GetLastXxx<br/>Pure reader<br/>⚠️ No new conversion<br/>⚠️ No re-call of SetSourceCode"]
-
-    S1 --> S2 --> S3
-
-    style S1 fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
-    style S2 fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    style S3 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-```
-
-### 8.3 The Complete Tool Inventory
-
-| # | Tool | Role | Prerequisite | Output |
-|:-:|------|------|-------------|--------|
-| 1 | `SetSourceCode` | Step 1 — store | None | `{"status":"ok"}` |
-| 2 | `ConvertToPascalMCP` | Step 2 — Pascal | Step 1 success | `{"result":"<path>"}` |
-| 3 | `ConvertToPythonMCP` | Step 2 — Python | Step 1 success | `{"result":"<path>"}` |
-| 4 | `ConvertToCppMCP` | Step 2 — C++ | Step 1 success | `{"result":"<path>"}` |
-| 5 | `GetLastPascalCode` | Step 3 — read Pascal code | Step 2 Pascal success | Full code text |
-| 6 | `GetLastPascalReadme` | Step 3 — read Pascal README | Step 2 Pascal success | Full Markdown |
-| 7 | `GetLastPythonCode` | Step 3 — read Python code | Step 2 Python success | Full code text |
-| 8 | `GetLastPythonReadme` | Step 3 — read Python README | Step 2 Python success | Full Markdown |
-| 9 | `GetLastCppHeader` | Step 3 — read C++ header | Step 2 C++ success | Full header text |
-| 10 | `GetLastCppImpl` | Step 3 — read C++ impl | Step 2 C++ success | Full impl text |
-| 11 | `GetLastCppReadme` | Step 3 — read C++ README | Step 2 C++ success | Full Markdown |
-
-### 8.4 Enforced Constraints
-
-| # | Constraint | Violation Symptom |
-|:-:|-----------|-------------------|
-| 1 | `Language` accepts only `"pascal"` or `"c"` | AI passes `"python"` and gets confused |
-| 2 | Step 1 → Step 2 → Step 3 is mandatory | Skipping Step 1 makes Convert fail |
-| 3 | Do not loop `SetSourceCode` + `ConvertToXxx` | AI re-stores source repeatedly |
-| 4 | `GetLastXxx` is a pure reader | AI expects a new conversion and stalls |
-| 5 | GUI must stay alive | All conversions return `Form not available` |
-
-### 8.5 Return Value Shapes
-
-| Scenario | Response JSON |
-|----------|---------------|
-| `SetSourceCode` success | `{"status":"ok"}` |
-| `SetSourceCode` failure | `{"error":"<message>"}` |
-| `ConvertToXxxMCP` success | `{"result":"<absolute path>"}` |
-| `ConvertToXxxMCP` failure | `{"error":"<message>"}` |
-| `GetLastXxx` success | Full text |
-| `GetLastXxx` failure | Empty string |
-
-### 8.6 Recommended Call Sequences
-
-```mermaid
-flowchart LR
-    subgraph Min["Minimal (Python service)"]
-        M1["SetSourceCode"]
-        M2["ConvertToPythonMCP"]
-        M3["GetLastPythonCode"]
-        M4["GetLastPythonReadme"]
-        M1 --> M2 --> M3 --> M4
-    end
-
-    subgraph Multi["One source, multiple targets"]
-        N1["SetSourceCode"]
-        N2["ConvertToPascalMCP"]
-        N3["ConvertToPythonMCP"]
-        N4["ConvertToCppMCP"]
-        N5["GetLast*  (all branches)"]
-        N1 --> N2 --> N3 --> N4 --> N5
-    end
-
-    style Min fill:#e8f5e9
-    style Multi fill:#fff3e0
-```
-
-### 8.7 MCP Tool Registration JSON (Downstream Tools)
-
-Generated providers register themselves through the `register_agent` API with this JSON shape:
-
-```json
-{
-  "name": "<ApiName>",
-  "description": "<extracted from comments>",
-  "target_app": "<MY_APP_NAME>",
-  "target_api": "<ApiName>",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "<param_name>": {
-        "type": "integer|number|string",
-        "description": "<param description>"
-      }
-    },
-    "required": ["<param_name>", "..."]
-  }
-}
-```
-
-**Field constraints**:
-
-| Field | Constraint |
-|-------|-----------|
-| `name` | Required, tool name |
-| `description` | Required, from comments |
-| `target_app` | Required, equals `MY_APP_NAME` |
-| `target_api` | Required, equals `name` |
-| `parameters.type` | Required, must be `"object"` |
-| `parameters.required` | Required, includes **every** parameter |
-
----
-
-## Chapter 9  Comment Discipline — The Single Most Important Rule
-
-### 9.1 Why This Chapter Matters
-
-An AI agent does **not** read your source file. It reads the **`description` string** of each tool. That string is your source comment, **compressed, de-tagged, and possibly truncated** (C++ side truncates at 200 characters).
-
-> **The quality of your comments is the quality of your agent.**
-
-### 9.2 Human vs AI Reading
-
-```mermaid
-flowchart TB
-    subgraph Human["Human Reading Source"]
-        H1["Reads the whole unit"]
-        H2["Understands the whole workflow"]
-        H3["Sees the next method naturally"]
-        H1 --> H2 --> H3
-    end
-
-    subgraph AI["AI Agent"]
-        A1["Reads only the description string"]
-        A2["Sees only this one tool"]
-        A3["Has no global picture"]
-        A4["Stops after the first successful tool"]
-        A1 --> A2 --> A3 --> A4
-    end
-
-    style H2 fill:#e1ffe1
-    style A3 fill:#ffe1e1
-    style A4 fill:#ffe1e1
-```
-
-### 9.3 The Real-World Incident
-
-**Tool design**: A three-tool generation pipeline.
-
-| Tool | Purpose |
-|------|---------|
-| `SetSourceCode(Source, Language)` | Store source and language |
-| `ConvertToPythonMCP()` | Perform conversion, return path |
-| `GetLastPythonCode()` | Read the generated content |
-
-**Actual agent behavior across three rounds**:
-
-| Round | Agent Behavior | Root Cause |
-|:-----:|---------------|------------|
-| 1 | Called only `SetSourceCode`, saw `{"status":"ok"}`, stopped | Description did not say "Step 1 of 3" |
-| 2 | Called `SetSourceCode` + `ConvertToCppMCP`, but passed `Language='python'` | Parameter name ambiguity |
-| 3 | After clarification, completed the three-step call correctly | — |
-
-**Cost**: Three rounds of comment rewriting, each requiring a full regeneration + beacon restart + retest cycle.
-
-### 9.4 The Four Weapons for AI-Friendly Comments
-
-#### Weapon 1 — Every Tool Answers Three Questions
-
-```mermaid
-flowchart LR
-    Q1["Q1: What is my role<br/>in the workflow?"] --> Q2["Q2: What is my<br/>prerequisite?"]
-    Q2 --> Q3["Q3: What is<br/>my output?"]
-
-    style Q1 fill:#e3f2fd
-    style Q2 fill:#fff3e0
-    style Q3 fill:#e8f5e9
-```
-
-#### Weapon 2 — Decision Table
-
-Place it in the **unit header comment**:
-
-```pascal
-(*
-  WHAT YOU WANT  ->  WHICH TOOLS TO CALL
-  --------------------------------------
-
-      Want Python code ?      SetSourceCode -> ConvertToPythonMCP
-                                              -> GetLastPythonCode
-
-      Want Python README ?    SetSourceCode -> ConvertToPythonMCP
-                                              -> GetLastPythonReadme
-
-      Want Pascal code ?      SetSourceCode -> ConvertToPascalMCP
-                                              -> GetLastPascalCode
-
-      Want C++ header ?       SetSourceCode -> ConvertToCppMCP
-                                              -> GetLastCppHeader
-*)
-```
-
-#### Weapon 3 — WRONG/RIGHT Table
-
-```pascal
-(*
-  COMMON MISTAKES TO AVOID
-  ------------------------
-
-      WRONG   SetSourceCode(Source, "python")
-              - python is not a source language
-      RIGHT   SetSourceCode(Source, "c")
-              ConvertToPythonMCP
-
-      WRONG   Stop after SetSourceCode and expect a file
-      RIGHT   Always follow SetSourceCode with one ConvertToXxxMCP
-
-      WRONG   Call SetSourceCode again before GetLastPythonReadme
-      RIGHT   GetLastPythonReadme reads what ConvertToPythonMCP produced
-*)
-```
-
-**Why it works**: When the AI is about to try something wrong and sees that exact thing in a `WRONG` block, it avoids it. **This is more direct than positive description.**
-
-#### Weapon 4 — Front-Load the First 200 Characters
-
-| Language | `GetFullDescription` Behavior | Truncation |
-|----------|-------------------------------|-----------|
-| Pascal | Scans via `TPascalStringList.AsText` | None |
-| Python | Char-by-char on `TP_String` | None |
-| C++ | `CleanComment_Local` + line scan | **`MAX_DESC_LEN = 200`** |
-
-**Because the C++ side truncates at 200 characters, the first 200 characters must carry the critical information** — especially "workflow role" and "prerequisite".
-
-### 9.5 The 10-Point Agent Description Self-Check
-
-| # | Check | Fix if Failing |
-|:-:|-------|---------------|
-| 1 | Unit header describes the complete workflow | Add a WORKFLOW OVERVIEW section |
-| 2 | Each tool independently answers role / prerequisite / output | Add three role labels |
-| 3 | Multi-step workflow: each tool names the next tool | Write the next tool's name into the description |
-| 4 | "Intent → tool chain" decision table exists | Add the decision table |
-| 5 | "COMMON MISTAKES TO AVOID" table exists | Add the WRONG/RIGHT table |
-| 6 | Ambiguous parameters clarified in the first sentence | Disambiguate explicitly |
-| 7 | Legal values listed with an example illegal value | Complete the list |
-| 8 | First 200 characters cover the critical info | Move the critical info earlier |
-| 9 | `RegisterTools`'s `description` > 200 chars when necessary | Override manually or emit from template |
-| 10 | Test case covers "let the AI run a full workflow from scratch" | Add the test case |
-
-### 9.6 Reserved Comments (Do Not Modify)
-
-| Location | Comment | Reason |
-|----------|---------|--------|
-| Pascal `internal_call_*` | `// call type: Result := ...` | Fill-in point |
-| Pascal `internal_call_*` | `(* ... {$IFDEF FPC} ... *)` block | Optional main-thread sync |
-| Python `internal_call_*` | `"""Wrapper for the original routine ... TODO: replace ..."""` | Fill-in point |
-| Python `internal_call_*` | `# Default return value; replace with actual logic.` | Placeholder marker |
-| C++ `internal_call_*` | `// TODO: replace this placeholder ...` | Fill-in point |
-| Pascal callback | `// ---- <Name> (API: <ApiName>) ----` | Locating marker |
-| File header | Entire docstring | Generator version and entry |
-
-### 9.7 The Comment Iron Rule
-
-```mermaid
-flowchart TD
-    R["Comment Iron Rule"]
-    R --> R1["Contract-related: hands off"]
-    R --> R2["Business-related: your call"]
-    R --> R3["AI reads only the first 200 chars<br/>(C++ hard limit)"]
-    R --> R4["Every tool answers three questions<br/>(role / prerequisite / output)"]
-    R --> R5["Decision table + WRONG/RIGHT table<br/>(global view)"]
-
-    style R fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
-    style R3 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
-```
-
----
-
-# Part IV — Python Agent Ecosystem
-
-## Chapter 10  mcp_api_tool.py — The MCP Gateway
-
-### 10.1 Positioning
-
-`mcp_api_tool.py` is the **MCP protocol gateway**. It translates between MCP JSON-RPC (client-facing) and LingoFuse RPC (backend-facing).
-
-```mermaid
-flowchart LR
-    Client["MCP Client"] -->|JSON-RPC| GW["mcp_api_tool"]
-    GW -->|LF_Call| Beacon["Beacon"]
-    Beacon -->|LF_Call| Provider["Tool Provider"]
-
-    style GW fill:#FADBD8,stroke:#922B21,stroke-width:3px
-```
-
-### 10.2 The Three Core APIs
-
-| API | Type | Input | Output |
-|-----|------|-------|--------|
-| `agent_main` | Call | `{}` | `{tools: [...]}` |
-| `agent_log` | Call | `{message}` | `{status: "ok"}` |
-| `register_agent` | Call | `{name, description, target_app, target_api, parameters}` | `{status: "ok"}` |
-
-### 10.3 Transport Modes
-
-```mermaid
-flowchart TD
-    T["Transport selection"]
-    T --> S["stdio<br/>(default)"]
-    T --> H["http<br/>(recommended)"]
-    T --> E["sse<br/>(deprecated)"]
-
-    S --> S1["Client auto-launches"]
-    S --> S2["Runs in MAIN PROCESS<br/>(avoids Windows spawn)"]
-    H --> H1["Manual start"]
-    H --> H2["Streamable HTTP"]
-    E --> E1["Manual start"]
-    E --> E2["Legacy SSE"]
-
-    style S fill:#e8f5e9
-    style H fill:#e3f2fd
-    style E fill:#ffebee
-```
-
-### 10.4 stdio Console Suppression
-
-```python
-LF_SetOption(b"ConsoleOutput", b"False")
-LF_SetOption(b"Quiet", b"True")
-```
-
-**Reason**: LingoFuse's C layer emits diagnostic output, which pollutes the MCP stdio channel.
-
-**Critical timing**: This must run before any other LingoFuse API in stdio mode.
-
-### 10.5 Signal Handling
-
-```python
-def signal_handler(sig, frame):
-    raise KeyboardInterrupt()   # NOT sys.exit(0)
-```
-
-**Reason**: `sys.exit(0)` raises `SystemExit`, which is **not** caught by `except KeyboardInterrupt`. This causes http/sse subprocesses to become orphaned.
-
-### 10.6 Dynamic Tool Registration
-
-```mermaid
-flowchart TD
-    Start["register_dynamic_tools()"] --> Loop["For each tool from middleware"]
-    Loop --> Name["Resolve Python identifier"]
-    Name --> Params["Build typed signature"]
-    Params --> Body["Build body: args dict + call_tool"]
-    Body --> Exec["exec() the source"]
-    Exec --> Register["mcp.tool(name, description)"]
-    Register --> Next{"More tools?"}
-    Next -- Yes --> Loop
-    Next -- No --> Done["Done"]
-```
-
-**Critical** (v2.40 fix): Generated tool functions **must** carry type annotations (`a: int`, `b: str`, ...). Without annotations, FastMCP advertises empty parameter schemas and clients send `{}` for every argument.
-
-### 10.7 Configuration Generation
-
-```bash
-python mcp_api_tool.py --generate-configs --output-dir ./mcp_configs
-```
-
-Generates per-client JSON config files plus Markdown documentation:
-
-```mermaid
-flowchart LR
-    Gen["--generate-configs"] --> LM["lmstudio_stdio.json<br/>lmstudio_http.json<br/>lmstudio_sse.json<br/>lmstudio_stdio_proxy.json"]
-    Gen --> CL["claude_stdio.json<br/>..."]
-    Gen --> CO["continue_stdio.json<br/>..."]
-    Gen --> JA["jan_stdio.json<br/>..."]
-    Gen --> DS["deepseek_stdio.json<br/>..."]
-    Gen --> GE["generic_stdio.json<br/>..."]
-    Gen --> MD["*_README.md"]
-```
-
----
-
-## Chapter 11  language_middleware.py — The Middleware
-
-### 11.1 Positioning
-
-`language_middleware.py` bridges the MCP gateway and the backend. It is **language-neutral**: it does not know whether the provider is Pascal, Python, or C++.
-
-### 11.2 Key Design
-
-```mermaid
-flowchart TB
-    subgraph Key["Key Design Properties"]
-        K1["Singleton<br/>One instance per process"]
-        K2["Lazy connect<br/>Connect on first use"]
-        K3["Thread-safe<br/>Internal lock"]
-        K4["Auto-reconnect<br/>Via _ensure_connected()"]
-    end
-
-    style Key fill:#e3f2fd,stroke:#1565c0
-```
-
-### 11.3 Complete API
-
-| Method | Purpose |
-|--------|---------|
-| `get_instance(...)` | Get singleton, optionally update config |
-| `get_tools() -> List[Dict]` | Tool list |
-| `call_tool(tool_name, arguments) -> Any` | Invoke a tool |
-| `log(message) -> Optional[Dict]` | Send a log |
-| `is_connected() -> bool` | Connection state |
-| `reconnect()` | Force reconnect |
-| `shutdown()` | Explicit shutdown |
-
-### 11.4 Lifecycle Iron Rule
-
-```mermaid
-flowchart LR
-    A["LF_ExitMainThread"] --> B["LF_FreeApp"]
-    B --> C["LF_Shutdown"]
-
-    style A fill:#e3f2fd
-    style B fill:#fff3e0
-    style C fill:#e8f5e9
-```
-
-**`_disconnect()` must NOT call `LF_Shutdown()`** — the App handle must remain valid across disconnect/reconnect cycles.
-
-### 11.5 The `reg_tool` Callback
-
-The `register_agent` callback reads the field **`name`**, not `tool_name`. This matches the Pascal side's `do_register_agent`.
-
-### 11.6 Response Validation (v7.7)
-
-Two defensive checks in `_fetch_tools_from_backend`:
-
-| Check | Behavior | Rationale |
-|-------|----------|-----------|
-| N1 | Non-object response → clear cache, soft fail | A backend that returns a non-object no longer raises `AttributeError` |
-| N2 | Non-object tool entries → skip with warning | A malformed entry no longer aborts the list |
-
-Both preserve the invariant: **a bad backend cannot abort the connection attempt**.
-
----
-
-## Chapter 12  The LLM Service Trio
-
-### 12.1 The Three Siblings
-
-```mermaid
-flowchart LR
-    subgraph Trio["LLM Service Trio"]
-        S["llm_service<br/>local inference"]
-        P["llm_proxy<br/>pure text passthrough"]
-        L["llm_proxy_tool<br/>proxy + server-side tools"]
-    end
-
-    style S fill:#e3f2fd,stroke:#1565c0
-    style P fill:#fff3e0,stroke:#e65100
-    style L fill:#fce4ec,stroke:#c2185b
-```
-
-### 12.2 Capability Matrix
-
-| API | `llm_service` | `llm_proxy` | `llm_proxy_tool` |
-|-----|:-------------:|:-----------:|:----------------:|
-| `generate` | 1 | 1 | 1 |
-| `create_session` | 1 | 1 | 1 |
-| `close_session` | 1 | 1 | 1 |
-| `cancel_session` | 1 | 1 | 1 |
-| `list_sessions` | 1 | 1 | 1 |
-| `set_system_message` | **1** | **0** | **0** |
-| `health` | 1 | 1 | 1 |
-| `llm_stream` | 1 | 1 | 1 |
-| `attachments` | 1 | 1 | 1 |
-| `vision` | **0** | 0/1 | 0/1 |
-| `tools` / `tool_calls` / `tool_results` | — | — | **1** |
-| `server_kind` | `service` | `proxy` | `proxy` |
-
-**Precise meaning of `vision=0`**: The server itself does not perform visual processing. It does not mean the whole pipeline lacks multimodal support. Image understanding depends on the **backend**.
-
-### 12.3 `llm_service.py` — Local Inference
-
-| Dimension | Value |
-|-----------|-------|
-| Inference backend | local llama.cpp |
-| Inference thread | single serial worker (**required**: llama.cpp is not thread-safe) |
-| Context management | server holds KV cache |
-| Session reclaim | **dual condition**: status=idle AND idle time > timeout AND client app offline |
-| `check_app` cache delay | ~3 seconds |
-| Thinking priority | 1) `options.thinking` → 2) `--thinking` → 3) `LLM_THINKING` → 4) `DEFAULT_THINKING` |
-
-**Attachment limits**: text ≤ 256 KB/file, 512 KB total; image base64 ≤ 8 MB/file, 16 MB total. **Images accepted only when `--vision` is enabled** (currently `llm_service` always rejects them).
-
-### 12.4 `llm_proxy.py` — Pure Text Proxy
-
-**Key differences from `llm_service`**:
-
-| Dimension | `llm_service` | `llm_proxy` |
-|-----------|---------------|-------------|
-| Model loading | local llama.cpp | none |
-| Inference | single serial worker | none |
-| Context | server holds KV cache | rebuilds messages per round |
-| `set_system_message` | ✅ supported | ❌ explicitly rejected |
-| Session reclaim | dual condition | single condition (timeout only) |
-| Default `session_timeout` | 600 | 1800 |
-
-**`set_system_message` rejection response**:
-
-```json
-{
-  "code": -1,
-  "status": "unsupported",
-  "error": "set_system_message is not supported by llm_proxy.\n..."
-}
-```
-
-### 12.5 `llm_proxy_tool.py` — LTB
-
-**Positioning**: `llm_proxy` + **server-side tool execution**.
-
-**The multi-round loop**:
-
-```mermaid
-stateDiagram-v2
-    [*] --> Round0: generate arrives
-    Round0 --> CallBackend: with tools
-    CallBackend --> CheckCalls: SSE finished
-    CheckCalls --> Final: no tool_calls
-    CheckCalls --> ExecuteTools: has tool_calls
-    ExecuteTools --> AppendHistory: append role=tool
-    AppendHistory --> CheckCaps: check round/call limits
-    CheckCaps --> CallBackend: under limits, next round with tools
-    CheckCaps --> CallBackendNoTools: over limit or last round, no tools
-    CallBackendNoTools --> Final
-    Final --> EmitFinish: send finish
-    EmitFinish --> [*]
-```
-
-**Key decisions**:
-- `is_final_round = force_final_round OR (round_idx == max_tool_rounds - 1)`
-- When `total_tool_calls >= max_total_tool_calls`, `force_final_round = True`.
-- **The final round does not carry `tools`**, forcing the model to produce text.
-
-**Tool-result truncation**:
-1. Single result > `max_tool_result_chars` → truncated + `...(truncated)`.
-2. Total characters > `max_total_tool_result_chars` → truncated + `...(tool-result budget exhausted)`.
-
-**Pre-connect middleware ordering (critical)**: LTB must call `_ensure_tools_ready()` **before** `Server.start()`. Reason: `LF_PrepareDone()` returns 1 only once per process.
-
-### 12.6 `llm_test.py` — Interactive Test Client
-
-**Interactive commands**:
-
-| Command | Purpose |
-|---------|---------|
-| `/new` | Create a new session |
-| `/use <session_id>` | Switch current session |
-| `/sessions` | List sessions for this client |
-| `/close [id]` | Close a session |
-| `/cancel` | Cancel the current generation |
-| `/sys <message>` | Update global default system message |
-| `/health` | Query server health |
-| `/capabilities` | Show server capability matrix |
-| `/capabilities refresh` | Force re-fetch |
-| `/thinking on\|off` | Toggle thinking mode |
-| `/help` | Show help |
-| `/quit` / `/exit` | Exit |
-
-**One-shot mode**:
-
-```bash
-python llm_test.py --content "review this code" --text main.py
-python llm_test.py --content "describe this chart" --image a.png
-python llm_test.py --text a.py --text b.py --image chart.png
-```
-
----
-
-## Chapter 13  bridge.py and HTTP Interop
-
-### 13.1 Positioning
-
-`bridge.py` is a **bidirectional HTTP ↔ LingoFuse gateway** with canonical JSON normalization.
-
-```mermaid
-flowchart LR
-    subgraph DirectionA["Direction A — Inbound"]
-        HTTP1["HTTP client"] -->|POST /app/api| B1["bridge.py"]
-        B1 -->|LF_Call| P1["LingoFuse provider"]
-    end
-
-    subgraph DirectionB["Direction B — Outbound"]
-        LF1["LingoFuse client"] -->|LF_Call __lf_outbound_post__| B2["bridge.py"]
-        B2 -->|HTTP request| HTTP2["Remote HTTP server"]
-    end
-
-    subgraph DirectionC["Direction C — Repair"]
-        LF2["LingoFuse client"] -->|LF_Call __lf_repair_json__| B3["bridge.py"]
-        B3 -->|repaired text| LF2
-    end
-
-    style DirectionA fill:#e3f2fd
-    style DirectionB fill:#fff3e0
-    style DirectionC fill:#e8f5e9
-```
-
-### 13.2 Default Names
-
-| Element | Default Value |
-|---------|---------------|
-| Bridge App name | `__lf_http_bridge__` |
-| Outbound POST API | `__lf_outbound_post__` |
-| JSON repair API | `__lf_repair_json__` |
-
-**Namespace convention**: The double-underscore prefix/suffix cannot appear in a normal HTTP URL path without encoding, so the bridge's own APIs never collide with business APIs.
-
-### 13.3 Inbound Response Codes
-
-| Code | HTTP | Meaning |
-|------|------|---------|
-| `-1` | 200 | Remote call failed |
-| `-2` | 400 | Request shape error |
-| `-3` | 200 | API pre-check failed |
-
-### 13.4 JSON Normalization
-
-The bridge normalizes payloads in both directions. The two-layer repair stack:
-
-```mermaid
-flowchart TD
-    Start["Raw bytes"] --> Strip["Strip BOM, trailing NULs"]
-    Strip --> Decode["Decode UTF-8 → GBK → Latin-1"]
-    Decode --> Parse["json.loads()"]
-    Parse -- Success --> Canon["Canonicalize via dumps_json"]
-    Parse -- Failure --> L1["Layer 1: _try_repair_json<br/>(BOM, trailing comma)"]
-    L1 --> L2["Layer 2: repair_json_text<br/>(unified engine)"]
-    L2 -- Success --> Canon
-    L2 -- Failure --> Pass["Passthrough: return original bytes"]
-    Canon --> Done["Return canonical JSON"]
-    Pass --> Done
-
-    style Parse fill:#e3f2fd
-    style L1 fill:#fff3e0
-    style L2 fill:#fce4ec
-    style Pass fill:#ffebee
-```
-
-### 13.5 `lf_http_bridge_client.pas`
-
-A Pascal client library for the bridge. **Not a program** — it does not prepare services/clients, does not call `LF_PrepareDone`.
-
-**Three usage levels**:
-
-| Level | Function | Purpose |
-|-------|----------|---------|
-| Highest | `LFHttpPostBody` | Send JSON body, unwrap response body |
-| Middle | `LFHttpPost` | Send JSON body, receive full envelope |
-| Lowest | `LFHttpCall` | Full control over method, headers, timeout |
-| Repair | `LFHttpRepairJson` | JSON repair service |
-
----
-
-## Chapter 14  Startup Sequence Contract
-
-### 14.1 The Complete Startup Chain
-
-```mermaid
-flowchart TD
-    S1["Terminal 1: pascal_agent_service.exe"]
-    S2["Terminal 2: <AppName>_provider.exe<br/>(or python <AppName>_tool_provider.py)"]
-    S3["Terminal 3: mcp_api_tool.exe --transport stdio"]
-    S4["Client config: merge lmstudio_stdio.json"]
-    S5["Restart AI client"]
-    S6["Client shows new tools in tool list"]
-    S7["Test: ask AI to call a tool"]
-
-    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
-
-    style S1 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    style S7 fill:#fce4ec,stroke:#c2185b,stroke-width:2px
-```
-
-### 14.2 Why Order Matters
-
-```mermaid
-flowchart TD
-    Q["Why can't we start in any order?"]
-    Q --> A["LF_PrepareDone()<br/>returns 1 only once per process"]
-    A --> B["If the beacon starts before the gateway,<br/>the gateway's PrepareDone may return 0"]
-    B --> C["LTB therefore pre-connects middleware<br/>BEFORE Server.start()"]
-
-    style A fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    style C fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-```
-
-### 14.3 The 8-Step Startup Checklist
-
-| # | Step | Command / Configuration |
-|:-:|------|------------------------|
-| 1 | Generate code | GUI / CLI / MCP-API |
-| 2 | Read the generated `.md` | Open `<basename>_readme.md` |
-| 3 | Build the provider | Follow the `.md` |
-| 4 | Fill in `internal_call_*` | Edit the generated unit/module |
-| 5 | Register the tool | Automatic via `Execute_And_Reg_all()` |
-| 6 | Start the beacon | `pascal_agent_service.exe` |
-| 7 | Start the provider | `<provider>.exe` or `python <provider>.py` |
-| 8 | Start the agent | Path A: `mcp_api_tool.exe` · Path B: `llm_proxy_tool.exe` |
-
-**Step 9 (not optional)**: **Audit AI descriptions** (see Chapter 9).
-
----
-
-# Part V — Build and Integration
-
-## Chapter 15  Pascal Provider Build
-
-### 15.1 The Three-Repository Dependency
-
-```mermaid
-flowchart TD
-    subgraph Required["Required Repositories"]
-        R1["ZCore<br/>(Z.Core units)"]
-        R2["ZNetV2<br/>(lingofuse_import.pas + z_ipc_*.dll)"]
-        R3["LingoFuse-pasAgent-v3<br/>(beacon + MCP gateway + examples)"]
-    end
-
-    subgraph Use["Usage"]
-        U1["-Fu&lt;ZCore&gt; on compile"]
-        U2["-Fu&lt;ZNetV2&gt; on compile"]
-        U3["Runtime: pascal_agent_service.exe"]
-    end
-
-    R1 --> U1
-    R2 --> U2
-    R3 --> U3
-```
-
-### 15.2 Compile Command
-
-```bash
-fpc -Fu<workspace>/ZNetV2/ZCore -Fu<workspace>/ZNetV2 <AppName>_provider.lpr
-```
-
-Or open the `.lpi` in Lazarus and press **F9**.
-
-### 15.3 The Embedded Test Program (`.lpr`)
-
-The Pascal README §3 embeds a complete runnable `.lpr`:
-
-```pascal
-program <AppName>_provider;
-
-{$mode objfpc}{$H+}
-{$CODEPAGE UTF8}
-
-uses
-  {$IFDEF UNIX}cthreads,{$ENDIF}
-  {$IFDEF MSWINDOWS}Windows,{$ENDIF}
-  SysUtils, Classes,
-  Z.Core,
-  <UnitName>_tool_provider_unit;
-
-begin
-  WriteLn('=== <AppName> Tool Provider ===');
-  WriteLn('Connecting to ipc:agent ...');
-
-  if not Execute_And_Reg_all then
-  begin
-    WriteLn('');
-    WriteLn('[FATAL] Provider startup failed.');
-    WriteLn('Checklist:');
-    WriteLn('  1. Is pascal_agent_service.exe running?');
-    WriteLn('  2. Is the endpoint ipc:agent reachable?');
-    WriteLn('  3. Check DEBUG_LOG output above for details.');
-    Halt(1);
-  end;
-
-  WriteLn('');
-  WriteLn('[OK] Provider is ready. All tools registered.');
-  WriteLn('Press Enter to shut down.');
-  ReadLn;
-
-  LF_ExitMainThread;
-  LF_Shutdown;
-  WriteLn('[OK] Shutdown complete.');
-end.
-```
-
-### 15.4 Key Points
-
-| Point | Reason |
-|-------|--------|
-| `{$mode objfpc}{$H+}` | Main mode for a standalone program |
-| `{$CODEPAGE UTF8}` | Ensures Chinese strings are correct |
-| `cthreads` first on Unix | RTS links the multi-threaded C library |
-| `Z.Core` in `uses` | Provider internally uses `TCompute` / `TCore_Thread` |
-| `LF_ExitMainThread` + `LF_Shutdown` | Release all LingoFuse resources |
-
-### 15.5 Delphi Portability
-
-| Step | Action |
-|------|--------|
-| 1 | Rename `.lpr` → `.dpr` |
-| 2 | Replace `{$mode objfpc}{$H+}` with Delphi project header |
-| 3 | Remove `cthreads` (Delphi RTL handles threading automatically) |
-| 4 | Set unit search paths |
-| 5 | **The generated `<UnitName>_tool_provider_unit.pas` is already Delphi-compatible** |
-
----
-
-## Chapter 16  Python Provider Build
-
-### 16.1 The Generated File Is the Test Program
-
-The generated `.py` file **already contains** an `if __name__ == "__main__":` block. There is **no separate test script**.
-
-### 16.2 The Two Package Sources
-
-```mermaid
-flowchart TD
-    Start["How to provide `lingofuse`?"]
-    Start --> PathA{"Standalone package<br/>available?"}
-    PathA -- Yes --> A["pip install py-lingofuse"]
-    PathA -- No --> B["Use v3's src/lingofuse/"]
-    B --> B1["set PYTHONPATH=&lt;v3&gt;/src"]
-    A --> Run["python &lt;UnitName&gt;_tool_provider.py"]
-    B1 --> Run
-
-    style A fill:#e8f5e9
-    style B fill:#fff3e0
-```
-
-### 16.3 Environment Configuration
-
-**Path A (recommended)**:
-```bash
-pip install py-lingofuse
-python <UnitName>_tool_provider.py
-```
-
-**Path B (fallback)**:
-
-| Shell | Command |
-|-------|---------|
-| Windows cmd | `set PYTHONPATH=D:\LingoFuse-pasAgent-v3\src` |
-| Windows PowerShell | `$env:PYTHONPATH = "D:\LingoFuse-pasAgent-v3\src"` |
-| Linux / macOS | `export PYTHONPATH=/path/to/LingoFuse-pasAgent-v3/src` |
-
-### 16.4 Verify the Import
-
-```bash
-python -c "import lingofuse._lf_native as m; print('OK', m.__file__)"
-```
-
-If this fails:
-- Path A: re-check `pip show py-lingofuse`
-- Path B: re-check `PYTHONPATH`
-
-### 16.5 Environment Variables
-
-| Variable | Required | Purpose |
-|----------|:--------:|---------|
-| `PYTHONPATH` | Only for Path B | Locate `lingofuse` package |
-| `PATH` | Recommended | Locate `z_ipc_*.dll` at process start |
-
----
-
-## Chapter 17  C++ Provider Build
-
-### 17.1 Current Status
-
-**The `cppAgent` repository has not been released yet.** Generated C++ README files therefore provide **three fallback paths** to obtain `LingoFuse.h`.
-
-```mermaid
-flowchart TD
-    Start["Need LingoFuse.h"]
-    Start --> A["Official cppAgent release"]
-    Start --> B["LingoFuse runtime distribution"]
-    Start --> C["Translate from lingofuse_import.pas"]
-    Start --> D["Use the README §3.1 fallback header"]
-
-    A -.->|not available yet| X["Not published"]
-    B --> Use["Usable"]
-    C --> Use
-    D --> Use
-
-    style D fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
-```
-
-### 17.2 Build Commands
-
-**Linux / macOS**:
-```bash
-g++ -std=c++17 -O2 -I. main.cpp <unit>_tool_provider.cpp \
-    -L. -lLingoFuse -Wl,-rpath,. -o provider
-```
-
-**Windows (MSVC)**:
-```bat
-cl /std:c++17 /EHsc /I. main.cpp <unit>_tool_provider.cpp ^
-   /link /LIBPATH:. LingoFuse.lib /OUT:provider.exe
-```
-
-**Windows (MinGW-w64)**:
-```bat
-g++ -std=c++17 -O2 -I. main.cpp <unit>_tool_provider.cpp ^
-    -L. -lLingoFuse -o provider.exe
-```
-
-### 17.3 The Fallback `LingoFuse.h`
-
-The C++ README §3.1 embeds a minimal ~50-line header that declares only the symbols actually used by the generated provider:
-
-| Symbol Group | Declarations |
-|--------------|-------------|
-| Handle types | `TDataHnd`, `TAppHnd` |
-| Callback types | `LFCallFunc`, `LFNotifyFunc` |
-| Data handle ops | `LF_CreateData`, `LF_FreeData`, `LF_GetBuffer`, `LF_WriteBuffer`, `LF_ReadBuffer`, `LF_GetPos`, `LF_SetPos`, `LF_GetSize`, `LF_SetSize` |
-| App ops | `LF_CreateApp`, `LF_FreeApp`, `LF_RegisterCall`, `LF_RegisterNotify`, `LF_Unregister` |
-| Network | `LF_ResetPrepare`, `LF_PrepareClient`, `LF_PrepareService`, `LF_PrepareDone`, `LF_ExitMainThread`, `LF_Shutdown` |
-| RPC | `LF_Call`, `LF_Notify`, `LF_Sequenced_Notify` |
-| Options / status | `LF_SetOption`, `LF_GetStatusCount`, `LF_GetStatus`, `LF_PostStatus`, `LF_CheckMainThread`, `LF_CheckApp`, `LF_CheckApi` |
-
-### 17.4 The Embedded Test Program (`main.cpp`)
-
-```cpp
-#include "<UnitName>_tool_provider.hpp"
-#include <cstdio>
-#include <cstdlib>
-
-extern "C" void LF_ExitMainThread();
-extern "C" void LF_Shutdown();
-
-int main()
-{
-    std::printf("=== %s Tool Provider ===\n", MY_APP_NAME);
-    std::printf("Connecting to %s ...\n", IPC_ENDPOINT);
-
-    if (!Execute_And_Reg_all())
-    {
-        std::fprintf(stderr, "\n[FATAL] Provider startup failed.\n");
-        return 1;
-    }
-
-    std::printf("\n[OK] Provider is ready. All tools registered.\n");
-    std::printf("Press Enter to shut down.\n");
-    std::getchar();
-
-    LF_ExitMainThread();
-    LF_Shutdown();
-    return 0;
-}
-```
-
-### 17.5 Compiler Support Matrix
-
-| Compiler | Minimum Version | Notes |
-|----------|----------------|-------|
-| MSVC | Visual Studio 2019 (16.8) | `/std:c++17` required |
-| g++ | 7.0 | `-std=c++17` required |
-| clang++ | 5.0 | `-std=c++17` required |
-
-### 17.6 Future CMake Integration
-
-Once `cppAgent` is released, the expected CMake configuration is:
-
-```cmake
-cmake_minimum_required(VERSION 3.15)
-project(<app>_provider CXX)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-find_package(LingoFuse REQUIRED)   # provided by cppAgent
-find_package(nlohmann_json REQUIRED)
-
-add_executable(<app>_provider
-    main.cpp
-    <unit>_tool_provider.cpp)
-
-target_link_libraries(<app>_provider
-    PRIVATE LingoFuse::LingoFuse nlohmann_json::nlohmann_json)
-```
-
----
-
-## Chapter 18  End-to-End Deployment
-
-### 18.1 Scenario — Calculator Tool via Pascal + MCP
-
-**Step 1 — Write the declaration** (`calculator.pas`):
-
-```pascal
-unit calculator;
-
-interface
-
-{*
- * Add two integers: a + b
- *
- * Step 1 of the calculator workflow. The caller passes two integers
- * and receives their sum. This tool is standalone: no prerequisite,
- * no follow-up tool required.
- *
- * @param a  First operand (Int64)
- * @param b  Second operand (Int64)
- * @return   a + b
- *}
-function Add(a: Integer; b: Integer): Integer;
-
-{*
- * Multiply two integers: a * b
- *}
-function Mul(a: Integer; b: Integer): Integer;
-
-implementation
-function Add(a: Integer; b: Integer): Integer;
-begin Result := a + b; end;
-
-function Mul(a: Integer; b: Integer): Integer;
-begin Result := a * b; end;
-end.
-```
-
-**Step 2 — Generate**: Run GUI, paste, click through 5 tabs, copy the 7 files.
-
-**Step 3 — Fill in `internal_call_*`**: Find `internal_call_Add_Add` in `calculator_tool_provider_unit.pas`, replace the placeholder body.
-
-**Step 4 — Build the provider**:
-
-```bash
-fpc -Fu<ZCore> -Fu<ZNetV2> calculator_provider.lpr
-```
-
-**Step 5 — Start the service chain**:
-
-```powershell
-# Terminal 1
-.\pascal_agent_service.exe
-
-# Terminal 2
-.\calculator_provider.exe
-
-# Terminal 3
-.\mcp_api_tool.exe --generate-configs --output-dir .\mcp_configs
-.\mcp_api_tool.exe --transport stdio
-```
-
-**Step 6 — Configure LM Studio**: Merge `lmstudio_stdio.json` into MCP Servers settings, restart.
-
-**Step 7 — Test**: Ask `Please compute (5 + 7) * 3`.
-
-### 18.2 Scenario — Python Provider Quick Start
-
-```mermaid
-flowchart LR
-    G["Generate"] --> E["Set env"]
-    E --> V["Verify import"]
-    V --> R["Run provider"]
-    R --> S["Same steps 5-7 as above"]
-
-    style G fill:#e3f2fd
-    style R fill:#e8f5e9
-```
-
-### 18.3 Scenario — C++ Provider from Scratch
-
-```mermaid
-flowchart LR
-    G["Generate"] --> H["Get LingoFuse.h<br/>(fallback from README)"]
-    H --> M["Get main.cpp<br/>(from README)"]
-    M --> J["Download json.hpp"]
-    J --> C["Compile with g++/cl/MinGW"]
-    C --> R["Run provider"]
-```
-
-### 18.4 Scenario — AI Agent Drives the Generator
-
-```mermaid
-sequenceDiagram
-    participant Agent as AI Agent
-    participant GW as mcp_api_tool
-    participant Gen as code_decl_to_mcp (GUI)
-
-    Agent->>GW: tools/call SetSourceCode
-    GW->>Gen: LF_Call SetSourceCode
-    Gen-->>GW: {"status":"ok"}
-    GW-->>Agent: {"status":"ok"}
-
-    Agent->>GW: tools/call ConvertToPythonMCP
-    GW->>Gen: LF_Call ConvertToPythonMCP
-    Gen-->>GW: {"result":"<path>"}
-    GW-->>Agent: {"result":"<path>"}
-
-    Agent->>GW: tools/call GetLastPythonCode
-    GW->>Gen: LF_Call GetLastPythonCode
-    Gen-->>GW: <full code>
-    GW-->>Agent: <full code>
-
-    Agent->>GW: tools/call GetLastPythonReadme
-    GW->>Gen: LF_Call GetLastPythonReadme
-    Gen-->>GW: <full README>
-    GW-->>Agent: <full README>
-```
-
-**Critical**: The agent must start `mcp_api_tool` and the `code_decl_to_mcp` GUI must stay running.
-
-### 18.5 Scenario — Pascal GUI Client via LTB
-
-```powershell
-# Start LM Studio (load model, enable local server on port 1234)
-# Start beacon and provider
-.\pascal_agent_service.exe
-.\calculator_tool_provider_unit.exe
-
-# Start LTB
-.\llm_proxy_tool.exe `
-  --backend-url http://127.0.0.1:1234/v1 `
-  --backend-model "nvidia-nemotron-3-nano-omni-30b-a3b-reasoning" `
-  --mcp-reg-agent-app llm_proxy_agent `
-  --mcp-tool-provider-app agent_main_app
-```
-
-The Pascal GUI client connects to `LLM_Service` on `ipc:llm_service` and simply calls `Generate`. **The client has no idea the tool system exists.**
-
----
-
-# Part VI — Contracts and Reference
-
-## Chapter 19  Wire Format and Protocol
-
-### 19.1 Three-Layer Protocol Stack
-
-```mermaid
-flowchart TB
-    L4["Layer 4 — MCP JSON-RPC<br/>tools/call / tools/list"]
-    L3["Layer 3 — Tool-call JSON<br/>{param_name: value} / {result: value}"]
-    L2["Layer 2 — DataHandle byte stream<br/>UTF-8(...) || 0x00"]
-    L1["Layer 1 — LingoFuse C4<br/>binary RPC frames"]
-
-    L4 --> L3 --> L2 --> L1
-```
-
-### 19.2 DataHandle Byte Format
-
-**Call input** (client → provider): `[UTF-8 JSON bytes] [0x00]`
-
-**Call output** (provider → client): `[UTF-8 JSON bytes] [0x00]`
-
-**Byte-level examples**:
-
-| Logical value | Bytes |
-|---------------|-------|
-| `{"a": 5, "b": 7}` | `7B 22 61 22 3A 20 35 2C 20 22 62 22 3A 20 37 7D 00` |
-| `{"result": 12}` | `7B 22 72 65 73 75 6C 74 22 3A 20 31 32 7D 00` |
-| `{"status": "ok"}` | `7B 22 73 74 61 74 75 73 22 3A 20 22 6F 6B 22 7D 00` |
-| `{"error": "Invalid JSON"}` | `7B 22 65 72 72 6F 72 22 3A 20 22 49 6E 76 61 6C 69 64 20 4A 53 4F 4E 22 7D 00` |
-| `{"name": "中文"}` | `7B 22 6E 61 6D 65 22 3A 20 22 E4 B8 AD E6 96 87 22 7D 00` |
-
-### 19.3 JSON No-Escape Contract
-
-**Iron rule**: Every non-ASCII character must be emitted as **raw UTF-8 bytes**, **never** as a `\uXXXX` sequence.
-
-| Stage | Correct Form |
-|-------|--------------|
-| Pascal serialization | `jo.ToBytes` |
-| Python serialization | `json.dumps(obj, ensure_ascii=False).encode("utf-8")` |
-| C++ serialization | `obj.dump(-1, ' ', false, ...)` |
-| Transport | Pass UTF-8 bytes directly |
-
-### 19.4 Output JSON Contract
-
-**Three response shapes**:
-
-| Case | Response JSON | Trigger |
-|------|---------------|---------|
-| Function success | `{"result": <value>}` | `IsFunction=True` and no exception |
-| Procedure success | `{"status": "ok"}` | `IsFunction=False` and no exception |
-| Any error | `{"error": "<msg>"}` | Empty input / invalid JSON / exception |
-
-### 19.5 Input JSON Contract
-
-**Parameter name = JSON key** (exact match, case-sensitive).
-
-**Forbidden**: case transformation, abbreviation, prefix/suffix, camelCase/snake_case conversion, or any "beautification".
-
-### 19.6 Error Message Formats
-
-| Scenario | Pascal Side | Python Side |
-|----------|-------------|-------------|
-| Empty input | **exactly** `"Empty input"` | **exactly** `"Empty input"` |
-| Invalid JSON | **exactly** `"Invalid JSON"` | prefixed `"Invalid JSON: <error>"` |
-
-**Do not change these messages** — some test scripts string-match them.
-
----
-
-## Chapter 20  Type System and Mapping
-
-### 20.1 The Only Allowed Trio
-
-| Normalized | Python Type Hint | JSON Schema | JSON Default | C++ Type |
-|:----------:|:----------------:|:-----------:|:------------:|:--------:|
-| `int64` | `int` | `integer` | `0` | `std::int64_t` |
-| `double` | `float` | `number` | `0.0` | `double` |
-| `string` | `str` | `string` | `""` | `std::string` (return) / `const std::string&` (parameter) |
-
-### 20.2 Five-Point Consistency
-
-```mermaid
-flowchart LR
-    P1["Pascal param extraction<br/>jo.I64['x'] / jo.F['x'] / jo.S['x']"]
-    P2["Pascal return write<br/>jo.I64['result'] := ret"]
-    P3["Python param extraction<br/>data.get('x') or default"]
-    P4["Python return write<br/>json.dumps({'result': ret}, ensure_ascii=False)"]
-    P5["JSON Schema<br/>type: integer / number / string"]
-
-    style P1 fill:#D6EAF8
-    style P2 fill:#D6EAF8
-    style P3 fill:#D5F5E3
-    style P4 fill:#D5F5E3
-    style P5 fill:#FADBD8
-```
-
-**If any one is wrong**: the client may see a default value instead of the real return value.
-
-### 20.3 Description Truncation
-
-| Language | Truncation |
-|----------|-----------|
+| Generator | Truncation |
+|-----------|-----------|
 | Pascal | None |
 | Python | None |
-| C++ | **200 characters** (`MAX_DESC_LEN`) |
+| C++ | **`MAX_DESC_LEN = 200`** |
+| C# | None |
+
+🟠 **C++-side 200-character truncation**: if a description exceeds 200 characters, **only the C++ language sees the truncated version**; the others see the full version.
+
+## 8.5 Table-Safe Text (`GetTableCellText`)
+
+Before inserting a description into a Markdown table, the README generators:
+
+1. Call `GetFullDescription`.
+2. `ReplaceChar('|', '/')` — replace pipes with slashes.
+3. `ReplaceChar(#13#10, ' ')` — replace newlines with spaces.
+4. `TrimChar(#32#9)`.
+5. If still empty → return `'(no description)'`.
+
+## 8.6 Ripple Effects of Changing Comment Extraction
+
+**Modifying `GetFullDescription` requires updating**:
+
+| # | Generator | Affected output |
+|:-:|-----------|-----------------|
+| 1 | `pas_mcp_generator_tool` | Pascal code + Pascal README |
+| 2 | `py_mcp_generator_tool` | Python code + Python README |
+| 3 | `cpp_mcp_generator_tool` | C++ code + C++ README |
+| 4 | `csharp_mcp_generator_tool` | C# code + C# README |
+
+**Recommendation**: extract this logic into a shared unit (e.g. `mcp_generator_common.pas`) and have all four generators `uses` it.
 
 ---
 
-## Chapter 21  Configuration Reference
+# 9. Function Filtering and Duplicate Handling
 
-### 21.1 `code_decl_to_mcp` CLI
+## 9.1 Filtering Logic in Three Generators
 
-| Argument | Description |
-|----------|-------------|
-| `--help` / `-h` / `-?` / `/?` | Show help |
-| `<input> <output>` | Convert file |
-
-**Exit codes**: 0 success, 1 bad args, 2 parse fail, 3 gen fail, 4 I/O error.
-
-### 21.2 `mcp_api_tool.py`
-
-| Argument | Default | Env Var |
-|----------|---------|---------|
-| `--transport` | `stdio` | `MCP_TRANSPORT` |
-| `--host` | `0.0.0.0` | `MCP_HOST` |
-| `--port` | `8000` | `MCP_PORT` |
-| `--endpoint` | `ipc:agent` | `LINGOFUSE_ENDPOINT` |
-| `--timeout` | `5000` | `LINGOFUSE_TIMEOUT_MS` |
-| `--reg-agent-app` | `reg_agent` | `LINGOFUSE_REG_AGENT_APP` |
-| `--tool-provider-app` | `agent_main_app` | `LINGOFUSE_TOOL_PROVIDER_APP` |
-| `--agent-main-api` | `agent_main` | `LINGOFUSE_AGENT_MAIN_API` |
-| `--agent-log-api` | `agent_log` | `LINGOFUSE_AGENT_LOG_API` |
-| `--debug` | `False` | `MCP_DEBUG` |
-| `--log-file` | None | `MCP_LOG_FILE` |
-| `--generate-configs` | `False` | — |
-| `--output-dir` | `./mcp_configs` | — |
-| `--proxy-path` | auto-detect | `MCP_API_PROXY_PATH` |
-
-### 21.3 `llm_service.py`
-
-See Chapter 12.3 and the module docstring.
-
-### 21.4 `llm_proxy.py`
-
-See Chapter 12.4.
-
-### 21.5 `llm_proxy_tool.py` (LTB-specific)
-
-| Argument | Default | Env Var |
-|----------|---------|---------|
-| `--enable-tools` / `--no-tools` | enabled | `LLM_PROXY_ENABLE_TOOLS` |
-| `--mcp-endpoint` | `ipc:agent` | `LLM_PROXY_MCP_ENDPOINT` |
-| `--mcp-timeout` | `5000` | `LLM_PROXY_MCP_TIMEOUT` |
-| `--mcp-reg-agent-app` | `llm_proxy_agent` | `LLM_PROXY_MCP_REG_AGENT_APP` |
-| `--mcp-tool-provider-app` | `agent_main_app` | `LLM_PROXY_MCP_TOOL_PROVIDER_APP` |
-| `--max-tool-rounds` | `100` | `LLM_PROXY_MAX_TOOL_ROUNDS` |
-| `--max-total-tool-calls` | `50` | `LLM_PROXY_MAX_TOTAL_TOOL_CALLS` |
-| `--max-tools-per-round` | `10` | `LLM_PROXY_MAX_TOOLS_PER_ROUND` |
-| `--max-tool-result-chars` | `8000` | `LLM_PROXY_MAX_TOOL_RESULT_CHARS` |
-| `--max-total-tool-result-chars` | `200000` | `LLM_PROXY_MAX_TOTAL_TOOL_RESULT_CHARS` |
-
-### 21.6 `bridge.py`
-
-| Argument | Default | Env Var |
-|----------|---------|---------|
-| `--host` | `0.0.0.0` | `LINGOFUSE_HOST` |
-| `--port` | `8081` | `LINGOFUSE_PORT` |
-| `--endpoint` | `ipc:lingofuse_bridge` | `LINGOFUSE_ENDPOINT` |
-| `--timeout` | `5000` | `LINGOFUSE_TIMEOUT` |
-| `--app` | None | `LINGOFUSE_APP` |
-| `--threaded` | `True` | `LINGOFUSE_THREADED` |
-| `--no-precheck` | `False` | `LINGOFUSE_NO_PRECHECK` |
-| `--no-normalize-json` | `False` | `LINGOFUSE_NORMALIZE_JSON` |
-| `--bridge-app` | `__lf_http_bridge__` | `LINGOFUSE_BRIDGE_APP` |
-| `--bridge-api` | `__lf_outbound_post__` | `LINGOFUSE_BRIDGE_API` |
-| `--bridge-repair-api` | `__lf_repair_json__` | `LINGOFUSE_BRIDGE_REPAIR_API` |
-
-### 21.7 `llm_test.py`
-
-| Argument | Default | Env Var |
-|----------|---------|---------|
-| `--endpoint` | `ipc:llm_service` | `LINGOFUSE_ENDPOINT` |
-| `--server-app` | `LLM_Service` | `LLM_SERVER_APP` |
-| `--notify-api` | `llm_stream` | `LLM_NOTIFY_API` |
-| `--timeout` | `30000` | `LINGOFUSE_TIMEOUT` |
-| `--content` / `--prompt` / `--session-id` / `--keep` / `--thinking` | — | — |
-| `--text` / `--image` | — | — |
-| `--system-message` | — | — |
-| `--debug` | `False` | `LLM_DEBUG` |
-
----
-
-## Chapter 22  Lifecycle and State Machines
-
-### 22.1 The One-Shot Constraint of `LF_PrepareDone`
-
-**Iron rule**: `LF_PrepareDone()` **returns 1 only on the first call within a process**.
-
-**Consequences**:
-- Startup order must be arranged so that critical connections complete before the first call.
-- LTB must pre-connect middleware before `Server.start()`.
-- Test code must call `LF_Shutdown()` in a `finally` block.
-
-### 22.2 Automatic Reclamation
-
-| Resource | Reclaim Policy |
-|----------|----------------|
-| Data handles | Idle > 5 minutes (background scan every 5s) |
-| Sequenced notify threads | Idle > 5 minutes |
-| Sessions (llm_service) | Dual condition: idle + timeout + client offline |
-| Sessions (llm_proxy / LTB) | Single condition: idle + timeout |
-
-**Do not rely on automatic reclamation** — always explicitly free handles.
-
-### 22.3 `LF_FreeApp` Two-Phase Destruction
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant App as TLF_App
-    participant Pool as Global Pool
-
-    User->>App: LF_FreeApp(app)
-    App->>App: 1. Unbind from all clients
-    App->>App: 2. Kill sequenced threads
-    App->>App: 3. FakeFree (timer only)
-    App->>Pool: Remains in LF_App_Pool
-    Note over Pool: Object NOT destroyed yet
-
-    User->>App: LF_Shutdown()
-    App->>Pool: Clear pool
-    Pool->>App: Truly destroy all TLF_App
-```
-
-### 22.4 Session Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> Idle: create_session / generate(new)
-    Idle --> Running: generate(continue)
-    Running --> Idle: finish / cancel / error
-    Idle --> Closing: close_session / watchdog
-    Running --> Closing: close_session(cancel_running=true)
-    Closing --> [*]
-```
-
----
-
-## Chapter 23  Threading Model
-
-### 23.1 Callback Execution Threads
-
-| Callback Type | Execution Thread | Constraint |
-|---------------|-----------------|-----------|
-| LingoFuse Call/Notify | Background C4 thread pool | No blocking; no `LF_Call`; no UI |
-| Network event | Background TCompute worker | `addr_` invalid after return |
-| `RegisterSyncCall_M` | Main thread (via `LF_Sync`) | Main loop must call `LF_Sync` periodically |
-| `llm_stream` Notify | Client LingoFuse main thread | Requires `FActiveSessionId` filter |
-
-### 23.2 Thread-Safety Matrix
-
-| Component | Thread-Safe |
-|-----------|:-----------:|
-| `TBigList<T>` (non-critical) | ❌ |
-| `TCritical_BigList<T>` | ✅ (except iterators) |
-| `TBig_Hash_Pair_Pool` (non-critical) | ❌ |
-| `TCritical_Big_Hash_Pair_Pool` | ✅ |
-| `TCompute.Run*` / `Post*` | ✅ |
-| `LF_Call` / `LF_Notify` | ✅ |
-| Concurrent writes to same `TDataHnd` | ❌ |
-| `TAtomVar<T>` | ✅ |
-| `AtomInc` / `AtomDec` | ✅ |
-
-### 23.3 Callback Rules
-
-**Forbidden inside any LingoFuse callback**:
-- Blocking LF calls (`LF_Call`, `LF_LocalCall`, `LF_Notify`, `LF_PrepareDone`, `LF_Shutdown`)
-- UI access (VCL / LCL / GDI)
-- Long `Sleep`
-- Triggering another `LF_RegisterCall`
-
-**Recommended**:
-- Only read `_In`, write `_Out`, return quickly
-- Offload long-running work to `TCompute.RunC_NP` / `TThread.CreateAnonymousThread` / Python `threading.Thread`
-- Use `TThread.Queue` when UI is needed
-
-### 23.4 Handle Lifecycle in Callbacks
-
-**Iron rule**: **Never release `_In` / `_Out` inside a callback.** They are managed by the framework.
-
----
-
-## Chapter 24  Anti-Patterns
-
-### 24.1 Parameter Renaming
-
-```python
-# ❌ Wrong: renaming 'a' to 'x'
-def callback_add(_Trigger, _In, _Out):
-    data = json.loads(...)
-    x = data.get('a') or 0
-```
-
-**Consequence**: Client sends `{"a": 5}`; provider reads `data.get('x')` → `None` → `0`.
-
-### 24.2 Return Field Renaming
+### Pascal / Python / C#
 
 ```pascal
-// ❌ Wrong: renaming 'result' to 'value'
-jo.I64['value'] := ret;
-```
-
-### 24.3 Missing `cdecl`
-
-```pascal
-// ❌ Wrong
-procedure Callback_Add_Add(_Trigger___: Pointer; _In___, _Out___: TDataHnd___);
-```
-
-**Consequence**: Stack misalignment, random crashes.
-
-### 24.4 Dropping the NUL Terminator
-
-```python
-# ❌ Wrong: forgot the NUL
-LF_WriteBuffer(_Out, json.dumps({"result": ret}).encode("utf-8"), len(...))
-```
-
-### 24.5 `ensure_ascii` Not Turned Off
-
-```python
-# ❌ Wrong
-_write_string(_Out, json.dumps({"result": "中文"}))
-# Actually writes: b'{"result": "\\u4e2d\\u6587"}\x00'
-```
-
-### 24.6 Calling a Blocking Function Inside a Callback
-
-```pascal
-// ❌ Wrong
-procedure Callback_Foo_Foo(...); cdecl;
+for i := 0 to Model.Funcs.Count - 1 do
 begin
-  Other := LF_CallEx('OtherApp', SomeData, 5000);  // deadlock
+  f := Model.Funcs[i];
+  Supported := True;
+  for j := 0 to High(f.Params) do
+    if not IsSupportedType(f.Params[j].PascalType) then
+    begin
+      Supported := False;
+      Break;
+    end;
+  if Supported and f.IsFunction and not IsSupportedType(f.ReturnType) then
+    Supported := False;
+  if Supported then
+    // add to result set
 end;
 ```
 
-### 24.7 Manually Releasing `_In` / `_Out`
+**Duplicate handling**: when generating callback/internal-stub names, `UniqueApiName` adds a numeric suffix (`Add` / `Add_1` / `Add_2`).
+
+### C++ (Stricter)
 
 ```pascal
-// ❌ Wrong
-procedure Callback_Foo_Foo(...); cdecl;
+function IsDeclSupported(const F: TFunctionStructure): boolean;
 begin
-  LF_FreeData(_In___);   // double free
-  LF_FreeData(_Out___);
-end;
-```
-
-### 24.8 Returning `bool`
-
-```pascal
-// ❌ Wrong
-function MyFunc: Boolean;
-```
-
-**Consequence**: The whole declaration is dropped.
-
-### 24.9 Parameter of Type `array of string`
-
-```pascal
-// ❌ Wrong
-function MyFunc(items: array of string): Int64;
-```
-
-**Consequence**: The whole declaration is dropped.
-
-### 24.10 Changing `MY_APP_NAME`
-
-```pascal
-// ❌ Wrong
-MY_APP_NAME : string = 'my_special_name';
-```
-
-**Consequence**: Client's `LF_Call(appName, ...)` cannot find the server.
-
-### 24.11 Changing the Callback's Formal Parameter Names
-
-```python
-# ❌ Wrong
-@LFCallFunc
-def callback_add(a, b, c):   # should be _Trigger, _In, _Out
-    ...
-```
-
-### 24.12 Deleting the `internal_call_*` Placeholder
-
-```python
-# ❌ Wrong: inline directly
-def callback_add(_Trigger, _In, _Out):
-    ret = a + b
-```
-
-**Consequence**: Overwritten on next generation.
-
-### 24.13 Changing `cdecl` to `stdcall`
-
-```pascal
-// ❌ Wrong
-procedure Callback_Foo_Foo(...); stdcall;
-```
-
-### 24.14 Using `jo.ParseText` Instead of `jo.Parae`
-
-```pascal
-// ❌ Wrong
-jsonBytes := LF_ReadStringBytes(TDataHnd(_In___));
-jo.ParseText(TEncoding.UTF8.GetString(jsonBytes));
-```
-
-### 24.15 Using `json.loads(jo.ToBytes)` on the Python Side
-
-```python
-# ❌ Wrong: bypassing the generator's helper
-raw = ...
-data = json.loads(raw.decode("utf-8"))
-```
-
-**Consequence**: If `raw` ends with `\x00`, `json.loads` raises.
-
-### 24.16 Double JSON Serialization
-
-```python
-# ❌ Wrong
-_write_string(_Out, json.dumps(json.dumps({"result": ret}, ensure_ascii=False), ensure_ascii=False))
-```
-
-### 24.17 Not Checking `is_object` After `read_json` in C++
-
-```cpp
-// ❌ Wrong: JSON may be an array or scalar
-json req = read_json(in_hnd);
-std::int64_t a = req.value("a", 0);
-```
-
-### 24.18 Forgetting to Release the Response Handle
-
-```pascal
-// ❌ Wrong
-Req := LF_CreateDataEx('add');
-LF_WriteStringBytes(Req, jo.ToBytes);
-Res := LF_CallEx(AppName, Req, 5000);
-LF_FreeData(Req);
-// forgot LF_FreeData(Res);
-```
-
-### 24.19 Writing Payload > 64 KB Inside a Callback
-
-**Consequence**: LingoFuse chunks the transfer; chunk boundaries may break NUL terminator atomicity (**uncertain** — requires empirical testing).
-
-### 24.20 C++ `extern const bool` Internal Linkage
-
-```cpp
-// ❌ Wrong
-const bool DEBUG_LOG = false;
-
-// ✅ Right
-extern const bool DEBUG_LOG = false;
-```
-
-### 24.21 Comment Does Not Describe Workflow Role
-
-**Symptom**: AI calls the first tool and stops.
-
-### 24.22 Ambiguous Parameter Names
-
-**Symptom**: AI passes `Language='python'` to a function expecting a source language.
-
-### 24.23 Looping `SetSourceCode` and `ConvertToXxx`
-
-**Symptom**: AI re-stores source repeatedly.
-
-### 24.24 Not Checking Symmetry After Generator Changes
-
-**Consequence**: Only one language's behavior changes.
-
-### 24.25 FPC Inline `var` Declarations
-
-```pascal
-procedure Foo;
-begin
+  Result := False;
+  if F.Name.Len = 0 then Exit;                       // ← extra check
+  for j := 0 to High(F.Params) do
   begin
-    var x: integer;   // ❌ FPC {$mode delphi} disallows this
+    if F.Params[j].Name.Len = 0 then Exit;           // ← extra check
+    if not IsSupportedType(F.Params[j].PascalType) then Exit;
   end;
+  if F.IsFunction then
+    if not IsSupportedType(F.ReturnType) then Exit;
+  Result := True;
 end;
 ```
 
-**Consequence**: `Error: Illegal expression` + `Syntax error, ";" expected`.
+**Duplicate handling**: uses `SeenNames: TPascalStringList` to **discard duplicate functions** (no suffix).
 
-### 24.26 `response_format` + `tools` Combined Without Testing
+```pascal
+if SeenNames.ExistsValue(F.Name.Text) >= 0 then
+begin
+  LogFmt('  Skipped "%s": duplicate tool name (MCP requires unique names)', [F.Name.Text]);
+  Continue;
+end;
+```
 
-**Symptom**: Model refuses to call tools when a strict schema is active.
+🟠 **Behavioural inconsistency**:
+- Pascal / Python / C#: duplicates → keep both, second one gets `_1`.
+- C++: duplicates → **drop the second**.
 
-**Fix**: Test both modes separately; use `--no-tools` if needed.
+Example: `Add(a,b)` and `Add(a,b,c)` as two overloads:
+
+| Generator | Result |
+|-----------|--------|
+| Pascal | `Add` and `Add_1` |
+| Python | `Add` and `Add_1` |
+| C# | `Add` and `Add_1` |
+| C++ | Only `Add` |
 
 ---
 
-## Chapter 25  Troubleshooting Trees
+# 10. Modification Task Cheat Sheet
 
-### 25.1 "AI Does Not Call Tools"
+**This chapter is the heart of the document. Look here first for any modification request.**
 
-```mermaid
-flowchart TD
-    Start["AI does not call tools"] --> Q1{"Path?"}
-    Q1 -- "Path A (MCP)" --> A1{"Gateway started?"}
-    A1 -- No --> AX1["Start mcp_api_tool"]
-    A1 -- Yes --> A2{"Beacon started?"}
-    A2 -- No --> AX2["Start pascal_agent_service"]
-    A2 -- Yes --> A3{"Provider started?"}
-    A3 -- No --> AX3["Start provider"]
-    A3 -- Yes --> A4{"Client config correct?"}
-    A4 -- No --> AX4["Check MCP config file"]
-    A4 -- Yes --> A5["Check mcp_api_tool logs"]
+## 10.1 Common Modification Tasks
+
+| Task | Files to change | Key functions |
+|------|-----------------|---------------|
+| **Change the type whitelist** | All four `mcp_generator_tool.pas` | `IsSupportedType` + every `PascalTypeToXxx` |
+| **Change App name generation** | All four `mcp_generator_tool.pas` | `MakeAppNameFromUnit` (four copies) |
+| **Change output file naming** | `code_decl_to_mcp_frm.pas` | String literals in `GenerateAllArtifacts` |
+| **Add a new output file** | `code_decl_to_mcp_frm.pas` | `GenerateAllArtifacts` |
+| **Add a new target language** | `.lpr` + `frm` + `cmdline` + new `xxx_mcp_generator_tool.pas` | See §11 |
+| **Change default beacon / IPC** | All four `mcp_generator_tool.pas` + `code_decl_to_mcp_api_tool_provider_unit.pas` | Constants |
+| **Change README structure** | All four `GenerateXxxReadme` | `EmitXxx` nested procedures |
+| **Change comment extraction rules** | All four `mcp_generator_tool.pas` | `GetFullDescription` (four copies) |
+| **Change duplicate-name strategy** | All four `mcp_generator_tool.pas` | `CollectValidFunctions` or `UniqueApiName` |
+| **Add an MCP tool** | `code_decl_to_mcp_api_tool_provider_unit.pas` | `RegisterTools` + new callback |
+| **Change GUI tab structure** | `code_decl_to_mcp_frm.pas` | `MainPageControl` + tab components |
+| **Change CLI output paths** | `code_decl_to_mcp_cmdline.pas` | `Companion_Readme_Path` / `Cpp_Paths_From_Output` |
+| **Change CMake target names** | `cmake_for_cpp_mcp_generator_tool.pas` | `MakeTargetBaseName` |
+| **Change C++ `LF_LoadLibrary` behaviour** | `cmake_for_cpp_mcp_generator_tool.pas` | `EmitRuntimeLoadPrelude` |
+| **Change logging switch semantics** | All four `mcp_generator_tool.pas` | `GenerateCode_LogEnabled` declarations |
+| **Add or remove a constant** | All four `mcp_generator_tool.pas` + `cmdline` + `frm` | Constant tables |
+
+## 10.2 Concrete Steps for a Category of Change
+
+### Example: Changing the type whitelist (add `bool` to `int64`)
+
+**Steps**:
+
+1. **Change the model layer** (`Z.Pascal_Func_Model`): map Pascal `Boolean` to `bool`.
+2. **Change all four generators**:
+   - `pas_mcp_generator_tool.pas`: `IsSupportedType`, `PascalTypeToJsonType`, `PascalTypeToJsonLiteral`, the `jo.B['x']` branch in the callback, and the return branch.
+   - `py_mcp_generator_tool.pas`: the same 4 places + `PascalTypeToPythonType`.
+   - `cpp_mcp_generator_tool.pas`: the same 4 places + `PascalTypeToCPPType` + `PascalTypeToDefaultValue`.
+   - `csharp_mcp_generator_tool.pas`: the same 4 places + `PascalTypeToCSharpType`.
+3. **Change all four README generators**: type table, JSON Schema table, default value table.
+4. **Regression test**:
+   - Input a Pascal unit with a `Boolean` parameter.
+   - Generate Pascal / Python / C++ / C#.
+   - Verify all four outputs contain the API and that all JSON schemas say `boolean`.
+
+### Example: Changing App name generation
+
+**Modify all four `MakeAppNameFromUnit`**:
+
+```pascal
+function MakeAppNameFromUnit(const UnitName: TP_String): TP_String;
+var
+  tmp: TP_String;
+begin
+  tmp := UnitName;
+  if umlMultipleMatch('*.pas', tmp) then
+    tmp := umlChangeFileExt(tmp.Text, '').Text;
+  Result := tmp.ReplaceChar('.', '_').ReplaceChar('-', '_');
+end;
 ```
 
-### 25.2 "AI Calls Only the First Tool"
+The four copies live in:
+- `pas_mcp_generator_tool.pas` (one, standalone)
+- `py_mcp_generator_tool.pas` (one, standalone)
+- `cpp_mcp_generator_tool.pas` (one, standalone)
+- `csharp_mcp_generator_tool.pas` (one, standalone)
 
-```mermaid
-flowchart TD
-    Start["AI calls only the first tool"] --> Q1{"Tool description says<br/>'Step 1 of N'?"}
-    Q1 -- No --> A1["Add workflow overview<br/>(see Ch 9.4 Weapon 1)"]
-    Q1 -- Yes --> Q2{"Does it name the next tool?"}
-    Q2 -- No --> A2["Add next tool name<br/>(see Ch 9.4 Weapon 2)"]
-    Q2 -- Yes --> Q3{"First 200 chars cover the role?"}
-    Q3 -- No --> A3["Move critical info earlier<br/>(see Ch 9.4 Weapon 4)"]
-    Q3 -- Yes --> A4["Check for 200-char truncation<br/>in C++ generator"]
+**All four must change together**, otherwise App names will differ across languages and cross-language calls will fail.
+
+### Example: Adding a new README section
+
+Using the Python README as an example, `GeneratePythonReadme` contains 10 nested procedures:
+
+```pascal
+procedure EmitHeader;
+procedure EmitOverview;
+procedure EmitArchitecture;
+procedure EmitTestScript;
+procedure EmitBuildTestProcedure;
+procedure EmitToolReference;
+procedure EmitJsonSchemaSpec;
+procedure EmitTroubleshooting;
+procedure EmitPythonPortability;
+procedure EmitResources;
+
+begin
+  ...
+  EmitHeader;
+  EmitOverview;
+  EmitArchitecture;
+  EmitTestScript;         // new section goes here
+  EmitBuildTestProcedure;
+  ...
+end;
 ```
 
-### 25.3 "AI Passes Wrong Argument Values"
-
-```mermaid
-flowchart TD
-    Start["AI passes wrong values"] --> Q1{"Parameter name ambiguous?"}
-    Q1 -- Yes --> A1["Disambiguate in first sentence<br/>(see Ch 9.4 Weapon 3)"]
-    Q1 -- No --> Q2{"Is there a WRONG/RIGHT table?"}
-    Q2 -- No --> A2["Add the table<br/>(see Ch 9.4 Weapon 3)"]
-    Q2 -- Yes --> Q3{"AI sends empty {}?"}
-    Q3 -- Yes --> A3["FastMCP generated empty schema;<br/>check type annotations"]
-    Q3 -- No --> A4["Check parameter schema in registered JSON"]
-```
-
-### 25.4 "Client Receives No Stream"
-
-```mermaid
-flowchart TD
-    Start["Client receives no stream"] --> Q1{"Server log: 'no found app'?"}
-    Q1 -- Yes --> A1["client_name is not a real App name"]
-    Q1 -- No --> Q2{"'LF_PrepareDone returned 0'?"}
-    Q2 -- Yes --> A2["A PrepareDone call already exists in the process"]
-    Q2 -- No --> Q3{"'Notify to ... failed'?"}
-    Q3 -- Yes --> A3["Client may be offline"]
-    Q3 -- No --> A4["Check DEBUG log"]
-```
-
-### 25.5 "Compile Fails — Pascal"
-
-```mermaid
-flowchart TD
-    Start["Pascal compile fails"] --> Q1{"'Can''t find unit Z.Core'?"}
-    Q1 -- Yes --> A1["Add -Fu<ZCore>"]
-    Q1 -- No --> Q2{"'Can''t find unit lingofuse_import'?"}
-    Q2 -- Yes --> A2["Add -Fu<ZNetV2>"]
-    Q2 -- No --> Q3{"'Illegal expression'?"}
-    Q3 -- Yes --> A3["Check inline var (FPC disallows)"]
-    Q3 -- No --> A4["Check full error"]
-```
-
-### 25.6 "Compile Fails — Python"
-
-```mermaid
-flowchart TD
-    Start["Python startup fails"] --> Q1{"'ModuleNotFoundError: lingofuse'?"}
-    Q1 -- Yes --> A1["pip install or set PYTHONPATH"]
-    Q1 -- No --> Q2{"'ModuleNotFoundError: lingofuse._lf_native'?"}
-    Q2 -- Yes --> A2["Reinstall or point at <v3>/src"]
-    Q2 -- No --> Q3{"'cannot load library'?"}
-    Q3 -- Yes --> A3["Add z_ipc_*.dll / LingoFuse*.dll to PATH"]
-    Q3 -- No --> A4["Check full traceback"]
-```
-
-### 25.7 "Compile Fails — C++"
-
-```mermaid
-flowchart TD
-    Start["C++ compile fails"] --> Q1{"'json.hpp: No such file'?"}
-    Q1 -- Yes --> A1["Download from nlohmann/json releases"]
-    Q1 -- No --> Q2{"'LingoFuse.h: No such file'?"}
-    Q2 -- Yes --> A2["Use official header or README §3.1 fallback"]
-    Q2 -- No --> Q3{"'undefined reference to LF_*'?"}
-    Q3 -- Yes --> A3["Add -lLingoFuse and -L<path>"]
-    Q3 -- No --> A4["Check full error"]
-```
+**Steps**:
+1. Add `procedure EmitXxx` inside `GeneratePythonReadme`.
+2. Insert `EmitXxx` at the desired position in the `begin` block.
+3. **Sync the other three README generators** (keep the skeleton identical).
+4. Update §13 of this document.
 
 ---
 
-## Chapter 26  Self-Check Checklists
+# 11. Adding a New Target Language
 
-### 26.1 After Modifying a Code Generator
+**Use C# as the worked example** — this is also the current TODO of the project.
 
-- [ ] `IsSupportedType` is **strictly consistent across all three generators**.
-- [ ] `GetFullDescription` semantics are consistent.
-- [ ] Type mappings cover every newly added type.
-- [ ] Parameter extraction code covers every newly added type.
-- [ ] Return-value handling covers every newly added type.
-- [ ] **No `ensure_ascii=True` has been introduced.**
-- [ ] `cdecl` / `@LFCallFunc` / `LF_CDECL` have not been removed or altered.
-- [ ] **Regression test**: generate a model with Chinese comments and emoji.
+## 11.1 Complete Step List
 
-### 26.2 After Modifying a README Generator
+| # | File | Action |
+|:-:|------|--------|
+| 1 | `csharp_mcp_generator_tool.pas` | **Create new** (already delivered) |
+| 2 | `code_decl_to_mcp.lpr` | Add `csharp_mcp_generator_tool` to `uses` |
+| 3 | `code_decl_to_mcp_frm.pas` | Add line to `uses` + add 3 blocks to `GenerateAllArtifacts` |
+| 4 | `code_decl_to_mcp_cmdline.pas` | If CLI support is desired: add `tlCSharp`, `Execute_Conversion` branch, `.cs` in `Detect_Target_Lang` |
+| 5 | This document | Update the tables |
 
-- [ ] The **10-section skeleton** is complete.
-- [ ] **All English**.
-- [ ] **Mermaid diagrams** are syntactically correct.
-- [ ] The **test program** compiles as-is.
-- [ ] The **dependency table** matches the actual runtime.
-- [ ] **Placeholders** use a consistent form and have a replace reminder.
-- [ ] **Edge case**: `Model = nil` / `UnitName = ''` → non-nil degraded text.
-- [ ] The **zero-API** case has a clear warning.
-- [ ] The **tool reference** JSON examples match the actual schema.
-- [ ] The **C++ fallback `LingoFuse.h`** is complete.
-- [ ] The **Python PYTHONPATH** commands cover cmd / PowerShell / bash.
-- [ ] The **Pascal `.lpr`** compile command includes `-Fu<ZCore> -Fu<ZNetV2>`.
-- [ ] **No real repository URL is hardcoded**.
+## 11.2 `code_decl_to_mcp.lpr` Modification
 
-### 26.3 After Modifying the Declaration Spec
+```pascal
+uses
+  ...,
+  cpp_mcp_generator_tool,
+  csharp_mcp_generator_tool,   // ← new
+  code_decl_to_mcp_api_tool_provider_unit,
+  code_decl_to_mcp_cmdline,
+  cmake_for_cpp_mcp_generator_tool;
+```
 
-- [ ] `pascal_code_mcp_rule.md` is consistent with the generator.
-- [ ] `C_code_mcp_rule.md` is consistent with the generator.
-- [ ] The type table in `MCP_API_Contract.md` §2.1 is updated.
+## 11.3 `code_decl_to_mcp_frm.pas` Modification
 
-### 26.4 After Modifying Environment Constants
+**Interface `uses`**:
+```pascal
+uses
+  ...,
+  cpp_mcp_generator_tool,
+  csharp_mcp_generator_tool,   // ← new
+  code_decl_to_mcp_api_tool_provider_unit,
+  cmake_for_cpp_mcp_generator_tool,
+  ...;
+```
 
-- [ ] Changed in all three code generators.
-- [ ] Changed in all three README generators.
-- [ ] `mcp_api_tool.py` defaults updated.
-- [ ] Deployed providers regenerated.
+**Inside `GenerateAllArtifacts`, insert three blocks** (after `-- 6c. C++ test program`):
 
-### 26.5 After Modifying LLM Servers
+```pascal
+{ -- 6d. C# provider class. ------------------------------------- }
+L := GenerateCSharpCode(FuncModel);
+try
+  if L <> nil then
+    SaveListToFile(L, UnitName + '_tool_provider.cs', SavedPath);
+finally
+  DisposeObjectAndNil(L);
+end;
 
-- [ ] Capability matrix updated.
-- [ ] `llm_proxy` / LTB `set_system_message` rejection response intact.
-- [ ] LTB multi-round loop limits intact.
-- [ ] Pre-connect middleware ordering intact.
-- [ ] **Regression test**: single session, multi session, tool calls, multimodal.
+{ -- 6e. C# test program. --------------------------------------- }
+L := GenerateCSharpTestProgram(FuncModel);
+try
+  if L <> nil then
+    SaveListToFile(L, UnitName + '_tool_provider_test.cs', SavedPath);
+finally
+  DisposeObjectAndNil(L);
+end;
 
-### 26.6 After Modifying the Agent Interface
+{ -- 6f. C# README. --------------------------------------------- }
+L := GenerateCSharpReadme(FuncModel);
+try
+  if L <> nil then
+    SaveListToFile(L, UnitName + '_tool_provider_csharp.md', SavedPath);
+finally
+  DisposeObjectAndNil(L);
+end;
+```
 
-- [ ] Three-step shape (Step 1 → Step 2 → Step 3) intact.
-- [ ] `Language` accepts only `"pascal"` or `"c"`.
-- [ ] Every tool's description independently answers role / prerequisite / output.
-- [ ] Unit header contains decision table + WRONG/RIGHT table.
-- [ ] Critical info is in the first 200 characters.
-- [ ] Test case covers "let the AI run a full workflow from scratch".
+## 11.4 CLI Support (Optional)
 
-### 26.7 Pre-Commit Flow
+`code_decl_to_mcp_cmdline.pas` requires:
+
+1. **Add `tlCSharp` to `TTargetLang`**:
+   ```pascal
+   TTargetLang = (tlPascal, tlPython, tlCpp, tlCSharp, tlUnknown);
+   ```
+2. **Add a `.cs` branch to `Detect_Target_Lang`**:
+   ```pascal
+   else if Ext = '.cs' then Result := tlCSharp
+   ```
+3. **Add a `tlCSharp` branch to `Execute_Conversion`'s `case TgtLang of`**.
+4. **Add `csharp_mcp_generator_tool` to `uses`**.
+5. **Add `.cs` to the target extension list in `Print_Help`**.
+
+## 11.5 Consistency Checklist
+
+- [ ] The new language's `IsSupportedType` matches the existing three.
+- [ ] The new language's four `PascalTypeToXxx` match the existing three.
+- [ ] The new language's `GetFullDescription` semantics match (skip `@`, strip `*`).
+- [ ] The new language's `CollectValidFunctions` duplicate strategy matches Pascal/Python (add suffix, do not drop).
+- [ ] The new language's `MakeAppNameFromUnit` is **byte-for-byte identical** to the existing three.
+- [ ] The README's 10-section skeleton matches the existing three.
+- [ ] The README's startup order matches the existing three.
+
+---
+
+# 12. Adding a New Output File
+
+## 12.1 Steps
+
+1. **Decide the generator**: a brand-new standalone generator, or a new artifact from an existing generator?
+2. **If a new standalone generator**:
+   - Create the unit following §11 (only a `GenerateXxxCode`-style function, no README needed).
+   - Add to `.lpr` `uses`.
+   - Add to `frm` `uses`.
+   - Add a block to `GenerateAllArtifacts`.
+3. **If appending to an existing generator**:
+   - Call another function of the existing generator directly inside `GenerateAllArtifacts`, or
+   - Modify the existing generator to return multiple lists (not recommended).
+
+## 12.2 Output File Naming Convention
+
+The following patterns must be respected, otherwise users will be confused:
+
+| Suffix | Purpose |
+|--------|---------|
+| `<U>_tool_provider_unit.pas` | Pascal code (**with `_unit`**) |
+| `<U>_tool_provider.py` | Python code |
+| `<U>_tool_provider.hpp` / `.cpp` | C++ code |
+| `<U>_tool_provider.cs` | C# code |
+| `<U>_tool_provider_<lang>.md` | `<lang>` ∈ `{pascal, python, cpp, csharp}` |
+| `<U>_tool_provider_test.<ext>` | Language test program |
+| `CMakeLists.txt` | C++ build (no prefix, unique) |
+
+**Do not** introduce a new naming pattern (for example `<U>_tool_<lang>_provider.md`); otherwise the "file list" tables in the READMEs must be updated in sync.
+
+---
+
+# 13. Modifying a README Section
+
+## 13.1 The 10-Section Skeleton Shared by All Four README Generators
+
+Each README generator contains **10 `EmitXxx` nested procedures**:
+
+| # | Emit procedure | Language-specific |
+|:-:|----------------|:-----------------:|
+| 1 | `EmitHeader` | ✅ |
+| 2 | `EmitOverview` | ✅ |
+| 3 | `EmitArchitecture` | ❌ |
+| 4 | `EmitTestProgram` | ✅ |
+| 5 | `EmitBuildTestProcedure` | ✅ |
+| 6 | `EmitToolReference` | ❌ |
+| 7 | `EmitJsonSchemaSpec` | ❌ |
+| 8 | `EmitTroubleshooting` | ✅ |
+| 9 | `EmitXxxPortability` | ✅ |
+| 10 | `EmitResources` | ✅ |
+
+**Four language-agnostic ones** (2, 3, 6, 7): can be edited in one place, but all four generators must be kept in sync.
+
+**Six language-specific ones**: must be customized per language.
+
+## 13.2 Steps for Modifying a Language-Agnostic Section
+
+Using `EmitArchitecture` as an example:
+
+```mermaid
+flowchart LR
+    A["Edit pas's EmitArchitecture"] --> B["Edit py's"]
+    B --> C["Edit cpp's"]
+    C --> D["Edit csharp's"]
+    D --> E["Regenerate 4 outputs"]
+    E --> F["Compare the architecture diagrams in 4 READMEs<br/>must be byte-for-byte identical"]
+
+    style F fill:#e8f5e9,stroke:#2e7d32
+```
+
+## 13.3 README Generator Key Contracts
+
+| Contract | Description |
+|----------|-------------|
+| **`Model = nil`** | Return non-nil degraded text; first line `# README generation skipped` |
+| **`Model.UnitName = ''`** | Same as above |
+| **Zero valid functions** | §6 Tool Reference emits an explicit WARNING block |
+| **All text in English** | |
+| **Placeholder form** | `<xxx-repo-url>` / `<v3-repo-url>`; no real URLs |
+| **All diagrams use Mermaid** | |
+| **Code block language tags** | ` ```json ` / ` ```bash ` / ` ```pascal ` / etc. |
+
+---
+
+# 14. Known Inconsistencies (Be Warned)
+
+**The following inconsistencies are confirmed in the source. Be aware before modifying, or you will introduce new bugs.**
+
+## 14.1 🔴 GUI vs CLI README Naming
+
+| Mode | README naming rule |
+|------|-------------------|
+| GUI | `<U>_tool_provider_pascal.md` / `_python.md` / `_cpp.md` |
+| CLI | `<output base>_readme.md` |
+
+**User impact**: a GUI user cannot find `<base>_readme.md`; a CLI user cannot find `<U>_tool_provider_pascal.md`.
+
+**Recommendation**: unify on the GUI naming pattern (`<U>_tool_provider_<lang>.md`).
+
+## 14.2 🟠 C++ Duplicate Handling Differs
+
+| Language | Duplicate strategy |
+|----------|--------------------|
+| Pascal / Python / C# | Add numeric suffix (`Add_1`) |
+| C++ | Drop |
+
+**Recommendation**: unify on "add suffix".
+
+## 14.3 🟠 Callback Prefix Differs in C++
+
+| Language | Callback prefix |
+|----------|-----------------|
+| Pascal / C# | `Callback_` (capital C) |
+| Python / C++ | `callback_` (lowercase c) |
+
+**Impact**: easy to misgrep.
+
+**Recommendation**: unify on `Callback_`.
+
+## 14.4 🟠 Logging Switch `const` vs `var`
+
+| Generator | Declaration |
+|-----------|-------------|
+| Pascal | `const` |
+| Python | `const` |
+| C++ | **`var`** |
+| CMake | `const` |
+| C# | `const` |
+
+**Recommendation**: unify on `var` (allows runtime modification).
+
+## 14.5 🟠 Pascal `MakeApiName` Uses Character Replacement While Others Use Whitelist
+
+| Generator | Logic |
+|-----------|-------|
+| Pascal | `ReplaceChar(#32#9'./\@', '_')` — replaces only specific characters |
+| Python | Whitelist filter |
+| C++ | Whitelist filter |
+| C# | Whitelist filter |
+
+**Impact**: the Pascal generator may let through some illegal characters (such as `+`, `!`).
+
+**Recommendation**: unify on whitelist.
+
+## 14.6 🟠 C++ 200-Character Truncation
+
+C++'s `GetFullDescription` has `MAX_DESC_LEN = 200`. Other languages have no truncation.
+
+**Impact**: for the same Pascal function, the C++ side may see a truncated description.
+
+**Recommendation**: either truncate everywhere or nowhere.
+
+## 14.7 🟠 CLI Does Not Support C# or CMake
+
+`code_decl_to_mcp_cmdline.pas`'s `uses` clause contains **neither** `csharp_mcp_generator_tool` **nor** `cmake_for_cpp_mcp_generator_tool`.
+
+**Impact**: CLI mode cannot generate a C# provider or a CMakeLists.
+
+**Recommendation**: complete the CLI 4-language support.
+
+## 14.8 🟠 `lpr` Does Not Wire In the C# Generator
+
+`code_decl_to_mcp.lpr`'s `uses` clause does not contain `csharp_mcp_generator_tool`.
+
+**Impact**: even if `frm` adds the C# generation calls, compilation will fail.
+
+**Recommendation**: apply the change in §11 in sync.
+
+## 14.9 🟠 MCP Tool Names Are Long
+
+The 11 MCP tools registered in `code_decl_to_mcp_api_tool_provider_unit.pas` have long names:
+
+- `CodeDeclToMcp_SetSourceCode`
+- `CodeDeclToMcp_ConvertToPascal`
+- ...
+
+The old knowledge base (v7.0) used short names (`SetSourceCode`, `ConvertToPascalMCP`).
+
+**Impact**: AI agents using the short names will fail.
+
+**Recommendation**: source is authoritative; this document has been corrected.
+
+## 14.10 🟡 Constants Are Scattered
+
+`DEFAULT_BEACON_APP` / `DEFAULT_REGISTER_API` / `DEFAULT_AGENT_LOG_API` / `DEFAULT_IPC_ENDPOINT` exist as **separate copies** in every generator.
+
+**Recommendation**: extract into a shared unit `mcp_generator_common.pas`.
+
+---
+
+# 15. Consistency Constraints
+
+## 15.1 Four-Language Symmetry Requirements
+
+**Any modification to the following content must be synchronized across all four generators**:
 
 ```mermaid
 flowchart TD
-    A["Modification done"] --> B{"Business vs Contract?"}
-    B -- Business --> C["Modify inside internal_call_*"]
-    B -- Contract --> D["Check the iron rules"]
-    D --> E{"Affects the protocol?"}
-    E -- Yes --> F["Modify generator + spec + docs together"]
-    E -- No --> G["Modify only the corresponding location"]
-    C --> H["Regression test"]
-    F --> H
-    G --> H
-    H --> I["Commit"]
+    A["Change content"] --> B{"Is it one of these?"}
+    B -- "Type whitelist" --> X["Sync 4 IsSupportedType"]
+    B -- "Type mapping" --> Y["Sync 4 PascalTypeToXxx"]
+    B -- "JSON Schema type" --> Z["Sync 4 PascalTypeToJsonSchemaType"]
+    B -- "Default values" --> W["Sync 4 PascalTypeToDefaultValue"]
+    B -- "App name rule" --> V["Sync 4 MakeAppNameFromUnit"]
+    B -- "Comment extraction" --> U["Sync 4 GetFullDescription semantics"]
+    B -- "Duplicate handling" --> T["Sync 4 CollectValidFunctions / UniqueApiName"]
+
+    style X fill:#fce4ec
+    style Y fill:#fce4ec
+    style Z fill:#fce4ec
+    style W fill:#fce4ec
+    style V fill:#fce4ec
+    style U fill:#fce4ec
+    style T fill:#fce4ec
 ```
 
-**Special note**: README generators and code generators **share mapping functions**. Modifying these functions **affects both code and documentation**, so both must be regression-tested together.
+## 15.2 Hard Constraints (Non-Negotiable)
+
+| # | Constraint | Consequence of violation |
+|:-:|------------|--------------------------|
+| 1 | The four `IsSupportedType` must be semantically identical | Different API sets across the 4 languages |
+| 2 | The four `MakeAppNameFromUnit` must be byte-for-byte identical | Cross-language calls cannot find the App |
+| 3 | The four default beacon / IPC constants must be identical | Cannot connect |
+| 4 | The four `PascalTypeToJsonSchemaType` must be identical | Agent sees different schemas per language |
+| 5 | The README 10-section skeleton must be identical | User confusion |
+| 6 | The same tool's JSON examples in READMEs must be identical | User confusion |
+
+## 15.3 Soft Constraints (Recommended)
+
+| # | Constraint | Consequence of violation |
+|:-:|------------|--------------------------|
+| 1 | Unify the callback prefix (`Callback_` or `callback_`) | Harder to grep |
+| 2 | Unify internal stub prefix | Harder to grep |
+| 3 | Unify logging switch declaration (`const` or `var`) | Semantic ambiguity |
+| 4 | Unify comment extraction behaviour (truncation or not) | Description mismatch |
+| 5 | Extract constants into a shared unit | Easy to miss during modifications |
 
 ---
 
-# Appendices
+# 16. Post-Modification Self-Audit Checklist
 
-## Appendix A  Error Code and Message Index
+## 16.1 After Modifying One Generator
 
-### A.1 `bridge.py` Error Codes
+- [ ] Is this generator's `IsSupportedType` semantically identical to the other three?
+- [ ] Does the type mapping cover every type in the whitelist?
+- [ ] Do the parameter extraction branches cover every type?
+- [ ] Do the return value branches cover every type?
+- [ ] Have you introduced any new `\uXXXX` escapes? (**Forbidden**)
+- [ ] Are `cdecl` / `@LFCallFunc` / `LF_CDECL` preserved?
+- [ ] Have you introduced a new `MAX_DESC_LEN` truncation?
 
-| Code | HTTP | Meaning |
-|------|------|---------|
-| `-1` | 200 | Remote call failed |
-| `-2` | 400 | Request shape error |
-| `-3` | 200 | API pre-check failed |
+## 16.2 After Modifying `MakeAppNameFromUnit`
 
-### A.2 Streaming `finish` `reason`
+- [ ] Are all **four** `MakeAppNameFromUnit` copies byte-for-byte identical?
+- [ ] Does the generated App name still match `*.pas` via `umlMultipleMatch`?
 
-`stop` / `error` / `cancelled` / `timeout` / `client` / `shutdown` / `ephemeral` / `timeout+offline`
+## 16.3 After Modifying a README
 
-### A.3 Common Error Messages
+- [ ] Is the 10-section skeleton complete?
+- [ ] Is the content entirely in English?
+- [ ] Is the Mermaid syntax correct?
+- [ ] Does the test program compile?
+- [ ] Does the dependency table match the actual runtime?
+- [ ] Is the placeholder format consistent (`<xxx-repo-url>`)?
+- [ ] Does `Model = nil` / `UnitName = ''` return non-nil degraded text?
+- [ ] Does the zero-API case have an explicit WARNING?
+- [ ] Do the tool reference JSON examples match the actual schema?
+- [ ] Did you forget to list the new artifacts in the README?
 
-| Error Message | Source | Section |
-|---------------|--------|---------|
-| `no found app("...")` | Server log | §25.4 |
-| `LF_PrepareClient returned -1` | Multiple | §25.5 |
-| `repeat connection` | LingoFuse | §25.5 |
-| `LF_PrepareDone returned 0` | Multiple | §22.1 / §25.4 |
-| `Queue "..." is already occupied` | LingoFuse | §25.5 |
-| `LF_BindApp returned 0` | LingoFuse | §25.4 |
-| `Module not found: LingoFuse64.dll` | Loader | §25.5 / §25.6 |
-| `Model file not found` | `llm_service` | §25.5 |
-| `3029 function header doesn't match` | FPC | §24.25 |
-| `Illegal expression` / `Syntax error` | FPC | §24.25 |
-| `Image attachments are not supported` | `llm_service` | §12.3 |
-| `set_system_message is not supported` | `llm_proxy` / LTB | §12.4 |
-| `fatal error: json.hpp: No such file` | C++ compile | §25.7 |
-| `fatal error: LingoFuse.h: No such file` | C++ compile | §25.7 |
-| `undefined reference to LF_*` | C++ link | §25.7 |
-| `ModuleNotFoundError: lingofuse` | Python | §25.6 |
-| `cannot load library LingoFuse64.dll` | Python | §25.6 |
-| `Form not available` | `code_decl_to_mcp` MCP | §8.4 |
+## 16.4 After Modifying a Constant
 
----
+- [ ] Are `DEFAULT_BEACON_APP` / `DEFAULT_REGISTER_API` / `DEFAULT_AGENT_LOG_API` / `DEFAULT_IPC_ENDPOINT` in sync across **all four generators**?
+- [ ] Are the corresponding constants in `code_decl_to_mcp_api_tool_provider_unit.pas` also in sync?
+- [ ] Has the README configuration table been updated?
 
-## Appendix B  Honest Uncertainty List
+## 16.5 After Modifying an MCP Tool
 
-> The following items **cannot be fully determined from the source**. When AI needs to work on these, it must consult the source or ask a human.
+- [ ] Has `RegisterTools` in `code_decl_to_mcp_api_tool_provider_unit.pas` been updated with the new tool?
+- [ ] Does the new tool's description answer the three questions (role / prerequisite / output)?
+- [ ] Is the critical information within the first 200 characters?
+- [ ] Has the `Result := (regCount = N)` N been updated?
 
-1. **`Translate_C_Typ_To_Pascal` complete mapping table** — only broad categories are known.
-2. **`DetectSourceLanguage` complete scoring algorithm** — only "tie returns `slUnknown`" is known.
-3. **`GetFullDescription` (Pascal side) SystemString intermediary hazard** — only existence is known; fix details require consulting the Python-side implementation.
-4. **Whether C++'s `MAX_DESC_LEN = 200` should be unified** — asymmetry known; trade-off undecided.
-5. **Exact output template of each README generator section** — only skeleton and language-specific descriptions given.
-6. **Whether the `total_count` fix in `RegisterTools` is complete** — syntax checking recommended.
-7. **Minimal contract for a new language generator** — see §17.4.
-8. **Whether the GUI's 1 ms `SysTimer` is optimal** — 10 ms recommended.
-9. **The character replacement table in `MakeApiName`** — **confirmed incomplete**; whitelist filtering recommended.
-10. **Consistency maintenance between the declaration spec and the generators** — CI checking recommended.
-11. **Synchronization between this knowledge base and other spec documents** — manual cross-checking recommended.
-12. **`llm_service` local VLM path** — not implemented.
-13. **LTB's `--vision` + `--no-tools` combination** — multimodal forwarding still works, but tool capability disappears.
-14. **`bridge.py` JSON normalization effect on binary payloads** — if a payload cannot be parsed as JSON, it is forwarded as-is.
-15. **`umlDeleteFile`'s `_VerifyCheck=False`** — returning True does not mean the delete succeeded.
-16. **The `$80` boundary of `umlBufferIsASCII`** — treated as ASCII.
-17. **Whether FPC 3.3+ relaxes inline `var` in procedure bodies** — unverified; conservative treatment assumes FPC 3.2.2.
-18. **The `cppAgent` repository release date and exact API** — not yet published.
+## 16.6 After Modifying the CLI
+
+- [ ] Are the `EXIT_*` constants still consistent?
+- [ ] Do `Detect_Source_Lang` / `Detect_Target_Lang` support the new extensions?
+- [ ] Has the extension list in `Print_Help` been updated?
+- [ ] Has the `case TgtLang of` in `Execute_Conversion` been completed?
+
+## 16.7 After Modifying `GenerateAllArtifacts`
+
+- [ ] Does every artifact have a `try/finally DisposeObjectAndNil(L)`?
+- [ ] Do the new artifact filenames match the `MakeXxxFileName` functions in the generators?
+- [ ] Is the new artifact listed in the README's file list?
 
 ---
 
-## Appendix C  Revision History
+# 17. Twenty-Five Self-Test Questions
 
-### v7.0 (2026-09-25) — This Version
+**After reading this document, you should be able to answer the following. If you cannot, this document is not fit for purpose.**
 
-**Full-Ecosystem Reconstruction**:
+## 17.1 Files and Entry Points (5 questions)
 
-1. **Reframed the entire document as an ecosystem map**, not a tool manual.
-2. **Split the document into six parts** (Ecosystem Map, Pipeline, Agent Interface, Python Ecosystem, Build & Integration, Contracts).
-3. **All diagrams split into smaller composable Mermaid figures** so that each can be read independently.
-4. **Added Chapter 3 (Component and Data-Flow Map)** with three separate data-flow diagrams for Path A / B / C.
-5. **Expanded Chapter 9 (Comment Discipline)** — the single most important rule.
-6. **Added Chapter 13 (bridge.py and HTTP Interop)** as a first-class chapter.
-7. **Added Chapter 14 (Startup Sequence Contract)** with explicit ordering rationale.
-8. **Restructured Part IV (Python Agent Ecosystem)** to be a self-contained reference for the Python side.
-9. **All diagrams are Mermaid**; no character-based graphics.
-10. **All content in English.**
+**Q1**: How many Pascal files does `code_decl_to_mcp` have? What is each responsible for?
+> A: 9 (see §1.1). `.lpr` (entry) / `cmdline` (CLI) / `frm` (GUI) / `api_tool_provider_unit` (bootstrap) / 4 generators / CMake generator.
 
-### v6.0 (2026-09-25)
+**Q2**: What does `Process_CommandLine()` returning `True` vs `False` mean?
+> A: `True` = no arguments, continue with the GUI; `False` = the command line was already handled, exit with `CommandLine_ExitCode`.
 
-- Agent-first reconstruction.
-- Added 11 MCP tools contract.
-- Added Comment Discipline chapter.
-- Added Build & Integration chapter.
+**Q3**: How many files does GUI mode generate?
+> A: **12** (or 15 if C# is wired in). See §3.3.
 
-### v5.0 (2026-09-22)
+**Q4**: Which target languages does CLI mode support?
+> A: Only 3 (Pascal / Python / C++). **CMake and C# are not supported.**
 
-- README generation system complete.
-- 10-section README skeleton.
-- FPC compilation constraint.
-- Three-repository dependency model.
+**Q5**: Where is `GenerateAllArtifacts`?
+> A: In the `TCodeDeclToMcpForm` class in `code_decl_to_mcp_frm.pas`.
 
-### v4.0 (2026-09-22)
+## 17.2 Generator Interfaces (5 questions)
 
-- Completed API signatures, field-level data structures, wire format, configuration parameters, state machines, error code index, end-to-end examples, troubleshooting trees, and modification guide.
+**Q6**: What does `GeneratePascalCode` return when `Model = nil`?
+> A: Returns `nil`. **Code generators** return `nil`; **README generators** return non-nil degraded text.
 
-### v3.0 (2026-09-22)
+**Q7**: Who calls `GenerateCMakeLists`?
+> A: `GenerateAllArtifacts` (GUI mode). **CLI does not call it.**
 
-- Integrated LLM ecosystem components.
+**Q8**: How is `GenerateCode_LogEnabled` declared in the C++ generator?
+> A: **`var`** (not `const`). **This is the only generator using `var`.**
 
-### v2.0 (2026-09-20)
+**Q9**: What are the `GenerateXxxCode` function names across the four generators?
+> A: `GeneratePascalCode` / `GeneratePythonCode` / `GenerateHPPCode` + `GenerateCPPCode` (C++ has two) / `GenerateCSharpCode`.
 
-- Fixed 9 issues.
+**Q10**: After adding a new generator, which files need `uses` updates?
+> A: At minimum `code_decl_to_mcp.lpr` and `code_decl_to_mcp_frm.pas`.
 
-### v1.0 (2026-09-20)
+## 17.3 Types and Naming (5 questions)
 
-- Initial version.
+**Q11**: What normalized types are in the whitelist?
+> A: `int64` / `double` / `string`.
+
+**Q12**: In C++, what is the concrete type for `string` as a parameter vs a return value?
+> A: Parameter is `const std::string&`, return value is `std::string`.
+
+**Q13**: How does `MakeApiName` differ between the Pascal and C++ generators?
+> A: Pascal uses `ReplaceChar` (character replacement, handles only specific characters); C++ uses a **whitelist filter**. **Behaviour may differ.**
+
+**Q14**: What is the callback prefix in C++?
+> A: `callback_` (**lowercase**). Pascal and C# use `Callback_` (capital C).
+
+**Q15**: How many copies of `MakeAppNameFromUnit` exist?
+> A: **Four** (one per generator). Modifications must be synchronized.
+
+## 17.4 Outputs and Naming (5 questions)
+
+**Q16**: What is the Pascal code output filename (with suffix)?
+> A: `<UnitName>_tool_provider_unit.pas` — **with `_unit`**.
+
+**Q17**: What is the Python README filename?
+> A: GUI mode gives `<UnitName>_tool_provider_python.md`; CLI mode gives `<output base>_readme.md`. **They differ.**
+
+**Q18**: What is the C++ test program filename, and which function generates it?
+> A: `<UnitName>_tool_provider_test.cpp`, generated by `GenerateCPPTestMain`.
+
+**Q19**: How is the GUI output directory decided?
+> A: `umlCombinePath(umlGetFilePath(ParamStr(0)), UnitName)` — i.e. `<exe-dir>/<UnitName>/`.
+
+**Q20**: If you want to add a CMake-like build file for C# (for example a `.csproj`), what steps are needed?
+> A: See §12. New generator function + `.lpr` / `frm` `uses` additions + a new block in `GenerateAllArtifacts`.
+
+## 17.5 Modification and Upgrade (5 questions)
+
+**Q21**: What is the minimum number of changes to add `bool` to the type whitelist?
+> A: **At least 4 generators × 4 internal functions = 16 places**, plus the type tables in 4 README generators, plus the normalization logic in `Z.Pascal_Func_Model`.
+
+**Q22**: Which files must change when modifying `DEFAULT_IPC_ENDPOINT`?
+> A: Four generators + `code_decl_to_mcp_api_tool_provider_unit.pas`.
+
+**Q23**: To add a new README section, how many `EmitXxx` procedures must be changed?
+> A: **Four** (one per language's README generator). Keep the skeleton identical.
+
+**Q24**: How does the C++ generator handle duplicate function names?
+> A: **Drops the second** (via `SeenNames` check). Pascal / Python / C# add an `_1` suffix.
+
+**Q25**: If you modify only the Pascal copy of `MakeAppNameFromUnit`, what happens?
+> A: The Pascal-generated App name will differ from the other languages, and cross-language calls will **fail to find the App**.
 
 ---
 
-**Document version**: v7.0 (Full-Ecosystem Edition)
-**Coverage**: `code_decl_to_mcp` toolchain + `llm*.py` + `mcp_api*.py` + `llm_common` + `lingofuse` Python package + three-language README generation system + Agent interface + HTTP bridge + Pascal/C++ providers
-**Companion documents**: `pascal_code_mcp_rule.md`, `C_code_mcp_rule.md`, `MCP_API_Contract.md`, `code_generate_mcp.md`, `pascal_agent_api_ref_json.md`, `LingoFuse_LLM_Ecosystem_User_Guide.md`, `LingoFuse_Pascal_Complete_Guide.md`, `LingoFuse_LLM_Pitfalls_For_AI.md`
-**Repositories**:
-- https://github.com/PassByYou888/LingoFuse-pasAgent-v3
-- https://github.com/PassByYou888/LingoFuse-cppAgent (**not yet published**)
+# Appendix A — Precise Symbol Index
 
-**Last updated**: 2026-09-25
+## A.1 Generator Public Symbols
+
+| Symbol | Unit | Kind |
+|--------|------|------|
+| `GeneratePascalCode` | `pas_mcp_generator_tool` | function |
+| `GeneratePascalReadme` | `pas_mcp_generator_tool` | function |
+| `GenerateCode_LogEnabled` | `pas_mcp_generator_tool` | const |
+| `GeneratePythonCode` | `py_mcp_generator_tool` | function |
+| `GeneratePythonReadme` | `py_mcp_generator_tool` | function |
+| `GenerateCode_LogEnabled` | `py_mcp_generator_tool` | const |
+| `GenerateHPPCode` | `cpp_mcp_generator_tool` | function |
+| `GenerateCPPCode` | `cpp_mcp_generator_tool` | function |
+| `GenerateCPPReadme` | `cpp_mcp_generator_tool` | function |
+| `GenerateCode_LogEnabled` | `cpp_mcp_generator_tool` | **var** |
+| `GenerateCMakeLists` | `cmake_for_cpp_mcp_generator_tool` | function |
+| `GenerateCPPTestMain` | `cmake_for_cpp_mcp_generator_tool` | function |
+| `GenerateCode_LogEnabled` | `cmake_for_cpp_mcp_generator_tool` | const |
+| `GenerateCSharpCode` | `csharp_mcp_generator_tool` | function |
+| `GenerateCSharpTestProgram` | `csharp_mcp_generator_tool` | function |
+| `GenerateCSharpReadme` | `csharp_mcp_generator_tool` | function |
+| `GenerateCode_LogEnabled` | `csharp_mcp_generator_tool` | const |
+
+## A.2 CLI Public Symbols
+
+| Symbol | Unit |
+|--------|------|
+| `Process_CommandLine: Boolean` | `code_decl_to_mcp_cmdline` |
+| `CommandLine_ExitCode: Integer` | `code_decl_to_mcp_cmdline` |
+| `EXIT_OK` / `EXIT_BAD_ARGS` / `EXIT_PARSE_FAILED` / `EXIT_GEN_FAILED` / `EXIT_IO_ERROR` | `code_decl_to_mcp_cmdline` (implementation section) |
+
+## A.3 GUI Public Symbols
+
+| Symbol | Unit |
+|--------|------|
+| `TCodeDeclToMcpForm` | `code_decl_to_mcp_frm` |
+| `CodeDeclToMcpForm: TCodeDeclToMcpForm` | `code_decl_to_mcp_frm` |
+
+## A.4 Internal Function Index (for grepping)
+
+| Function name | Units where it appears |
+|---------------|-----------------------|
+| `IsSupportedType` | 5 generator units |
+| `PascalTypeTo*` | 4 generator units |
+| `MakeApiName` | `pas` / `cpp` |
+| `MakePythonIdentifier` | `py` |
+| `MakeCSharpIdentifier` | `csharp` |
+| `MakeCallbackName` | `pas` / `py` / `cpp` / `csharp` |
+| `MakeInternalCallName` | `pas` / `py` / `cpp` / `csharp` |
+| `MakeIncludeGuardName` | `cpp` |
+| `MakeSourceFileName` | `cpp` |
+| `MakeAppNameFromUnit` | `pas` / `py` / `cpp` / `csharp` |
+| `MakeProviderClassName` | `csharp` |
+| `MakeSourceBaseName` | `cmake` |
+| `MakeTargetBaseName` | `cmake` |
+| `GetFullDescription` | 4 generator units |
+| `GetTableCellText` | 4 generator units |
+| `CollectValidFunctions` | 4 generator units |
+| `UniqueApiName` | `py` / `csharp` |
+| `CleanComment_Local` | `cpp` |
+| `IsDeclSupported` | `cpp` |
+| `PyStrLit` | `py` |
+| `CPPStrLit` | `cpp` |
+| `CSharpStrLit` | `csharp` |
+| `PascalStrLit` | `pas` |
+| `Log` | 5 generator units |
+
+---
+
+# Appendix B — Constants and Defaults Master Table
+
+| Constant | Value | Locations |
+|----------|-------|-----------|
+| `DEFAULT_BEACON_APP` | `'agent_main_app'` | 4 generators + `api_tool_provider_unit` |
+| `DEFAULT_REGISTER_API` | `'register_agent'` | 4 generators + `api_tool_provider_unit` |
+| `DEFAULT_AGENT_LOG_API` | `'agent_log'` | 4 generators + `api_tool_provider_unit` |
+| `DEFAULT_IPC_ENDPOINT` | `'ipc:agent'` | 4 generators + `api_tool_provider_unit` |
+| `DEFAULT_APP_DESC` (C++) | `'Tool provider generated by cpp_mcp_generator_tool'` | `cpp_mcp_generator_tool` |
+| `MAX_DESC_LEN` (C++) | `200` | `cpp_mcp_generator_tool` |
+| `MY_APP_NAME` (bootstrap) | `'code_decl_to_mcp_api'` | `api_tool_provider_unit` |
+| `MY_APP_DESC` (bootstrap) | `'Tool provider for unit code_decl_to_mcp_api'` | `api_tool_provider_unit` |
+| `DEBUG_LOG` (bootstrap) | `True` | `api_tool_provider_unit` |
+| `EXIT_OK` | `0` | `code_decl_to_mcp_cmdline` |
+| `EXIT_BAD_ARGS` | `1` | `code_decl_to_mcp_cmdline` |
+| `EXIT_PARSE_FAILED` | `2` | `code_decl_to_mcp_cmdline` |
+| `EXIT_GEN_FAILED` | `3` | `code_decl_to_mcp_cmdline` |
+| `EXIT_IO_ERROR` | `4` | `code_decl_to_mcp_cmdline` |
+
+---
+
+# Appendix C — Honest Uncertainty List
+
+> **The following cannot be 100% confirmed from the source I have. Consult the source or ask the author before modifying.**
+
+1. **The internal normalization rules of `TPascal_Func_Model.LoadFromParser`**: the mapping table in §7.4 is based on indirect inference (from an older knowledge base) and has **not** been verified line-by-line against `Z.Pascal_Func_Model.pas`.
+
+2. **Whether the Pascal `GetFullDescription` actually loses non-ASCII**: the document says "possibly unsafe", but this has **not** been empirically tested.
+
+3. **Whether C++'s `MAX_DESC_LEN = 200` counts bytes or characters**: the source shows `Result.GetString(1, MAX_DESC_LEN + 1)`, but the exact meaning of `GetString`'s arguments has not been cross-checked against `TPascalString`'s implementation.
+
+4. **The complete description text of the 11 MCP tools** in `code_decl_to_mcp_api_tool_provider_unit.pas`: this document provides structure and key constraints but does not reproduce each tool's full description (each is roughly 500-1000 characters).
+
+5. **The concrete value of the GUI's `SysTimer.Interval`**: not visible in the source; needs confirmation from the `.lfm` file.
+
+6. **Whether CLI mode generates a CMakeLists**: from the source, it does **not** (no `cmake_for_cpp_mcp_generator_tool` in `uses`), but this could be an oversight rather than an intentional design decision.
+
+7. **Whether `csharp_mcp_generator_tool.pas` is fully aligned with `py_mcp_generator_tool.pas`**: this is newly delivered code that has **not** yet been verified by real execution.
+
+8. **The role of `mimalloc4p` / `athreads` in `code_decl_to_mcp.lpr`**: present in `uses` but not covered by this document; this is packaging/platform-specific.
+
+9. **Whether the values of `Application.Scaled` / `Application.MainFormOnTaskbar` are optimal**: the source uses `True` / `True` (under `{$WARN 5044 OFF}`), but the rationale is not stated.
+
+10. **Interaction details between `Z.LingoFuse_Export` / `Z.LingoFuse_Core` and `code_decl_to_mcp_api_tool_provider_unit`**: whether the MCP tool registration path goes through `LF_CreateAppEx` + `LF_RegisterCallEx` (looks like it) or another path needs cross-checking with `lingofuse_helper`.
+
+11. **Whether `TPascal_Func_Model.SaveToParser` discards `param_mod`**: an older knowledge base says it discards `var` / `out` / `const`; this document has not verified it line-by-line.
+
+12. **Whether the GUI's `FormClose` triggers `LF_Shutdown`**: the source only calls `Hide` + `caFree` in `FormClose`, while `LF_Shutdown` lives in `.lpr`'s `finally`. So **a normal GUI close triggers `LF_Shutdown`**, but a forced close (Task Manager) does not.
+
+13. **Whether `FUnitOutputDir` is used by other methods before the first `GenerateAllArtifacts` call**: needs confirmation from the complete `frm` source.
+
+14. **Whether modifying `Z.Status`'s `OnDoStatusHook` in the GUI or CLI pollutes the other**: CLI mode modifies it and **never restores it** (the source has no restore step), which could affect a subsequent GUI launch. In a single-process-single-mode scenario it is fine.
+
+15. **Whether the hard-coded `regCount = 11` in `api_tool_provider_unit` must be updated when adding a tool**: the source shows `Result := (regCount = 11);` — **hard-coded**. If a tool is added, this must be updated in sync.
+
+---
+
+## Closing Statement
+
+**What this document is**: a **maintainer-facing** knowledge base for `code_decl_to_mcp`. It does not pretend to replace the source, but it lets you locate the right file, function, and line for **95% of modification tasks** **without opening the source**.
+
+**What this document delivers**:
+1. **A precise symbol index**: any function name can be looked up to see which files contain it.
+2. **A modification task cheat sheet**: any modification request can be looked up to see which files must change.
+3. **Known inconsistencies**: 14 pitfalls are warned about up front.
+4. **25 self-test questions**: if you cannot answer them after reading, the document is not fit for purpose.
+5. **Honest uncertainty list**: 15 items that cannot be confirmed are marked explicitly.
+
+**How to use this document**:
+- Before modifying code, check §10 and §14.
+- After modifying code, walk §16's self-audit checklist.
+- If this document does not cover a modification task, **extend this document** rather than just changing the code.
+
+**Document version**: v8.0 (Developer-First Edition)
+**Coverage**: All 9 Pascal files of the `code_decl_to_mcp` project + shared generator logic + output file naming + modification / upgrade / maintenance guide
+**Companion documents**: `pascal_code_mcp_rule.md` / `C_code_mcp_rule.md` / `MCP_API_Contract.md`
+**Repository**: `https://github.com/PassByYou888/LingoFuse-pasAgent-v3`
