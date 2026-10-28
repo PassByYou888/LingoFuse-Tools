@@ -1,422 +1,182 @@
 # LingoFuse-Tools
 
-> **Code generation tools for the LingoFuse ecosystem**
-> Turn Pascal / C function declarations into cross-language binding code — with synchronized documentation, in one step.
+> **一份 Pascal 单元或一个 C 头文件，铺开整条跨语言接口线。**
 >
-> **Every tool supports the Agent. Every tool has an MCP API. Every tool has a CLI. Every tool runs cross-platform.**
-> **Roadmap: 30 target programming languages.**
+> 代码、测试、构建脚本、知识库——从同一个模型长出来，不会漂移。
 
-[LingoFuse](https://github.com/PassByYou888/LingoFuse) is a language-neutral, multi-threaded distributed RPC framework. [LingoFuse-pasAgent-v3](https://github.com/PassByYou888/LingoFuse-pasAgent-v3) provides the Agent and MCP runtime. **LingoFuse-Tools** is the companion code generator suite: start from a Pascal unit or C header, and produce multi-language service/call code plus synchronized README documentation.
-
----
-
-## Table of Contents
-
-- [What This Repository Provides](#what-this-repository-provides)
-- [Why This Project Matters](#why-this-project-matters)
-- [Three Tools, Three Protocols](#three-tools-three-protocols)
-- [Universal Capabilities](#universal-capabilities)
-- [The 30-Language Roadmap](#the-30-language-roadmap)
-- [AI-First Design](#ai-first-design)
-- [Quick Start](#quick-start)
-- [Workflow](#workflow)
-- [Directory Structure](#directory-structure)
-- [Documentation and Knowledge Base](#documentation-and-knowledge-base)
-- [The LingoFuse Ecosystem](#the-lingofuse-ecosystem)
-- [License](#license)
+[LingoFuse](https://github.com/PassByYou888/LingoFuse) 是跨语言通讯地基。**LingoFuse-Tools** 是它的接口生成层：把你已经在写的 Pascal 函数或 C 函数，一次性变成任意目标语言可以**直接调用**的 service / call 代码——不需要写 IDL，不需要手写桩，不需要为每种语言重复维护一份“接口长什么样”。
 
 ---
 
-## What This Repository Provides
+## 这个仓库解决的真实问题：接口的维护熵增
 
-This repository contains **three independent code generators**. Each one parses a Pascal unit or C header and emits service-side and caller-side code for multiple target languages, along with a Markdown companion for every artifact.
+跨语言接口最贵的不是“第一次写出来”，而是**改一次之后，所有语言、所有测试、所有构建脚本、所有文档能不能一起跟上**。
 
-Every tool in this repository:
+一个 `Add(a, b: Integer): Integer` 写出来，要在 Python 里写一遍调用、在 C++ 里写一遍 header/impl、在 C# 里写一遍 P/Invoke 封装、在测试里各写一遍断言、在 CMake 里加一个 target、在 README 里写一遍“这个 API 怎么用”。**每多一种语言，熵增翻一倍；每改一次签名，所有地方都可能留下一个不一致的字节。**
 
-- **Supports the Agent** — each tool registers itself as an MCP tool provider and can be driven entirely by an AI agent.
-- **Exposes an MCP API** — every generation workflow is reachable through MCP tool calls, with no exception.
-- **Provides a CLI mode** — file-to-file, scriptable, CI-ready; no UI is created in CLI mode.
-- **Runs cross-platform** — Windows, Linux, macOS, and any platform where a UI subsystem is available; the same source builds for every target.
-- **Targets 30 programming languages** — see [The 30-Language Roadmap](#the-30-language-roadmap).
-- **Ships with its own knowledge base** — a self-contained Markdown document that an AI agent can consume directly to take over the entire interface.
-- **Generates synchronized documentation** — code and README come from the same model, so they never drift out of sync.
+LingoFuse-Tools 做的事只有一件：**把“接口”从“维护物”变成“生成物”。**
+
+你维护**一份声明**。生成器负责把这份声明投影到每一种目标语言、每一种协议、每一套测试和构建脚本上。改声明，重新生成，所有目标一起刷新。**不存在“C++ 改了但 Rust 忘了改”这种事，因为根本没有手写的“Rust 版本”需要去记。**
 
 ---
 
-## Why This Project Matters
+## 三条工具线：同一份声明，三种“到对面”的方式
 
-### Modern agent direction
+仓库里不是“一个生成器”，而是**三条并行的投影线**。它们共享同一套解析器、同一套中间模型（LV1）、同一套类型白名单。区别只在**用什么协议把请求送到对面**，以及**产物集长什么样**。
 
-This project is built **agent-first**, not agent-compatible. It was designed from the ground up under the assumption that the primary user of the toolchain may be an AI agent, not a human at a keyboard.
+| 工具 | 协议 | 一句话定位 |
+|------|------|------------|
+| **`code_decl_to_abi`** | LingoFuse 二进制 ABI | 两端都是 LingoFuse 原生时，走最短路径：定宽二进制、零 JSON 解析、零文本编码 |
+| **`code_decl_to_json_abi`** | HTTP + JSON（经 `bridge.py`） | 一端是浏览器、外部 HTTP 客户端，或某种没有 LingoFuse 绑定的语言时，用 HTTP 把 LingoFuse 的 mesh 能力“借”出去 |
+| **`code_decl_to_mcp`** | MCP（Model Context Protocol） | 把函数直接变成 AI Agent 可以发现的工具，不需要 Agent 懂 LingoFuse，只需要懂 MCP |
 
-Concretely, this means:
+**选择规则可以压缩成一句话**：如果对面**能**加载 LingoFuse 运行时，优先用 ABI；如果对面**不能**，用 JSON ABI；如果对面是 **Agent**，用 MCP。
 
-- Every tool exposes its complete capability through an **MCP API**, so an agent can invoke it the same way it invokes any other MCP tool.
-- Every tool ships with a **knowledge base** written for AI consumption, so an agent can understand the tool's full contract without reading its source.
-- The **GUI, CLI, and MCP** entry points share the same backend, so what an agent calls through MCP is byte-identical to what a human produces through the GUI.
-
-### Super-efficiency for multi-language interfaces
-
-Writing cross-language bindings by hand is one of the most expensive and error-prone tasks in software engineering. A single change to a service signature must be manually propagated to every language's client code, every test program, every build script, and every documentation file. Each propagation is a chance to introduce a mismatch.
-
-**LingoFuse-Tools collapses this entire class of work into a single generator call.**
-
-From one Pascal unit or one C header, the toolchain produces — in one step, from a single source of truth:
-
-- **Service-side code** for every target language.
-- **Caller-side code** for every target language.
-- **A companion Markdown README** for every artifact, containing the test program, the interface reference, the build commands, and — for C++ — the CMake script.
-- **Test scaffolding** for every target.
-- **Build scripts** where the target requires them.
-
-Because the code and the documentation are generated from the same model, **they can never drift apart**. Change the declaration, re-run the generator, and every target's code and documentation update together.
-
-This is the super-efficiency: **the multi-language interface surface of your project becomes a generated artifact, not a maintained one.**
+三者的产物集不同——ABI 出 service/call 源码和测试，JSON ABI 额外出 bridge 配置和 HTML 测试页，MCP 出 tool provider 和 tool schema——但**输入契约是同一份**。你在 `.pas` 或 `.h` 里写的东西，三条线都认。
 
 ---
 
-## Three Tools, Three Protocols
+## 应用规律：生成的边界由“类型白名单”划定，不由“语言”划定
 
-The three tools share the same parsing and generation backend but target different communication protocols:
+LingoFuse-Tools 有一个不太像“代码生成器”的设计：**它不试图理解任意类型，只承认三个 ABI 家族——整数、浮点、字符串。**
 
-| Tool | Directory | Protocol | Source Languages | Target Languages |
-|------|-----------|----------|------------------|------------------|
-| **code_decl_to_abi** | `src/pascal_c_to_abi/` | LingoFuse binary ABI | Pascal, C | 30 (roadmap) |
-| **code_decl_to_json_abi** | `src/pascal_c_to_json_abi/` | HTTP + JSON (via bridge) | Pascal, C | 30 (roadmap) |
-| **code_decl_to_mcp** | `src/pascal_c_to_mcp/` | Model Context Protocol | Pascal, C | 30 (roadmap) |
+这意味着：
 
-### Which tool should I use?
+- 一个函数**能不能被生成**，不取决于它是 Pascal 还是 C，不取决于目标语言是 Rust 还是 R，只取决于它的参数和返回值是否落在这三个家族里。
+- `Boolean`、`Variant`、数组、记录、类、接口、枚举、指针、`TDateTime`——**整条声明被静默丢弃**，不是“部分生成”，不是“运行时再报错”。生成器在规范化阶段就把它们筛掉，日志里留一行原因。
+- 复杂结构不能“透传”，但可以**降级**：把 JSON 塞进 `string`，对面自己反序列化。这是唯一被支持的“复杂类型逃生通道”。
 
-| Scenario | Recommended tool |
-|----------|------------------|
-| Both ends are LingoFuse-native, high-concurrency, numeric-heavy payloads | **code_decl_to_abi** |
-| One end is a browser, an external HTTP client, or a language without a LingoFuse binding | **code_decl_to_json_abi** |
-| You want to expose your functions as MCP tools to an AI agent | **code_decl_to_mcp** |
-
-All three tools share the same input format, the same intermediate model, and the same type system. They differ only in the **wire format** and the **set of generated artifacts**.
+这条规律决定了这个仓库的**适用形状**：它最适合**接口本身是数值/字符串密集**的系统——计算引擎、协议网关、数据管道、嵌入式控制面。如果接口天然是“传一个对象进来、改一个对象出去”，LingoFuse-Tools 会强迫你在声明层面做一次显式序列化决策，这是刻意的摩擦，不是缺陷。
 
 ---
 
-## Universal Capabilities
+## 工程定位：不是“又一个 gRPC 代码生成”，而是“跨语言接口的单一真相源”
 
-The following four capabilities are **present in every tool** in this repository. They are not optional features of individual tools — they are the foundation on which the whole suite is built.
+gRPC 的 `.proto` 是**接口定义**，生成的是**桩**。LingoFuse-Tools 的 `.pas` / `.h` 是**实现本身**，生成的是**把实现暴露成远程可调用的那一层**。
 
-### 1. Agent support — every tool is an MCP tool provider
+这个差别带来三个工程后果：
 
-Every tool registers its capability with the `agent_main_app` beacon and exposes its complete workflow as MCP tools. An AI agent can discover the tools, sequence the calls, and produce artifacts — no human in the loop.
+**第一，它不要求你把接口从代码里“抽出来”。** 你的 Pascal 函数本来就在 `interface` 段里，C 函数本来就在头文件里。你不需要维护一份和实现分离的 IDL，也就不会出现“IDL 改了实现没改”或“实现改了 IDL 没改”的经典漂移。
 
-This is not an add-on. It is the **primary integration surface** of the toolchain.
+**第二，它是“全产物”生成，不是“只生成客户端桩”。** 一次 `code_decl_to_abi` 会同时产出 service 侧（把函数注册进 mesh）、call 侧（让别的语言能调它）、测试程序（端到端跑通）、构建脚本（CMake / Cargo / Maven / …）和知识库（这个产物怎么构建、怎么部署、怎么排错）。**调用方拿到的不只是一份“可以调用的 API”，而是一整条从编译到运行的路径。**
 
-### 2. MCP API — every tool exposes its full capability over MCP
-
-Every generation workflow is reachable through MCP tool calls:
-
-| Tool | MCP tools exposed |
-|------|-------------------|
-| code_decl_to_abi | 31 |
-| code_decl_to_json_abi | 3 |
-| code_decl_to_mcp | 11 |
-
-The difference in counts reflects the workflow each tool exposes, not a difference in capability. Every tool covers its complete surface.
-
-### 3. CLI mode — every tool is scriptable, every tool is CI-ready
-
-Run any tool **with arguments** to enter CLI mode. No GUI is opened, no window is created; the tool goes straight from file to file.
-
-```bash
-# ABI: generate Pascal service from Pascal source
-code_decl_to_abi calculator.pas calculator_service.pas
-
-# ABI: generate C# service from a C header
-code_decl_to_abi --call math.h math_service.cs
-
-# JSON ABI: generate C++ service
-code_decl_to_json_abi ComplexTestUnit.h calculator_service.hpp
-
-# MCP: generate Pascal tool provider
-code_decl_to_mcp calculator.pas calculator_provider.pas
-```
-
-**Every tool supports CLI mode.** Source language is detected from the input file's extension; target language is detected from the output file's extension. Every CLI run writes both the generated code and a `<base>_readme.md` companion.
-
-### 4. Cross-platform — every tool runs wherever a UI subsystem exists
-
-Every tool in this repository is written in **Free Pascal**, a cross-platform compiler, and is **verified to build and run on Windows, Linux, and macOS**.
-
-**The rule is simple**: as long as the target system provides a UI subsystem (LCL, GTK, Qt, Cocoa, Win32, or equivalent), the tool can build and run there. On headless systems, the CLI mode still works — the UI subsystem is only needed for the GUI entry point.
-
-There is no platform-specific code path in the generator backend. The same source produces the same output on every platform.
+**第三，它是“Agent 原生”的，不是“Agent 兼容”的。** 每个工具本身就是 MCP tool provider，每个工具都自带一份给 AI 读的知识库（输入契约、线格式、踩坑记录、调试树）。**Agent 不需要读生成器源码就能驱动整个工具链**——它通过 MCP 调 `Generate`，然后读知识库来理解生成出来的东西。这是这个仓库和大多数“AI-friendly”工具最本质的区别：**AI 是主用户，不是附加功能。**
 
 ---
 
-## The 30-Language Roadmap
+## 统一能力：四个前端入口，一个后端
 
-> **The generator backend is engineered to accept an unbounded number of target languages. 30 is the current commitment; the architecture has no ceiling.**
+三个工具**全部**共享同一套前端形态。没有“这个工具有 GUI 但那个只有 CLI”的分裂。
 
-Adding a new target language is a **mechanical process**, not an architectural change. Each new language requires:
+| 能力 | 具体形态 |
+|------|----------|
+| **GUI** | 五标签页向导：Welcome → Source Code → Source ↔ JSON → JSON ↔ Model → Final Source。每一步可以手工检查/修正中间 JSON，不是黑盒 |
+| **CLI** | 文件到文件，无 UI，退出码语义明确（0 成功 / 1 参数错 / 2 解析失败 / 3 生成失败 / 4 I/O 错） |
+| **MCP** | GUI 启动后自动注册为 MCP tool provider。`code_decl_to_abi` 暴露 31 个工具，`code_decl_to_json_abi` 3 个，`code_decl_to_mcp` 11 个——数量不同是因为工作流粒度不同，不是能力差异 |
+| **程序化接口** | 每个生成器都是独立的 Pascal 单元，导出 `GenerateXxxCode(Model)` 函数。你可以绕过所有前端，直接在自己的 Pascal 程序里调用 |
 
-1. **Two generator units** — `<lang>_abi_service_generator_tool.pas` and `<lang>_abi_call_generator_tool.pas`.
-2. **A type mapping table** — from the three ABI families (integer / float / string) to the target language's native types.
-3. **Registration in four places** — main program, CLI dispatcher, GUI form, MCP tool provider.
-4. **A CLI `Detect_Target_Lang` entry** and help-text update.
-5. **An MCP tool-count constant update.**
+**GUI / CLI / MCP 三者的输出是字节一致的。** MCP 层的 `internal_call_*` 内部就是调用 GUI 的按钮处理器，不存在“MCP 路径悄悄做了不一样的事”。
 
-### Current coverage
+---
 
-The following languages are already delivered and working today:
+## 目标语言：当前交付集是“五语言口径”，但架构没有天花板
 
-| Language | ABI | HTTP/JSON | MCP |
-|----------|:---:|:---------:|:---:|
+仓库当前的**已交付、可工作**的目标语言集是：
+
+| 语言 | ABI | HTTP/JSON | MCP |
+|------|:---:|:---------:|:---:|
 | Pascal | ✅ | ✅ | ✅ |
 | Python | ✅ | ✅ | ✅ |
 | C++ | ✅ | ✅ | ✅ |
 | C# | ✅ | ✅ | ✅ |
-| JavaScript | — | ✅ | — |
+| JavaScript（浏览器 / Node） | —（仅 call） | ✅ | — |
 
-### More language interfaces are still under construction
+**这不是“最终支持列表”**，而是“今天能直接跑的列表”。仓库的架构把加一种新目标语言定义为**机械操作**：两个生成器单元、一张类型映射表、在四个地方注册（主程序 / CLI / GUI / MCP 工具提供者）、一条 CLI 扩展名识别、一个 MCP 工具计数常量。**没有架构变更，没有“核心需要重构”。**
 
-> **Generation for additional target languages is actively in progress.** The 30-language commitment is a roadmap, not a finished state. The five languages listed above are the current delivered set; everything below is work-in-progress or planned.
-
-The remaining languages on the 30-language commitment fall into these families:
-
-| Family | Candidate languages |
-|--------|---------------------|
-| **Systems** | Rust, Go, Zig, Nim, D, Swift, Kotlin/Native |
-| **JVM** | Java, Kotlin, Scala (via JNI or JNA) |
-| **.NET** | F#, VB.NET (via P/Invoke) |
-| **Functional** | OCaml, Haskell, F#, Elixir, Erlang |
-| **Scripting** | Ruby, PHP, Perl, Lua, Julia, TypeScript |
-| **Domain-specific** | R, MATLAB, Wolfram Language, custom DSLs |
-| **Embedded** | MicroPython, embedded C, Ada, SPARK |
-
-**The user-facing contract does not change when a language is added**: the same CLI flags, the same GUI tabs, and the same MCP tools continue to work. The only difference is a new set of `<lang>_abi_*` generator units and a new companion `.md` per artifact.
+路线图上的 30 种语言覆盖系统语言（Rust / Go / Zig / Nim / D / Swift / Kotlin Native）、JVM 系（Java / Kotlin / Scala）、.NET 系（F# / VB.NET）、函数式（OCaml / Haskell / Elixir / Erlang）、脚本（Ruby / PHP / Perl / Lua / Julia / TypeScript）、领域专用（R / MATLAB / Wolfram）和嵌入式（MicroPython / embedded C / Ada / SPARK）。**加语言时用户契约不变**：同样的 CLI 标志、同样的 GUI 标签页、同样的 MCP 工具名。
 
 ---
 
-## AI-First Design
+## 快速开始
 
-Every tool ships with its **own knowledge base** — a self-contained Markdown document that describes the tool's complete contract in a form AI can consume directly:
-
-- All API signatures, wire protocols, and type mappings.
-- Every artifact the tool produces, and what each one is for.
-- Known pitfalls, anti-patterns, and how to avoid them.
-- Debugging trees, extension guides, and modification procedures.
-
-### How to give a tool to an AI
-
-1. **Feed the tool's knowledge base to the agent.** This is the only documentation the agent needs.
-2. **Point the agent at the MCP endpoint** (default `ipc:agent`).
-3. **Let the agent drive.** It will discover the tools, sequence the calls, and produce the artifacts — no human in the loop.
-
-**The design goal is simple**: once you feed the knowledge base of a tool to an AI agent, the agent can **take over the entire interface** — it can call the tool through MCP, drive the GUI on your behalf, or generate code from the CLI, all without ever reading the tool's source.
-
-This means:
-
-- **No manual interface documentation.** The knowledge base **is** the interface documentation.
-- **No hand-written MCP wrappers.** Every tool already exposes its capability as MCP tools.
-- **No drift between what the AI sees and what the tool does.** The knowledge base and the MCP API are generated from the same source.
-
----
-
-## Quick Start
-
-### 1. Prerequisites
-
-- **Free Pascal 3.2+** or **Delphi 10.4+**
-- **Lazarus** (for GUI builds) or **fpc** command line
-- The **zCore submodule** must be initialized (provides `Z.Core`, `Z.Json`, `Z.Pascal_Func_Model`, `Z.Pascal_Func_Tool`, etc.)
-- **LingoFuse runtime** (`LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib`, `z_ipc_*`) — required at runtime for MCP mode and for the generated code; not required to build the tools themselves
-
-### 2. Fetch submodules and build
+**前置条件**：Free Pascal 3.2+ 或 Delphi 10.4+；Lazarus（GUI 构建）或 `fpc` 命令行；zCore 子模块已初始化；LingoFuse 运行时（`LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib` + `z_ipc_*`）在 `PATH` 或工具可执行文件同目录。
 
 ```bash
-# Fetch submodules
 git submodule update --init --recursive
-
-# Build the three tools (using Lazarus as an example)
 lazbuild -B src/pascal_c_to_abi/code_decl_to_abi.lpi
 lazbuild -B src/pascal_c_to_json_abi/code_decl_to_json_abi.lpi
 lazbuild -B src/pascal_c_to_mcp/code_decl_to_mcp.lpi
+# 或 Windows 下直接 src/build.bat
 ```
 
-Or use `src/build.bat` on Windows.
+**GUI**：不带参数运行任意工具。
 
-### 3. GUI usage
-
-Run any tool **without arguments** to open its graphical interface:
-
-- Paste the source text.
-- Select the source language (Pascal / C).
-- Click "Next" through the five tabs to complete parsing, normalization, and generation.
-- View every artifact (code + README) in the "Final Source" page.
-- Files are also written to `<exe_dir>/<UnitName>/`.
-
-The GUI is the same across all three tools; they differ only in the target languages and the protocol they emit.
-
-### 4. Command-line usage
-
-Run any tool **with arguments** to enter CLI mode. No GUI is opened, no window is created; the tool goes straight from file to file.
+**CLI 最小示例**：
 
 ```bash
-# ABI: generate Pascal service from Pascal source
+# Pascal → Pascal service
 code_decl_to_abi calculator.pas calculator_service.pas
-# Output: calculator_service.pas + calculator_service_readme.md
 
-# ABI: generate C# service from a C header
+# C header → C# service（完整产物集：service + call + 两个测试 + 测试 README）
 code_decl_to_abi --call math.h math_service.cs
-# Output: complete C# artifact set (service, call, two test programs, READMEs)
 
-# JSON ABI: generate C++ service
+# C header → C++ service（自动配对 .hpp + .cpp + CMakeLists + 测试驱动）
 code_decl_to_json_abi ComplexTestUnit.h calculator_service.hpp
-# Output: calculator_service.hpp + calculator_service.cpp + calculator_service_readme.md
 
-# MCP: generate Pascal tool provider
+# Pascal → MCP tool provider
 code_decl_to_mcp calculator.pas calculator_provider.pas
-# Output: calculator_provider.pas + three READMEs (Pascal/Python/C++)
 ```
 
-**Every tool supports CLI mode.** The source language is detected from the input file's extension; the target language is detected from the output file's extension. C++ targets automatically pair `.hpp` and `.cpp`. Every CLI run also writes a `<base>_readme.md` companion next to the generated code.
-
-Run any tool with `--help` for the full CLI reference.
-
-### 5. MCP integration
-
-Every tool is also **an MCP tool provider**. When the GUI is running, the tool automatically registers its capability with the `agent_main_app` beacon, exposing its generation workflow as MCP tools.
-
-For example, `code_decl_to_mcp` registers 11 tools covering:
-
-- `SetSourceCode` — input
-- `ConvertToPascalMCP` / `ConvertToPythonMCP` / `ConvertToCppMCP` — generate
-- 7 readers such as `GetLastPascalCode` — read on demand
-
-Once the beacon and provider are running, an AI agent can drive the **entire generation workflow** through MCP:
-
-```
-SetSourceCode(Source, Language)
-ConvertToPythonMCP()
-GetLastPythonCode()
-GetLastPythonReadme()
-```
-
-No GUI interaction, no CLI invocation — the agent calls the tool the same way it calls any other MCP tool.
+**MCP**：GUI 启动后，工具自动向 `agent_main_app` beacon 注册。以 `code_decl_to_mcp` 为例，Agent 只需要三步：`SetSourceCode` → `ConvertToXxxMCP` → `GetLastXxxCode/Readme`。没有 GUI 交互，没有 CLI 调用，和调用任何其他 MCP tool 没有区别。
 
 ---
 
-## Workflow
+## 知识库：给 AI 读的“接口手册”，和代码同源
 
-All three tools follow the same pipeline:
+每个工具都自带一份知识库，内容不是“人类写的教程”，而是**AI 可以直接消费的契约**：
 
-```mermaid
-flowchart LR
-    A["Source file<br/>Pascal unit / C header"] --> B["Parse to LV0 JSON<br/>(raw declaration tree)"]
-    B --> C["Normalize to LV1 Model<br/>(types collapsed to int64/double/string)"]
-    C --> D["Generate target code<br/>+ companion README"]
-    D --> E1["Target language 1..30"]
-    D --> E2["Service side"]
-    D --> E3["Caller side"]
-```
+- **输入契约**（`pascal_code_abi_rule.md` / `C_code_abi_rule.md`）：哪些声明会被提取、哪些会被静默丢弃、参数名必须出现在行首、`{ }` 注释里不能有 `}`、C 的 `void *` 为什么会在 Pascal 侧被拒绝——**每一条规则都有 ✅/❌ 代码示例**。
+- **线协议**（`MCP_API_Contract.md`）：UTF-8 + NUL 帧、状态字节语义、`required` 数组包含所有参数、`ensure_ascii=False` 的强制要求——**字节级，不是伪代码级**。
+- **踩坑记录**（`R_ABI_Generator_Knowledge_Base.md` / `Dart_ABI_Generators_Fix_Report.md` / `Fortran_ABI_Generator_Work_Report.md` / `swift_abi_generator_development_log.md` / `TypeScript_ABI_Generator_Development_Report.md` / `LingoFuse_JS_Async_Generator_Fix_Knowledge_Base.md`）：记录了“我以为”被实测推翻的地方——`int64` 在 JS 丢精度、`_timer.unref()` 让 async 永远卡死、Ruby 的 dispatcher 线程在 DLL 卸载后访问野指针、Swift 的 `LF_LoadLibrary` 漏调用导致所有 `LF_*` 静默失败。
 
-- **Input**: A complete Pascal unit (with `interface` / `implementation`) or a C header (with include guard).
-- **Output**: Code + Markdown README. Both are generated from the same `TPascal_Func_Model`, so **they never drift out of sync**.
-- **Type whitelist**: Only integer, floating-point, and string families are supported. Other types (`Boolean`, `Variant`, arrays, records, classes, interfaces, enums, pointers, etc.) cause the entire declaration to be silently dropped.
-
-**The generated README is not optional.** Every artifact is paired with a Markdown companion that contains the test program, the interface reference, the build instructions, and — for C++ — the CMake script. **Read the generated `.md` first** whenever you are about to build, test, or deploy the artifact.
+**喂给 Agent，Agent 就能接管这个工具。** 这是仓库的设计承诺：知识库不是“文档”，是**可执行的接口规格**。
 
 ---
 
-## Directory Structure
+## 仓库结构（速览）
 
 ```
-LingoFuse-Tools/
-├── src/
-│   ├── common/                     # Shared units (lingofuse_import, helper, etc.)
-│   ├── pascal_c_to_abi/            # ABI generator (GUI + CLI + MCP)
-│   ├── pascal_c_to_json_abi/       # HTTP/JSON generator (GUI + CLI + MCP)
-│   ├── pascal_c_to_mcp/            # MCP generator (GUI + CLI + MCP)
-│   └── zCore/                      # Z.Core dependency (submodule)
-├── .gitmodules
-├── LICENSE
-└── README.md
+src/
+├── pascal_c_to_abi/          ← code_decl_to_abi（二进制 ABI）
+│   ├── code_decl_to_abi.lpr  ← 主程序（CLI/GUI 分发）
+│   ├── code_decl_to_abi_frm.pas
+│   ├── code_decl_to_abi_cmdline.pas
+│   ├── *_abi_*_generator_tool.pas  ← 各语言生成器
+│   └── *_rule.md / *Knowledge*.md  ← 输入契约 + 踩坑库
+├── pascal_c_to_json_abi/     ← code_decl_to_json_abi（HTTP/JSON）
+│   ├── http_bridge_setup_generator_tool.pas  ← bridge 启动脚本
+│   └── http_*_abi_*_generator_tool.pas
+├── pascal_c_to_mcp/          ← code_decl_to_mcp（MCP）
+│   ├── *_mcp_generator_tool.pas
+│   └── MCP_API_Contract.md
+├── common/                   ← 共享底层（lingofuse_import / helper）
+└── zCore/                    ← Z 框架子模块
 ```
 
----
-
-## Documentation and Knowledge Base
-
-**Each tool ships with its own knowledge base** — a self-contained Markdown document written for both humans and AI agents. Feeding it to an AI is the recommended way to enable full AI takeover of that tool's interface.
-
-| Tool | Knowledge base | User guide |
-|------|----------------|------------|
-| `code_decl_to_abi` | [`code_decl_to_abi_OPERATIONS.md`](src/pascal_c_to_abi/code_decl_to_abi_OPERATIONS.md) | [`code_decl_to_abi_USER_GUIDE.md`](src/pascal_c_to_abi/code_decl_to_abi_USER_GUIDE.md) |
-| `code_decl_to_json_abi` | [`code_decl_to_json_abi_knowledge_base.md`](src/pascal_c_to_json_abi/code_decl_to_json_abi_knowledge_base.md) | [`code_decl_to_json_abi_USER_GUIDE.md`](src/pascal_c_to_json_abi/code_decl_to_json_abi_USER_GUIDE.md) |
-| `code_decl_to_mcp` | [`code_decl_to_mcp_knowledge_base.md`](src/pascal_c_to_mcp/code_decl_to_mcp_knowledge_base.md) | [`code_generate_mcp.md`](src/pascal_c_to_mcp/code_generate_mcp.md) |
-
-Each knowledge base covers:
-
-- **API contracts** — every tool function, every MCP tool, every CLI argument.
-- **Wire protocols** — byte-level formats, type mappings, encoding rules.
-- **Generated artifacts** — what each file is for, where it lives, how to build it.
-- **Common pitfalls** — anti-patterns, silent-drop rules, cross-compiler hazards.
-- **Debugging trees** — symptom → cause → fix for the most common failures.
-- **Extension guides** — how to add a new target language, a new source language, or a new MCP tool.
-
-### Declaration rules
-
-Before you feed a declaration to any of these tools, read the corresponding rule document. These documents **are** the parsing contract: anything that violates them is silently dropped.
-
-| Source language | Rule document |
-|-----------------|---------------|
-| Pascal | [`pascal_code_abi_rule.md`](src/pascal_c_to_abi/pascal_code_abi_rule.md) |
-| C | [`C_code_abi_rule.md`](src/pascal_c_to_abi/C_code_abi_rule.md) |
-| MCP-specific contracts | [`MCP_API_Contract.md`](src/pascal_c_to_mcp/MCP_API_Contract.md) |
+每个工具目录下**生成器单元和知识库并排**——这是刻意的：读生成器行为和读契约文档在同一个视野里，不会出现“代码在这里、文档在另一个仓库”的断裂。
 
 ---
 
-## The LingoFuse Ecosystem
+## 这个仓库不适合谁
 
-`LingoFuse-Tools` is part of the LingoFuse family of projects. The repositories below are all under [@PassByYou888](https://github.com/PassByYou888) and are designed to work together.
+- **想要“装好就能跑、一条命令出全部语言”的人**：生成器本身需要 FPC/Lazarus 构建，目标语言的构建脚本需要你该语言的工具链。生成器只保证“生成出来的代码是完整的”，不保证“你的机器上什么编译器都装好了”。
+- **接口天然是“对象进、对象出”的人**：三个 ABI 家族之外的类型会被丢弃。你需要先在声明层面做序列化决策，这不是生成器替你做的事。
+- **需要成熟社区、Stack Overflow 问答、第三方教程的人**：单人维护，Issue 会回，但没有 SLA。
 
-| Repository | Description |
-|------------|-------------|
-| [**LingoFuse**](https://github.com/PassByYou888/LingoFuse) | The core cross-language RPC framework. Zero-IDL, 30+ languages, built-in service discovery, load balancing, and FIFO ordering. The foundation everything else builds on. |
-| [**LingoFuse-Tools**](https://github.com/PassByYou888/LingoFuse-Tools) | **This repository.** The code generator suite that turns Pascal / C declarations into ABI, HTTP/JSON, and MCP binding code — targeting 30 programming languages. |
-| [**LingoFuse-pasAgent-v3**](https://github.com/PassByYou888/LingoFuse-pasAgent-v3) | Industrial-grade Pascal agent system v3. Multi-modal (text + image), four core components, server-side tool execution, dual-language code generation. The agent runtime that consumes the MCP tool providers generated by `code_decl_to_mcp`. |
-| [**LingoFuse-pasAgent**](https://github.com/PassByYou888/LingoFuse-pasAgent) | The previous generation of the Pascal agent system. Precompiled packages available for zero-setup evaluation. |
-| [**LingoFuse-cppAgent**](https://github.com/PassByYou888/LingoFuse-cppAgent) | C++ integration layer for the LingoFuse agent mesh. Declare a C++ function once — get an AI agent tool, a CLI command, and a cross-language plugin automatically. Built on top of `LingoFuse-Tools`. |
-| [**LingoFuse-csharpAgent**](https://github.com/PassByYou888/LingoFuse-csharpAgent) | C#/.NET integration layer for the LingoFuse agent mesh. Full .NET binding, agent runtime, and LLM client SDK. Declare a C# function once — get an AI agent tool, a CLI command, and a cross-language plugin automatically. Built on top of `LingoFuse-Tools`. |
-
-### How they fit together
-
-```mermaid
-flowchart TB
-    LF["LingoFuse<br/>core RPC framework"]
-    LFT["LingoFuse-Tools<br/>ABI / JSON / MCP generators<br/>→ 30 target languages"]
-    PAS["LingoFuse-pasAgent-v3<br/>Pascal agent runtime"]
-    CPP["LingoFuse-cppAgent<br/>C++ integration layer"]
-    CS["LingoFuse-csharpAgent<br/>C#/.NET integration layer"]
-
-    LF --> LFT
-    LFT --> PAS
-    LFT --> CPP
-    LFT --> CS
-    PAS --> LF
-    CPP --> LF
-    CS --> LF
-
-    style LF fill:#4A90E2,color:#FFFFFF
-    style LFT fill:#9B59B6,color:#FFFFFF
-    style PAS fill:#27AE60,color:#FFFFFF
-    style CPP fill:#E67E22,color:#FFFFFF
-    style CS fill:#1A5490,color:#FFFFFF
-```
+**反过来**：如果你需要**把一组已经在用的 Pascal / C 函数，以最小的手工维护成本暴露给多种语言**，并且你接受“只支持整数 / 浮点 / 字符串、复杂结构自己序列化成字符串”这个边界，那这个仓库是目前能找到的最接近“单一真相源”的实现。
 
 ---
 
-## License
+**相关**：[LingoFuse](https://github.com/PassByYou888/LingoFuse)（通讯地基） · [LingoFuse-pasAgent-v3](https://github.com/PassByYou888/LingoFuse-pasAgent-v3)（Agent 与 MCP 运行时） · [zIPC](https://github.com/PassByYou888/zIPC)（底层同机 IPC）
 
-See [LICENSE](LICENSE) — consistent with the LingoFuse ecosystem.
-
----
-
-**LingoFuse-Tools** — makes cross-language RPC binding generation simple, consistent, and automatable.
-**GUI, CLI, or MCP — the same tool, the same output, 30 target languages, ready for a human or an AI to drive.**
+**许可证**：MIT
