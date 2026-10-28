@@ -1,7 +1,3 @@
-你指出的“五语言口径”确实有误。根据目录树中的生成器文件，**`code_decl_to_abi` 单条工具线已覆盖 17 种目标语言**，三条工具线合计远超 20 种。下面重新生成，语言支持表以目录树为唯一依据。
-
----
-
 # LingoFuse-Tools
 
 > **一份 Pascal 单元或一个 C 头文件，铺开整条跨语言接口线。**
@@ -9,6 +5,8 @@
 > 代码、测试、构建脚本、知识库——从同一个模型长出来，不会漂移。
 
 [LingoFuse](https://github.com/PassByYou888/LingoFuse) 是跨语言通讯地基。**LingoFuse-Tools** 是它的接口生成层：把你已经在写的 Pascal 函数或 C 函数，一次性变成任意目标语言可以**直接调用**的 service / call 代码——不需要写 IDL，不需要手写桩，不需要为每种语言重复维护一份“接口长什么样”。
+
+[下载预构建包](https://github.com/PassByYou888/LingoFuse-Tools/releases/tag/pre_build)
 
 ---
 
