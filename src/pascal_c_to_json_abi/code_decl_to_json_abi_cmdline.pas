@@ -1,106 +1,5 @@
 unit code_decl_to_json_abi_cmdline;
 
-(*
-  code_decl_to_json_abi_cmdline
-
-  Command-line front end for the code_decl_to_json_abi generator.
-
-  This unit is fully independent from the GUI and from LingoFuse. It
-  performs the same parsing and HTTP/JSON code generation work as the
-  graphical tool, but it never creates a form and never touches the UI
-  thread. It is intended to be called at the very start of the host
-  program, before the LCL application object is created.
-
-  Typical usage inside the host program (code_decl_to_json_abi.lpr):
-
-      begin
-        if not Process_CommandLine then
-        begin
-          exitCode := CommandLine_ExitCode;
-          exit;
-        end;
-
-        RequireDerivedFormResource := True;
-        Application.Scaled := True;
-        Application.MainFormOnTaskbar := True;
-        Application.Initialize;
-        Application.CreateForm(Tcode_decl_to_abi_json_form,
-                                code_decl_to_abi_json_form);
-        Application.Run;
-      end.
-
-  Process_CommandLine returns True when the process has no command-line
-  arguments at all, indicating that the caller should continue with the
-  normal GUI startup. It returns False when a command-line action has
-  been handled; the host program should then exit with the code stored
-  in CommandLine_ExitCode.
-
-  CONSOLE HANDLING
-  ----------------
-
-  The host project is built as a CONSOLE-subsystem application (via the
-  {$apptype console} directive). This is required so that the parent
-  shell waits for our output before printing its next prompt; a GUI-
-  subsystem build would let the parent shell return immediately and
-  would interleave the shell prompt with our help text.
-
-  Two console behaviours are handled by this unit:
-
-      - No command-line arguments. The console window that a console-
-        subsystem build allocates at startup is left alone; the LCL
-        application then runs exactly as a normal GUI application.
-        Double-clicking the executable in Explorer launches the GUI;
-        launching it from a shell leaves the shell prompt after the
-        process exits.
-
-      - At least one command-line argument. The console is kept
-        visible. A custom DoStatus hook routes every message straight
-        to standard output, bypassing the queue-based mechanism of
-        Z.Status that requires a running main loop. When the requested
-        work is done the function flushes stdout and returns False so
-        that the host program exits normally with the code in
-        CommandLine_ExitCode.
-
-  All status output goes through DoStatus. No direct WriteLn is used by
-  this unit's logic; only the console hook (private to this unit)
-  writes to standard output.
-
-  Supported command-line forms:
-
-      code_decl_to_json_abi --help
-      code_decl_to_json_abi <input_file> <output_file>
-      code_decl_to_json_abi --call <input_file> <output_file>
-
-  The source language is detected from the input file extension. The
-  target language is detected from the output file extension. The
-  direction (service or call) is controlled by the --call flag; the
-  default is service.
-
-  Every successful run produces the generated code file plus a
-  companion Markdown README describing the artefact.
-
-  When the target is C++, two code files are produced (a header and an
-  implementation), the README describes the pair as a single unit, and
-  two fixed-name CMake artifacts (CMakeLists.txt + test_main___.cpp)
-  are written to the same directory.
-
-  When the target is JavaScript, a self-contained HTML test page is
-  produced alongside the .js file, and the README describes all three
-  artefacts. JavaScript is a CALL-SIDE ONLY target: naming .js as the
-  output without also passing --call is an argument error.
-
-  C# is a special case. Naming a .cs file as the output produces a
-  complete C# project (service code, call code, both test programs,
-  and all associated READMEs) in a single run, written next to the
-  output file. The output file name itself is only used to select the
-  target directory; the file is not created. The --call flag is
-  ignored for C# because the service half, the call half and their
-  test programs must be generated together.
-
-  The remaining targets (Pascal, Python, C++) support both the service
-  side and the call side, selected by --call.
-*)
-
 {$DEFINE FPC_DELPHI_MODE}
 {$I ..\..\zCore\src\Z.Define.inc}
 
@@ -109,23 +8,9 @@ interface
 uses
   SysUtils;
 
-(*
-  Exit code produced by the last Process_CommandLine call. The host
-  program should pass this value to the process exit code (Delphi mode:
-  exitCode := CommandLine_ExitCode; exit;).
-*)
 var
   CommandLine_ExitCode: Integer = 0;
 
-(*
-  Inspect the process command line.
-
-  Return value:
-    True   no command-line arguments were supplied; the caller should
-           continue with the normal GUI startup.
-    False  a command-line action was performed; the caller should exit
-           with the code stored in CommandLine_ExitCode.
-*)
 function Process_CommandLine: Boolean;
 
 implementation
@@ -143,17 +28,7 @@ uses
   Z.UnicodeMixedLib,
   Z.Pascal_Func_Model,
   Z.Pascal_Func_Tool,
-  http_pas_abi_service_generator_tool,
-  http_pas_abi_call_generator_tool,
-  http_js_abi_call_generator_tool,
-  http_py_abi_service_generator_tool,
-  http_py_abi_call_generator_tool,
-  http_csharp_abi_service_generator_tool,
-  http_csharp_abi_call_generator_tool,
-  http_csharp_abi_test_generator_tool,
-  http_cpp_abi_service_generator_tool,
-  http_cpp_abi_call_generator_tool,
-  http_cmake_generator_tool;
+  code_decl_to_json_abi_registry;
 
 const
   EXIT_OK           = 0;
@@ -162,138 +37,113 @@ const
   EXIT_GEN_FAILED   = 3;
   EXIT_IO_ERROR     = 4;
 
-  (*
-    Fixed file names used by the C++ build support. These names are
-    NOT derived from the unit name: they are the exact names that the
-    generated C++ README's CMake section refers to, and that the
-    CMake script itself expects on disk.
-  *)
-  CMAKE_FILE_NAME     = 'CMakeLists.txt';
-  TEST_MAIN_FILE_NAME = 'test_main___.cpp';
-
 type
   TSourceLang = (slPascal, slC, slUnknown);
-  TTargetLang = (tlPascal, tlPython, tlCpp, tlJavaScript, tlCSharp, tlUnknown);
   TTargetMode = (tmService, tmCall);
 
-(* ------------------------------------------------------------------------ *)
-(* Console output hook                                                        *)
-(* ------------------------------------------------------------------------ *)
-
-(*
-  DoStatus hook used in command-line mode. Every message is written to
-  standard output immediately. Because the host project is built as a
-  console-subsystem application, WriteLn reaches the same console the
-  parent shell is already waiting on; no AttachConsole or AllocConsole
-  is needed.
-*)
 procedure CmdLine_DoStatus_Hook(Text_: SystemString; const ID: Integer);
 begin
   WriteLn(Text_);
 end;
 
-(* ------------------------------------------------------------------------ *)
-(* Help text                                                                  *)
-(* ------------------------------------------------------------------------ *)
-
 procedure Print_Help;
+var
+  callOnly, serviceOnly, separateBoth, completeSet: string;
 begin
   DoStatus('code_decl_to_json_abi - HTTP/JSON interface code generator');
   DoStatus('');
   DoStatus('USAGE');
-  DoStatus('  code_decl_to_json_abi                          Launch the GUI.');
-  DoStatus('  code_decl_to_json_abi --help                   Show this help text.');
-  DoStatus('  code_decl_to_json_abi <input> <output>         Generate the SERVICE side.');
-  DoStatus('  code_decl_to_json_abi --call <input> <output>  Generate the CALL side.');
+  DoStatus('  code_decl_to_json_abi                                Launch the GUI.');
+  DoStatus('  code_decl_to_json_abi --help                         Show this help text.');
+  DoStatus('  code_decl_to_json_abi --list-languages               List registered languages.');
+  DoStatus('  code_decl_to_json_abi <input> <output>               Generate the SERVICE side.');
+  DoStatus('  code_decl_to_json_abi --call <input> <output>        Generate the CALL side.');
+  DoStatus('  code_decl_to_json_abi --lang <id> <input> <output>   Force the target language.');
   DoStatus('');
-  DoStatus('SOURCE LANGUAGE (detected from the input file extension)');
+  DoStatus('INPUT (source language detected from the extension)');
   DoStatus('  .pas .pp .p                   Pascal unit');
   DoStatus('  .h .hpp .hh .c .cpp .cc .cxx  C header');
   DoStatus('');
-  DoStatus('TARGET LANGUAGE (detected from the output file extension)');
-  DoStatus('  .pas .pp .p                   Pascal HTTP/JSON unit');
-  DoStatus('  .py                           Python HTTP/JSON module');
-  DoStatus('  .hpp .hh .h                   C++ HTTP/JSON header');
-  DoStatus('  .cpp .cc .cxx .c              C++ HTTP/JSON implementation');
-  DoStatus('  .js                           JavaScript HTTP/JSON client (Call side only)');
-  DoStatus('  .cs                           C# HTTP/JSON project (service + call + test)');
+  DoStatus('OUTPUT (target language detected from the extension or --lang)');
+  DoStatus('');
+  DoStatus('  Format: [language] side-capability ext-list artifact-kinds (total)');
+  DoStatus('');
+
+  if (CodeGenRegistry <> nil) and (CodeGenRegistry.GetLanguageCount > 0) then
+  begin
+    DoStatus(CodeGenRegistry.GetRegisteredLanguageSummary);
+    DoStatus('');
+    DoStatus('  Extensions (non-fixed-name artifacts): %s',
+      [CodeGenRegistry.GetAllExtensions(' ')]);
+  end
+  else
+  begin
+    DoStatus('  [pascal      ] service+call      .pas             ' +
+      'service-code x1, call-code x1, test-code x2  (4 total)');
+    DoStatus('  [javascript  ] call-only         .js              ' +
+      'call-code x1  (1 total)');
+    DoStatus('  [cpp         ] service+call      .hpp, .cpp       ' +
+      'service-header x1, service-code x1, call-header x1, ' +
+      'call-code x1, build-script x1, build-main x1  (6 total)');
+  end;
+
   DoStatus('');
   DoStatus('TARGET DIRECTION (selected by the --call flag)');
   DoStatus('  (default)                     Service side: exposes the routines.');
   DoStatus('  --call                        Call side: invokes the routines.');
-  DoStatus('  NOTE: JavaScript is a Call-side only target. Requesting a .js');
-  DoStatus('        output without also passing --call is an argument error.');
-  DoStatus('  NOTE: C# ignores --call; a .cs output always produces the');
-  DoStatus('        complete project (service + call + test).');
   DoStatus('');
-  DoStatus('C++ PAIRING');
-  DoStatus('  When the target is C++, two files are written together: the');
-  DoStatus('  header (.hpp) and the implementation (.cpp). Naming either one');
-  DoStatus('  causes the other to be written next to it under the same base');
-  DoStatus('  name.');
+  DoStatus('LANGUAGE-SPECIFIC NOTES');
+
+  if (CodeGenRegistry <> nil) and (CodeGenRegistry.GetLanguageCount > 0) then
+  begin
+    callOnly     := CodeGenRegistry.GetCallOnlyLanguages;
+    serviceOnly  := CodeGenRegistry.GetServiceOnlyLanguages;
+    separateBoth := CodeGenRegistry.GetSeparateBothLanguages;
+    completeSet  := CodeGenRegistry.GetCompleteSetLanguages;
+    if callOnly <> '' then
+      DoStatus('  --call required:    %s', [callOnly]);
+    if serviceOnly <> '' then
+      DoStatus('  no --call allowed:  %s', [serviceOnly]);
+    if separateBoth <> '' then
+      DoStatus('  service+call:       %s (--call optional)', [separateBoth]);
+    if completeSet <> '' then
+      DoStatus('  complete set:       %s (--call ignored)', [completeSet]);
+  end
+  else
+  begin
+    DoStatus('  JavaScript  Call-side only.');
+    DoStatus('  C#          Complete set (--call is ignored).');
+  end;
+
   DoStatus('');
-  DoStatus('C++ BUILD SUPPORT');
-  DoStatus('  Every C++ target also produces two fixed-name companion files');
-  DoStatus('  in the same directory, because the generated C++ README');
-  DoStatus('  references them by name:');
+  DoStatus('ARTIFACT KINDS');
+  DoStatus('  service-code    service-side source code (main entry)');
+  DoStatus('  service-header  service-side header file');
+  DoStatus('  service-readme  service-side documentation');
+  DoStatus('  call-code       call-side source code (main entry)');
+  DoStatus('  call-header     call-side header file');
+  DoStatus('  call-readme     call-side documentation');
+  DoStatus('  call-html       call-side HTML test page (JS/TS)');
+  DoStatus('  test-code       test program source');
+  DoStatus('  test-readme     test program documentation');
+  DoStatus('  build-script    build script (CMakeLists.txt / *.ps1)');
+  DoStatus('  build-main      build main file (test_main___.cpp)');
   DoStatus('');
-  DoStatus('    CMakeLists.txt      A ready-to-use CMake build script that');
-  DoStatus('                        builds both the service executable and');
-  DoStatus('                        the call test executable from the');
-  DoStatus('                        .hpp / .cpp pair.');
-  DoStatus('');
-  DoStatus('    test_main___.cpp    The call-side test driver that the CMake');
-  DoStatus('                        script compiles into the call test');
-  DoStatus('                        executable. It calls every wrapper');
-  DoStatus('                        function with default arguments.');
-  DoStatus('');
-  DoStatus('  Both are produced unconditionally for every C++ target, whether');
-  DoStatus('  you are generating the service side or the call side. The two');
-  DoStatus('  sides are halves of a single unit; the CMake project builds');
-  DoStatus('  both. Configure it with:');
-  DoStatus('');
-  DoStatus('      cmake -S . -B build -DLINGOFUSE_CPP_LIB_DIR=/path/to/lf');
-  DoStatus('');
-  DoStatus('JAVASCRIPT EXTRA FILES');
-  DoStatus('  When the target is JavaScript, an additional self-contained');
-  DoStatus('  HTML test page is written as <base>_test.html next to the .js');
-  DoStatus('  file. It embeds the generated client library and renders one');
-  DoStatus('  interactive test card per exposed routine.');
-  DoStatus('');
-  DoStatus('C# TARGET NOTES');
-  DoStatus('  A .cs output produces a complete C# project in one run.');
-  DoStatus('  Seven files are written to the directory of the output file.');
-  DoStatus('  The output file name itself is only used to select that');
-  DoStatus('  directory: <Unit> below is Model.UnitName.');
-  DoStatus('');
-  DoStatus('      <Unit>_http_json_service.cs');
-  DoStatus('      <Unit>_http_json_service_csharp.md');
-  DoStatus('      <Unit>_http_json_call.cs');
-  DoStatus('      <Unit>_http_json_call_csharp.md');
-  DoStatus('      <Unit>_http_json_service_main_test___.cs');
-  DoStatus('      <Unit>_http_json_call_main_test___.cs');
-  DoStatus('      <Unit>_http_json_test_csharp.md');
-  DoStatus('');
-  DoStatus('  The --call flag is ignored for C# because the service half,');
-  DoStatus('  the call half and their test programs must be generated');
-  DoStatus('  together.');
-  DoStatus('');
-  DoStatus('README');
-  DoStatus('  A Markdown user guide is written next to the generated code');
-  DoStatus('  file. Its name is the output base name plus "_readme.md".');
-  DoStatus('  The README is the primary deliverable: it contains the build');
-  DoStatus('  commands, the CMake script (for C++), and a full test program');
-  DoStatus('  for the target language.');
+  DoStatus('FILE NAMING');
+  DoStatus('  The output file name you supply is used only to choose the');
+  DoStatus('  destination directory. The actual file names come from the');
+  DoStatus('  generator registry: each artefact is written as');
+  DoStatus('      <UnitName><suffix>     (e.g. calculator_http_json_service.py)');
+  DoStatus('  or, for build-support artefacts, exactly');
+  DoStatus('      <suffix>               (e.g. CMakeLists.txt).');
   DoStatus('');
   DoStatus('EXAMPLES');
-  DoStatus('  code_decl_to_json_abi calculator.pas calculator_service.pas');
-  DoStatus('  code_decl_to_json_abi --call calculator.pas calculator_call.pas');
-  DoStatus('  code_decl_to_json_abi ComplexTestUnit.h calculator_service.py');
-  DoStatus('  code_decl_to_json_abi --call ComplexTestUnit.h calculator_call.py');
-  DoStatus('  code_decl_to_json_abi ComplexTestUnit.h calculator_service.hpp');
-  DoStatus('  code_decl_to_json_abi --call ComplexTestUnit.h calculator_call.hpp');
-  DoStatus('  code_decl_to_json_abi --call ComplexTestUnit.h calculator_call.js');
-  DoStatus('  code_decl_to_json_abi ComplexTestUnit.h calculator_project.cs');
+  DoStatus('  code_decl_to_json_abi calculator.pas output/');
+  DoStatus('  code_decl_to_json_abi --call calculator.pas output/');
+  DoStatus('  code_decl_to_json_abi --lang python calculator.pas output/');
+  DoStatus('  code_decl_to_json_abi --call --lang ts calculator.pas output/');
+  DoStatus('  code_decl_to_json_abi ComplexTestUnit.h build/');
+  DoStatus('  code_decl_to_json_abi --call ComplexTestUnit.h build/');
   DoStatus('');
   DoStatus('EXIT CODES');
   DoStatus('  0  Conversion succeeded.');
@@ -303,9 +153,19 @@ begin
   DoStatus('  4  File I/O error.');
 end;
 
-(* ------------------------------------------------------------------------ *)
-(* File name helpers                                                          *)
-(* ------------------------------------------------------------------------ *)
+procedure Print_Languages;
+begin
+  if (CodeGenRegistry = nil) or (CodeGenRegistry.GetLanguageCount = 0) then
+  begin
+    DoStatus('Registry is empty or not loaded.');
+    DoStatus('Fallback languages (hardcoded): pascal, python, cpp, javascript, csharp');
+    Exit;
+  end;
+
+  DoStatus('Registered languages (%d):', [CodeGenRegistry.GetLanguageCount]);
+  DoStatus('');
+  DoStatus(CodeGenRegistry.GetRegisteredLanguageDetail);
+end;
 
 function Detect_Source_Lang(const FileName: string): TSourceLang;
 var
@@ -321,24 +181,37 @@ begin
     Result := slUnknown;
 end;
 
-function Detect_Target_Lang(const FileName: string): TTargetLang;
+function Detect_Target_Lang_ID(const FileName: string): TP_String;
 var
   Ext: string;
 begin
   Ext := LowerCase(ExtractFileExt(FileName));
+  if Ext = '' then
+  begin
+    Result := '';
+    Exit;
+  end;
+
+  if CodeGenRegistry <> nil then
+  begin
+    Result := CodeGenRegistry.FindLanguageByExtension(Ext);
+    if Result.Len > 0 then
+      Exit;
+  end;
+
   if (Ext = '.pas') or (Ext = '.pp') or (Ext = '.p') then
-    Result := tlPascal
+    Result := 'pascal'
   else if Ext = '.py' then
-    Result := tlPython
+    Result := 'python'
   else if (Ext = '.hpp') or (Ext = '.hh') or (Ext = '.h')
        or (Ext = '.cpp') or (Ext = '.cc') or (Ext = '.cxx') or (Ext = '.c') then
-    Result := tlCpp
+    Result := 'cpp'
   else if Ext = '.js' then
-    Result := tlJavaScript
+    Result := 'javascript'
   else if Ext = '.cs' then
-    Result := tlCSharp
+    Result := 'csharp'
   else
-    Result := tlUnknown;
+    Result := '';
 end;
 
 function Read_Text_File(const FileName: string): string;
@@ -381,15 +254,6 @@ begin
   end;
 end;
 
-(*
-  JoinPath - combine a directory and a file name.
-
-  We deliberately do NOT call IncludeTrailingPathDelimiter with an
-  empty Dir: on Windows that returns a single backslash, which would
-  turn a bare file name into an absolute path rooted at the drive
-  root. Returning the bare name when Dir is empty keeps relative
-  output paths relative.
-*)
 function JoinPath(const Dir, Name: string): string;
 begin
   if Dir = '' then
@@ -398,548 +262,142 @@ begin
     Result := IncludeTrailingPathDelimiter(Dir) + Name;
 end;
 
-function Companion_Readme_Path(const OutputFile: string): string;
+function Resolve_Output_Directory(const OutputArg: string): string;
 var
-  Dir, Base: string;
+  Dir: string;
+  Base: string;
 begin
-  Dir := ExtractFileDir(OutputFile);
-  Base := ChangeFileExt(ExtractFileName(OutputFile), '');
-  Result := JoinPath(Dir, Base + '_readme.md');
+  Dir  := ExtractFileDir(OutputArg);
+  Base := ExtractFileName(OutputArg);
+
+  if Dir <> '' then
+  begin
+    Result := Dir;
+    Exit;
+  end;
+
+  if ExtractFileExt(Base) = '' then
+  begin
+    Result := Base;
+    Exit;
+  end;
+
+  Result := '';
 end;
 
-function Companion_Html_Path(const OutputFile: string): string;
-var
-  Dir, Base: string;
-begin
-  Dir := ExtractFileDir(OutputFile);
-  Base := ChangeFileExt(ExtractFileName(OutputFile), '');
-  Result := JoinPath(Dir, Base + '_test.html');
-end;
-
-procedure Cpp_Paths_From_Output(const OutputFile: string; out HppPath, CppPath: string);
-var
-  Dir, Base: string;
-begin
-  Dir := ExtractFileDir(OutputFile);
-  Base := ChangeFileExt(ExtractFileName(OutputFile), '');
-  HppPath := JoinPath(Dir, Base + '.hpp');
-  CppPath := JoinPath(Dir, Base + '.cpp');
-end;
-
-(* ------------------------------------------------------------------------ *)
-(* Per-target-language writers                                                *)
-(* ------------------------------------------------------------------------ *)
-
-(*
-  Write_Code_And_Readme - write a code list and its companion README.
-
-  The code list is written to OutputFile. The README list (if non-nil)
-  is written to <base>_readme.md next to it. This is the common path
-  shared by every target language that produces exactly one code file
-  plus a README.
-*)
-procedure Write_Code_And_Readme(const OutputFile: string;
-  CodeList, ReadmeList: TPascalStringList);
-var
-  ReadmePath: string;
-begin
-  try
-    if (CodeList = nil) or (not Write_Text_List(OutputFile, CodeList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [OutputFile]);
-      Exit;
-    end;
-    DoStatus('Wrote  : %s', [OutputFile]);
-  finally
-    CodeList.Free;
-  end;
-
-  if ReadmeList <> nil then
-  begin
-    try
-      ReadmePath := Companion_Readme_Path(OutputFile);
-      if Write_Text_List(ReadmePath, ReadmeList) then
-        DoStatus('Wrote  : %s', [ReadmePath]);
-    finally
-      ReadmeList.Free;
-    end;
-  end;
-end;
-
-(*
-  Generate_Pascal - write the Pascal HTTP/JSON unit plus its README.
-
-  The side is selected by Mode:
-      tmService -> GenerateHTTPServicePascalCode / ...Readme
-      tmCall    -> GenerateHTTPCallPascalCode    / ...Readme
-*)
-function Generate_Pascal(const Model: TPascal_Func_Model;
-  const Mode: TTargetMode;
-  const OutputFile: string): Integer;
-var
-  CodeList, ReadmeList: TPascalStringList;
-begin
-  Result := EXIT_OK;
-
-  if Mode = tmService then
-  begin
-    CodeList   := GenerateHTTPServicePascalCode(Model);
-    ReadmeList := GenerateHTTPServicePascalReadme(Model);
-  end
-  else
-  begin
-    CodeList   := GenerateHTTPCallPascalCode(Model);
-    ReadmeList := GenerateHTTPCallPascalReadme(Model);
-  end;
-
-  if CodeList = nil then
-  begin
-    DoStatus('Error: Pascal code generation failed.');
-    Exit(EXIT_GEN_FAILED);
-  end;
-
-  Write_Code_And_Readme(OutputFile, CodeList, ReadmeList);
-end;
-
-(*
-  Generate_Python - write the Python HTTP/JSON module plus its README.
-
-  The side is selected by Mode:
-      tmService -> GenerateHTTPServicePythonCode / ...Readme
-      tmCall    -> GenerateHTTPCallPythonCode    / ...Readme
-*)
-function Generate_Python(const Model: TPascal_Func_Model;
-  const Mode: TTargetMode;
-  const OutputFile: string): Integer;
-var
-  CodeList, ReadmeList: TPascalStringList;
-begin
-  Result := EXIT_OK;
-
-  if Mode = tmService then
-  begin
-    CodeList   := GenerateHTTPServicePythonCode(Model);
-    ReadmeList := GenerateHTTPServicePythonReadme(Model);
-  end
-  else
-  begin
-    CodeList   := GenerateHTTPCallPythonCode(Model);
-    ReadmeList := GenerateHTTPCallPythonReadme(Model);
-  end;
-
-  if CodeList = nil then
-  begin
-    DoStatus('Error: Python code generation failed.');
-    Exit(EXIT_GEN_FAILED);
-  end;
-
-  Write_Code_And_Readme(OutputFile, CodeList, ReadmeList);
-end;
-
-(*
-  Generate_CSharp - write the complete C# project.
-
-  Unlike every other target, C# is generated as an indivisible unit:
-  the service code, the call code, both test programs and every README
-  are produced together, because the test programs exercise both
-  halves and cannot be used in isolation. The --call flag is
-  therefore ignored for C#.
-
-  Seven files are written to the directory of OutputFile. The output
-  file name itself is only used to select that directory; the file is
-  not created. The <Unit> below is Model.UnitName:
-
-      <Unit>_http_json_service.cs
-      <Unit>_http_json_service_csharp.md
-      <Unit>_http_json_call.cs
-      <Unit>_http_json_call_csharp.md
-      <Unit>_http_json_service_main_test___.cs
-      <Unit>_http_json_call_main_test___.cs
-      <Unit>_http_json_test_csharp.md
-*)
-function Generate_CSharp(const Model: TPascal_Func_Model;
-  const Mode: TTargetMode;
-  const OutputFile: string): Integer;
-var
-  UnitName, OutDir: string;
-  ServiceCodeList, ServiceReadmeList: TPascalStringList;
-  CallCodeList, CallReadmeList: TPascalStringList;
-  ServiceTestList, CallTestList, TestReadmeList: TPascalStringList;
-  PathService, PathServiceReadme: string;
-  PathCall, PathCallReadme: string;
-  PathServiceTest, PathCallTest, PathTestReadme: string;
-begin
-  Result := EXIT_OK;
-
-  UnitName := Model.UnitName.Text;
-  if UnitName = '' then
-  begin
-    DoStatus('Error: Model.UnitName is empty. Cannot generate C# artifacts.');
-    Exit(EXIT_GEN_FAILED);
-  end;
-
-  OutDir := ExtractFileDir(OutputFile);
-
-  PathService       := JoinPath(OutDir, UnitName + '_http_json_service.cs');
-  PathServiceReadme := JoinPath(OutDir, UnitName + '_http_json_service_csharp.md');
-  PathCall          := JoinPath(OutDir, UnitName + '_http_json_call.cs');
-  PathCallReadme    := JoinPath(OutDir, UnitName + '_http_json_call_csharp.md');
-  PathServiceTest   := JoinPath(OutDir, UnitName + '_http_json_service_main_test___.cs');
-  PathCallTest      := JoinPath(OutDir, UnitName + '_http_json_call_main_test___.cs');
-  PathTestReadme    := JoinPath(OutDir, UnitName + '_http_json_test_csharp.md');
-
-  (* ---- Service code ---- *)
-  ServiceCodeList := GenerateHTTPServiceCsharpCode(Model);
-  try
-    if (ServiceCodeList = nil) or (not Write_Text_List(PathService, ServiceCodeList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [PathService]);
-      Exit(EXIT_GEN_FAILED);
-    end;
-    DoStatus('Wrote  : %s', [PathService]);
-  finally
-    ServiceCodeList.Free;
-  end;
-
-  (* ---- Service README ---- *)
-  ServiceReadmeList := GenerateHTTPServiceCsharpReadme(Model);
-  if ServiceReadmeList <> nil then
-  begin
-    try
-      if Write_Text_List(PathServiceReadme, ServiceReadmeList) then
-        DoStatus('Wrote  : %s', [PathServiceReadme]);
-    finally
-      ServiceReadmeList.Free;
-    end;
-  end;
-
-  (* ---- Call code ---- *)
-  CallCodeList := GenerateHTTPCallCsharpCode(Model);
-  try
-    if (CallCodeList = nil) or (not Write_Text_List(PathCall, CallCodeList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [PathCall]);
-      Exit(EXIT_GEN_FAILED);
-    end;
-    DoStatus('Wrote  : %s', [PathCall]);
-  finally
-    CallCodeList.Free;
-  end;
-
-  (* ---- Call README ---- *)
-  CallReadmeList := GenerateHTTPCallCsharpReadme(Model);
-  if CallReadmeList <> nil then
-  begin
-    try
-      if Write_Text_List(PathCallReadme, CallReadmeList) then
-        DoStatus('Wrote  : %s', [PathCallReadme]);
-    finally
-      CallReadmeList.Free;
-    end;
-  end;
-
-  (* ---- Service test program ---- *)
-  ServiceTestList := GenerateHTTPServiceCsharpTestCode(Model);
-  if ServiceTestList <> nil then
-  begin
-    try
-      if Write_Text_List(PathServiceTest, ServiceTestList) then
-        DoStatus('Wrote  : %s', [PathServiceTest]);
-    finally
-      ServiceTestList.Free;
-    end;
-  end;
-
-  (* ---- Call test program ---- *)
-  CallTestList := GenerateHTTPCallCsharpTestCode(Model);
-  if CallTestList <> nil then
-  begin
-    try
-      if Write_Text_List(PathCallTest, CallTestList) then
-        DoStatus('Wrote  : %s', [PathCallTest]);
-    finally
-      CallTestList.Free;
-    end;
-  end;
-
-  (* ---- Test README ---- *)
-  TestReadmeList := GenerateHTTPCsharpTestReadme(Model);
-  if TestReadmeList <> nil then
-  begin
-    try
-      if Write_Text_List(PathTestReadme, TestReadmeList) then
-        DoStatus('Wrote  : %s', [PathTestReadme]);
-    finally
-      TestReadmeList.Free;
-    end;
-  end;
-end;
-
-(*
-  Generate_Cpp - write the C++ HTTP/JSON pair (.hpp + .cpp), the
-  companion README, and the two CMake build artifacts
-  (CMakeLists.txt + test_main___.cpp) that the README's CMake section
-  references.
-
-  The side is selected by Mode:
-      tmService -> GenerateHTTPServiceCppHeader / ...CppCode / ...Readme
-      tmCall    -> GenerateHTTPCallCppHeader    / ...CppCode / ...Readme
-
-  Two code files are written: the header (.hpp) and the implementation
-  (.cpp). Either output name is accepted; both are derived from the
-  same base name. The README describes the pair as a single unit and
-  is written next to the header.
-
-  Two CMake artifacts are also written to the same directory, using
-  the fixed names "CMakeLists.txt" and "test_main___.cpp", because
-  the C++ README's CMake section refers to them by those exact names.
-  The CMake script that http_cmake_generator_tool.pas produces builds
-  both the service executable and the call test executable from the
-  pair emitted here, so generating both alongside the .hpp/.cpp is
-  what makes the emitted README directly actionable.
-
-  Both CMake artifacts are emitted unconditionally, regardless of
-  whether this run is producing the service side or the call side.
-  The toolchain treats the two sides as halves of one unit; a single
-  CMake project builds both halves, and producing only one half would
-  leave the CMake script with a missing source file at configure time.
-*)
-function Generate_Cpp(const Model: TPascal_Func_Model;
-  const Mode: TTargetMode;
-  const OutputFile: string): Integer;
-var
-  HeaderList, ImplList, ReadmeList: TPascalStringList;
-  CmakeList, TestMainList: TPascalStringList;
-  HppPath, CppPath, ReadmePath: string;
-  Dir, CmakePath, TestMainPath: string;
-begin
-  Result := EXIT_OK;
-
-  Cpp_Paths_From_Output(OutputFile, HppPath, CppPath);
-  Dir := ExtractFileDir(OutputFile);
-
-  (* ---- Header ---- *)
-  if Mode = tmService then
-    HeaderList := GenerateHTTPServiceCppHeader(Model)
-  else
-    HeaderList := GenerateHTTPCallCppHeader(Model);
-
-  try
-    if (HeaderList = nil) or (not Write_Text_List(HppPath, HeaderList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [HppPath]);
-      Exit(EXIT_GEN_FAILED);
-    end;
-    DoStatus('Wrote  : %s', [HppPath]);
-  finally
-    HeaderList.Free;
-  end;
-
-  (* ---- Implementation ---- *)
-  if Mode = tmService then
-    ImplList := GenerateHTTPServiceCppCode(Model)
-  else
-    ImplList := GenerateHTTPCallCppCode(Model);
-
-  try
-    if (ImplList = nil) or (not Write_Text_List(CppPath, ImplList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [CppPath]);
-      Exit(EXIT_GEN_FAILED);
-    end;
-    DoStatus('Wrote  : %s', [CppPath]);
-  finally
-    ImplList.Free;
-  end;
-
-  (* ---- README (paired with the header) ---- *)
-  if Mode = tmService then
-    ReadmeList := GenerateHTTPServiceCppReadme(Model)
-  else
-    ReadmeList := GenerateHTTPCallCppReadme(Model);
-
-  if ReadmeList <> nil then
-  begin
-    try
-      ReadmePath := Companion_Readme_Path(HppPath);
-      if Write_Text_List(ReadmePath, ReadmeList) then
-        DoStatus('Wrote  : %s', [ReadmePath]);
-    finally
-      ReadmeList.Free;
-    end;
-  end;
-
-  (* ---- CMakeLists.txt ----
-   *
-   * Fixed name, written next to the .hpp/.cpp pair. The generated
-   * C++ README's "Building - CMake" section refers to this name
-   * literally, and the CMake script's source-file list expects the
-   * .hpp/.cpp pair to live in the same directory. *)
-  CmakePath := JoinPath(Dir, CMAKE_FILE_NAME);
-  CmakeList := GenerateCMakeScript(Model);
-  try
-    if (CmakeList <> nil) and Write_Text_List(CmakePath, CmakeList) then
-      DoStatus('Wrote  : %s', [CmakePath]);
-  finally
-    CmakeList.Free;
-  end;
-
-  (* ---- test_main___.cpp ----
-   *
-   * Fixed name, written next to the .hpp/.cpp pair. This is the call
-   * test driver that the CMake script compiles into the call test
-   * executable. It is generated regardless of the current side,
-   * because the CMake project builds both halves and the call side
-   * is required for the project to link successfully. *)
-  TestMainPath := JoinPath(Dir, TEST_MAIN_FILE_NAME);
-  TestMainList := GenerateTestMainCpp(Model);
-  try
-    if (TestMainList <> nil) and Write_Text_List(TestMainPath, TestMainList) then
-      DoStatus('Wrote  : %s', [TestMainPath]);
-  finally
-    TestMainList.Free;
-  end;
-end;
-
-(*
-  Generate_JavaScript - write the browser JS client, its README, and
-  the HTML test page.
-
-  JavaScript is a CALL-SIDE ONLY target. The CLI rejects .js output
-  without --call before this function is reached.
-
-  Three files are written:
-      <base>.js           the standalone IIFE client library
-      <base>_readme.md    the user guide
-      <base>_test.html    a self-contained HTML test page
-
-  No CMake artifact is produced for JavaScript. The JS README's
-  deployment section relies on a plain HTTP server (for example
-  "python -m http.server"), not on a build system.
-*)
-function Generate_JavaScript(const Model: TPascal_Func_Model;
-  const OutputFile: string): Integer;
-var
-  JsList, ReadmeList, HtmlList: TPascalStringList;
-  HtmlPath, ReadmePath: string;
-begin
-  Result := EXIT_OK;
-
-  (* ---- JS library ---- *)
-  JsList := GenerateHTTPCallJsCode(Model);
-  try
-    if (JsList = nil) or (not Write_Text_List(OutputFile, JsList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [OutputFile]);
-      Exit(EXIT_GEN_FAILED);
-    end;
-    DoStatus('Wrote  : %s', [OutputFile]);
-  finally
-    JsList.Free;
-  end;
-
-  (* ---- README ---- *)
-  ReadmeList := GenerateHTTPCallJsReadme(Model);
-  if ReadmeList <> nil then
-  begin
-    try
-      ReadmePath := Companion_Readme_Path(OutputFile);
-      if Write_Text_List(ReadmePath, ReadmeList) then
-        DoStatus('Wrote  : %s', [ReadmePath]);
-    finally
-      ReadmeList.Free;
-    end;
-  end;
-
-  (* ---- HTML test page ---- *)
-  HtmlList := GenerateHTTPCallJsHtmlCode(Model);
-  if HtmlList <> nil then
-  begin
-    try
-      HtmlPath := Companion_Html_Path(OutputFile);
-      if Write_Text_List(HtmlPath, HtmlList) then
-        DoStatus('Wrote  : %s', [HtmlPath]);
-    finally
-      HtmlList.Free;
-    end;
-  end;
-end;
-
-(* ------------------------------------------------------------------------ *)
-(* Conversion pipeline                                                        *)
-(* ------------------------------------------------------------------------ *)
-
-(*
-  Execute_Conversion - read the input file, parse it, build the model,
-  and dispatch to the per-target writer.
-
-  The result is one of the EXIT_* constants defined above. All progress
-  and error reporting goes through DoStatus, which the command-line
-  hook routes straight to stdout.
-*)
-function Execute_Conversion(const InputFile, OutputFile: string;
-  const Mode: TTargetMode): Integer;
+function Execute_Conversion(const InputFile, OutputArg: string;
+  const Mode: TTargetMode; const ForceLang: TP_String): Integer;
 var
   SrcLang: TSourceLang;
-  TgtLang: TTargetLang;
+  TgtLangID: TP_String;
   SourceText: string;
   Tool: tpascal_func_decl_tool;
   Model: TPascal_Func_Model;
   Report: TPascalStringList;
+  OutDir, UnitName: string;
+  i: Integer;
+  Entry: PCodeGenEntry;
+  Text: TPascalStringList;
+  SkipSideCheck: Boolean;
+  LangInfo: TLanguageInfo;
+  HasServiceCap, HasCallCap: Boolean;
+  FullPath: string;
 begin
-  SrcLang := Detect_Source_Lang(InputFile);
-  TgtLang := Detect_Target_Lang(OutputFile);
-
-  if SrcLang = slUnknown then
-  begin
-    DoStatus('Error: cannot detect the source language from "%s".', [InputFile]);
-    DoStatus('Supported input extensions: .pas .pp .p .h .hpp .hh .c .cpp .cc .cxx');
-    Exit(EXIT_BAD_ARGS);
-  end;
-
-  if TgtLang = tlUnknown then
-  begin
-    DoStatus('Error: cannot detect the target language from "%s".', [OutputFile]);
-    DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c .js .cs');
-    Exit(EXIT_BAD_ARGS);
-  end;
-
-  (* JavaScript is a Call-side only target. Reject .js without --call
-     before touching the file system so that the error message is
-     unambiguous. *)
-  if (TgtLang = tlJavaScript) and (Mode <> tmCall) then
-  begin
-    DoStatus('Error: JavaScript is a Call-side only target.');
-    DoStatus('Re-run with the --call flag, for example:');
-    DoStatus('    code_decl_to_json_abi --call %s %s', [InputFile, OutputFile]);
-    Exit(EXIT_BAD_ARGS);
-  end;
-
-  (* C# ignores --call; the full project is always produced. *)
-  if TgtLang = tlCSharp then
-    DoStatus('Note   : C# target ignores --call; the full project will be generated.');
-
-  try
-    SourceText := Read_Text_File(InputFile);
-  except
-    on E: Exception do
-    begin
-      DoStatus('Error: cannot read "%s": %s', [InputFile, E.Message]);
-      Exit(EXIT_IO_ERROR);
-    end;
-  end;
-
-  DoStatus('Reading: %s (%d chars)', [InputFile, Length(SourceText)]);
-  DoStatus('Output : %s', [OutputFile]);
-  if Mode = tmService then
-    DoStatus('Mode   : service')
-  else
-    DoStatus('Mode   : call');
-
+  Result := EXIT_OK;
   Tool := nil;
   Model := nil;
   Report := nil;
+
   try
+    SrcLang := Detect_Source_Lang(InputFile);
+    if SrcLang = slUnknown then
+    begin
+      DoStatus('Error: cannot detect the source language from "%s".', [InputFile]);
+      DoStatus('Supported input extensions: .pas .pp .p .h .hpp .hh .c .cpp .cc .cxx');
+      Exit(EXIT_BAD_ARGS);
+    end;
+
+    if ForceLang.Len > 0 then
+    begin
+      if (CodeGenRegistry = nil) or (not CodeGenRegistry.HasLanguage(ForceLang)) then
+      begin
+        DoStatus('Error: language "%s" (from --lang) is not registered.',
+          [ForceLang.Text]);
+        if CodeGenRegistry <> nil then
+          DoStatus('Registered languages: %s',
+            [CodeGenRegistry.GetAllLanguageIDs(', ')]);
+        Exit(EXIT_BAD_ARGS);
+      end;
+      TgtLangID := ForceLang;
+    end
+    else
+    begin
+      TgtLangID := Detect_Target_Lang_ID(OutputArg);
+      if TgtLangID.Len = 0 then
+      begin
+        DoStatus('Error: cannot detect the target language from "%s".', [OutputArg]);
+        if (CodeGenRegistry <> nil) and (CodeGenRegistry.Count > 0) then
+        begin
+          DoStatus('Supported output extensions: %s',
+            [CodeGenRegistry.GetAllExtensions(' ')]);
+          DoStatus('Use --lang <id> to force a language, or --list-languages for details.');
+        end
+        else
+          DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c .js .cs');
+        Exit(EXIT_BAD_ARGS);
+      end;
+    end;
+
+    if (CodeGenRegistry = nil) or (CodeGenRegistry.Count = 0) then
+    begin
+      DoStatus('Error: generator registry is empty; no generators are available.');
+      Exit(EXIT_GEN_FAILED);
+    end;
+
+    LangInfo := CodeGenRegistry.GetLanguageInfo(TgtLangID);
+    HasServiceCap := LangInfo.HasService or LangInfo.HasBoth;
+    HasCallCap := LangInfo.HasCall or LangInfo.HasBoth;
+    SkipSideCheck := LangInfo.HasBoth and (not LangInfo.HasService) and (not LangInfo.HasCall);
+
+    if not SkipSideCheck then
+    begin
+      if (Mode = tmCall) and (not HasCallCap) then
+      begin
+        DoStatus('Error: language "%s" has no call-side generator.', [TgtLangID.Text]);
+        DoStatus('Omit --call to generate the service side.');
+        Exit(EXIT_BAD_ARGS);
+      end;
+      if (Mode = tmService) and (not HasServiceCap) then
+      begin
+        DoStatus('Error: language "%s" has no service-side generator.', [TgtLangID.Text]);
+        DoStatus('Re-run with --call to generate the call side.');
+        Exit(EXIT_BAD_ARGS);
+      end;
+    end
+    else
+      DoStatus('Note   : language "%s" always produces the full set; --call is ignored.',
+        [TgtLangID.Text]);
+
+    try
+      SourceText := Read_Text_File(InputFile);
+    except
+      on E: Exception do
+      begin
+        DoStatus('Error: cannot read "%s": %s', [InputFile, E.Message]);
+        Exit(EXIT_IO_ERROR);
+      end;
+    end;
+
+    DoStatus('Reading: %s (%d chars)', [InputFile, Length(SourceText)]);
+    DoStatus('Output : %s', [OutputArg]);
+    DoStatus('Target : %s', [TgtLangID.Text]);
+    if SkipSideCheck then
+      DoStatus('Mode   : both (forced by target language)')
+    else if Mode = tmService then
+      DoStatus('Mode   : service')
+    else
+      DoStatus('Mode   : call');
+
     try
       if SrcLang = slPascal then
         Tool := tpascal_func_decl_tool.CreateFrom_Pascal_Code(SourceText)
@@ -974,14 +432,55 @@ begin
     DoStatus('Unit   : %s', [Model.UnitName.Text]);
     DoStatus('Funcs  : %d', [Model.FuncCount]);
 
-    case TgtLang of
-      tlPascal:      Result := Generate_Pascal(Model, Mode, OutputFile);
-      tlPython:      Result := Generate_Python(Model, Mode, OutputFile);
-      tlCpp:         Result := Generate_Cpp(Model, Mode, OutputFile);
-      tlJavaScript:  Result := Generate_JavaScript(Model, OutputFile);
-      tlCSharp:      Result := Generate_CSharp(Model, Mode, OutputFile);
-      else           Result := EXIT_GEN_FAILED;
+    OutDir := Resolve_Output_Directory(OutputArg);
+    if OutDir <> '' then
+      DoStatus('Dir    : %s', [OutDir]);
+
+    UnitName := Model.UnitName.Text;
+    if UnitName = '' then
+    begin
+      DoStatus('Error: Model.UnitName is empty. Cannot derive artefact names.');
+      Exit(EXIT_GEN_FAILED);
     end;
+
+    Result := EXIT_OK;
+    for i := 0 to CodeGenRegistry.Count - 1 do
+    begin
+      Entry := CodeGenRegistry[i];
+      if not Entry^.LanguageID.Same(TgtLangID) then
+        Continue;
+      if (not SkipSideCheck) and
+         (not Side_Matches_Requested(Entry^.Side, Mode = tmCall)) then
+        Continue;
+
+      try
+        Text := Entry^.Func(Model);
+      except
+        Text := nil;
+      end;
+
+      if Text = nil then
+        Continue;
+      try
+        if Entry^.FixedName then
+          FullPath := JoinPath(OutDir, Entry^.Suffix.Text)
+        else
+          FullPath := JoinPath(OutDir, UnitName + Entry^.Suffix.Text);
+
+        if Write_Text_List(FullPath, Text) then
+          DoStatus('Wrote  : %s', [FullPath])
+        else
+        begin
+          DoStatus('Error  : cannot write "%s".', [FullPath]);
+          Result := EXIT_GEN_FAILED;
+        end;
+      finally
+        Text.Free;
+      end;
+    end;
+
+    if Result = EXIT_OK then
+      DoStatus('Done.');
 
   finally
     if Report <> nil then
@@ -993,54 +492,74 @@ begin
   end;
 end;
 
-(* ------------------------------------------------------------------------ *)
-(* Entry point                                                                *)
-(* ------------------------------------------------------------------------ *)
-
 function Process_CommandLine: Boolean;
 var
-  Arg1, Arg2: string;
+  Arg: string;
   Code: Integer;
   Mode: TTargetMode;
-  ArgStart, ArgCount: Integer;
+  ForceLang: TP_String;
+  Pos, ArgCount: Integer;
 begin
-  (* No arguments: leave the console as it is and let the caller start
-     the GUI normally. *)
   if ParamCount <= 0 then
   begin
     Result := True;
     Exit;
   end;
 
-  (* Command-line mode. Route every DoStatus message straight to the
-     console so that no main loop is required. *)
   OnDoStatusHook := @CmdLine_DoStatus_Hook;
 
   CommandLine_ExitCode := EXIT_OK;
   Mode := tmService;
-  ArgStart := 1;
+  ForceLang := '';
+  Pos := 1;
 
   try
     try
-      Arg1 := ParamStr(ArgStart);
-
-      (* Help. Only recognised as the first argument. *)
-      if (Arg1 = '--help') or (Arg1 = '-h') or (Arg1 = '-?') or (Arg1 = '/?') then
+      if Pos <= ParamCount then
       begin
-        Print_Help;
-        CommandLine_ExitCode := EXIT_OK;
-        Result := False;
-        Exit;
+        Arg := ParamStr(Pos);
+        if (Arg = '--help') or (Arg = '-h') or (Arg = '-?') or (Arg = '/?') then
+        begin
+          Print_Help;
+          CommandLine_ExitCode := EXIT_OK;
+          Result := False;
+          Exit;
+        end;
+        if (Arg = '--list-languages') or (Arg = '-ll') then
+        begin
+          Print_Languages;
+          CommandLine_ExitCode := EXIT_OK;
+          Result := False;
+          Exit;
+        end;
       end;
 
-      (* Direction flag. Only recognised as the first argument. *)
-      if (Arg1 = '--call') or (Arg1 = '-c') then
+      while Pos <= ParamCount do
       begin
-        Mode := tmCall;
-        Inc(ArgStart);
+        Arg := ParamStr(Pos);
+
+        if (Arg = '--call') or (Arg = '-c') then
+        begin
+          Mode := tmCall;
+          Inc(Pos);
+        end
+        else if (Arg = '--lang') or (Arg = '-l') then
+        begin
+          if Pos >= ParamCount then
+          begin
+            DoStatus('Error: --lang requires a language identifier.');
+            CommandLine_ExitCode := EXIT_BAD_ARGS;
+            Result := False;
+            Exit;
+          end;
+          ForceLang := ParamStr(Pos + 1);
+          Inc(Pos, 2);
+        end
+        else
+          Break;
       end;
 
-      ArgCount := ParamCount - (ArgStart - 1);
+      ArgCount := ParamCount - Pos + 1;
       if ArgCount < 2 then
       begin
         DoStatus('Error: expected <input_file> <output_file>.');
@@ -1050,15 +569,10 @@ begin
         Exit;
       end;
 
-      Arg1 := ParamStr(ArgStart);
-      Arg2 := ParamStr(ArgStart + 1);
-
-      Code := Execute_Conversion(Arg1, Arg2, Mode);
+      Code := Execute_Conversion(ParamStr(Pos), ParamStr(Pos + 1), Mode, ForceLang);
       CommandLine_ExitCode := Code;
 
-      if Code = EXIT_OK then
-        DoStatus('Done.')
-      else
+      if Code <> EXIT_OK then
         DoStatus('Failed.');
 
       Result := False;
@@ -1072,8 +586,6 @@ begin
       end;
     end;
   finally
-    (* Flush stdout so the parent shell sees every line before the
-       process exits. *)
     Flush(Output);
   end;
 end;

@@ -1,61 +1,5 @@
 unit http_csharp_abi_test_generator_tool;
 
-// ============================================================================
-// http_csharp_abi_test_generator_tool
-// ----------------------------------------------------------------------------
-// Test-program generator for the C# HTTP/JSON ABI toolchain.
-//
-// Consumes a TPascal_Func_Model (Typ_Normalize_Func = tnf_ABI) and
-// produces three artifacts:
-//
-//   1. A service-side test program
-//        <Unit>_http_json_service_main_test___.cs
-//      Pairs with the service module produced by
-//      http_csharp_abi_service_generator_tool.
-//
-//      Default mode: calls Service.RunService() and blocks until Ctrl+C.
-//      --smoke mode: runs an in-process LocalCall round trip through
-//      every registered API, without starting the LingoFuse mesh and
-//      without needing the bridge to be running.
-//
-//   2. A call-side test program
-//        <Unit>_http_json_call_main_test___.cs
-//      Pairs with the call module produced by
-//      http_csharp_abi_call_generator_tool.
-//
-//      Initializes LingoFuse as a pure consumer, then calls every
-//      generated API with default arguments, printing OK/FAILED per
-//      call and a summary at the end. Requires the bridge and the
-//      service to be running.
-//
-//   3. A README
-//        <Unit>_http_json_test_csharp.md
-//      Documents both test programs: build commands, expected output,
-//      end-to-end test scenarios, and troubleshooting.
-//
-// DESIGN: Both test programs use the official LingoFuse .NET binding
-// (namespace LingoFuse) rather than direct P/Invoke or raw HTTP.
-//
-//   - AppHandle  : RAII application container.
-//   - DataHandle : RAII data buffer.
-//   - LfIo       : The single sanctioned JSON/string I/O path.
-//   - Framework  : Process-wide lifecycle facade.
-//   - NetworkEvents : Process-global connect/disconnect events.
-//
-// Both test programs are meant to be copied to Program.cs inside a
-// fresh `dotnet new console` project:
-//
-//     dotnet new console -o <unit>_service_test
-//     cd <unit>_service_test
-//     cp ../<unit>_http_json_service.cs .
-//     cp ../<unit>_http_json_service_main_test___.cs Program.cs
-//     dotnet run
-//
-// All comments and status output are in English.
-//
-// Author: LingoFuse-pasAgent project
-// ============================================================================
-
 {$DEFINE FPC_DELPHI_MODE}
 {$I ..\..\zCore\src\Z.Define.inc}
 
@@ -66,7 +10,7 @@ uses
   Z.PascalStrings, Z.UPascalStrings,
   Z.Status, Z.Json, Z.UnicodeMixedLib, Z.ListEngine,
   Z.Pascal_Func_Model,
-  Z.Parsing;
+  Z.Parsing, code_decl_to_json_abi_registry;
 
 // GenerateHTTPServiceCsharpTestCode - generate the service-side test
 // program. The returned list is owned by the caller and must be
@@ -78,20 +22,15 @@ function GenerateHTTPServiceCsharpTestCode(Model: TPascal_Func_Model): TPascalSt
 // released with DisposeObject.
 function GenerateHTTPCallCsharpTestCode(Model: TPascal_Func_Model): TPascalStringList;
 
-// GenerateHTTPCsharpTestReadme - generate the README that documents
-// both test programs. The returned list is owned by the caller and
-// must be released with DisposeObject.
-function GenerateHTTPCsharpTestReadme(Model: TPascal_Func_Model): TPascalStringList;
-
 const
   // Enable verbose logging during generation.
   GenerateCode_LogEnabled: boolean = False;
 
 implementation
 
-// ============================================================================
+// -----------------------------------------------------------------------------
 // Logging helpers
-// ============================================================================
+// -----------------------------------------------------------------------------
 
 procedure Log(const Msg: TP_String); overload;
 begin
@@ -105,10 +44,10 @@ begin
     DoStatus('[http_csharp_abi_test_generator] %s', [PFormat(Fmt, Args)]);
 end;
 
-// ============================================================================
+// -----------------------------------------------------------------------------
 // ABI type family classification (mirrors every HTTP/JSON generator in
 // this toolchain).
-// ============================================================================
+// -----------------------------------------------------------------------------
 
 function ABI_Type_Is_String(const T: TP_String): boolean;
 begin
@@ -188,9 +127,9 @@ begin
     Result := '0';
 end;
 
-// ============================================================================
+// -----------------------------------------------------------------------------
 // Identifier helpers
-// ============================================================================
+// -----------------------------------------------------------------------------
 
 function MakeApiName(const FuncName: TP_String): TP_String;
 begin
@@ -305,9 +244,9 @@ begin
   Result.Append('"');
 end;
 
-// ============================================================================
+// -----------------------------------------------------------------------------
 // Markdown helpers
-// ============================================================================
+// -----------------------------------------------------------------------------
 
 function MdCellEscape(const S: TP_String): TP_String;
 var
@@ -334,9 +273,9 @@ begin
   Result := umlIntToStr(V);
 end;
 
-// ============================================================================
+// -----------------------------------------------------------------------------
 // Supported-function filtering (mirrors every HTTP/JSON generator)
-// ============================================================================
+// -----------------------------------------------------------------------------
 
 type
   TArryFunctionStructure = array of TFunctionStructure;
@@ -439,6 +378,15 @@ end;
 // ============================================================================
 // SERVICE-SIDE TEST PROGRAM GENERATOR
 // ============================================================================
+//
+// The service-side test program is intentionally NOT extended with an
+// async block. Its --smoke mode uses AppHandle.LocalCall, which
+// invokes the registered handler synchronously on the calling thread,
+// with caller-owned input and output handles. That is the correct
+// model for verifying that a stub is reachable and produces a
+// well-formed JSON response; it does not exercise the client-side
+// async machinery. The client-side test program (below) covers the
+// async path.
 
 function GenerateHTTPServiceCsharpTestCode(Model: TPascal_Func_Model): TPascalStringList;
 var
@@ -591,6 +539,12 @@ begin
     Lines.Add('    // A callback never throws: it converts any exception into a');
     Lines.Add('    // {"code": -1, "error": "..."} response. So this test counts a call');
     Lines.Add('    // as failed only when the response carries a non-zero code.');
+    Lines.Add('    //');
+    Lines.Add('    // AppHandle.LocalCall is synchronous by design: it invokes the');
+    Lines.Add('    // registered handler on the calling thread, with caller-owned');
+    Lines.Add('    // input and output handles. The purpose of the smoke test is to');
+    Lines.Add('    // verify stub reachability and JSON round-trip correctness, not');
+    Lines.Add('    // to exercise the client-side async machinery.');
     Lines.Add('    // ----------------------------------------------------------------');
     Lines.Add('');
     Lines.Add('    private static int RunSmokeTest()');
@@ -721,6 +675,9 @@ var
   ApiName, ArgList, RetType: TP_String;
   F: TFunctionStructure;
   Lines: TPascalStringList;
+  HasParams: boolean;
+  AsyncAsyncResultType: TP_String;
+  AsyncExtraSep: TP_String;
 begin
   Result := nil;
   if Model = nil then
@@ -762,9 +719,14 @@ begin
     Lines.Add('//');
     Lines.Add('// This file is meant to be compiled alongside');
     Lines.Add('// ' + NormalizedUnit.Text + '_http_json_call.cs. It initializes');
-    Lines.Add('// LingoFuse as a pure consumer, calls every generated API with');
-    Lines.Add('// default arguments, prints OK / FAILED per call, and prints a');
-    Lines.Add('// summary at the end.');
+    Lines.Add('// LingoFuse as a pure consumer, then exercises BOTH the');
+    Lines.Add('// synchronous and the asynchronous call path for every generated');
+    Lines.Add('// API. It prints OK / FAILED per call and a summary at the end.');
+    Lines.Add('//');
+    Lines.Add('// Sync blocks:  wrapped in try/catch on HTTPCallError.');
+    Lines.Add('// Async blocks: use TaskCompletionSource<API.<ApiName>AsyncResult>,');
+    Lines.Add('//               submitted through API.<ApiName>Async(...), and waited');
+    Lines.Add('//               on for up to 30 seconds.');
     Lines.Add('//');
     Lines.Add('// Prerequisites:');
     Lines.Add('//   * The bridge (bridge.py) must be running and reachable through');
@@ -794,8 +756,10 @@ begin
     Lines.Add('//   Base URL: ' + DefaultBaseUrl.Text);
     Lines.Add('//   Endpoint: ' + DefaultEndpoint.Text);
     Lines.Add('//');
-    Lines.Add('//     Add: OK');
-    Lines.Add('//     Sub: OK');
+    Lines.Add('//     Add [sync] : OK');
+    Lines.Add('//     Add [async]: OK');
+    Lines.Add('//     Sub [sync] : OK');
+    Lines.Add('//     Sub [async]: OK');
     Lines.Add('//     ...');
     Lines.Add('//');
     Lines.Add('//   === Summary ===');
@@ -806,6 +770,7 @@ begin
     Lines.Add('// ---------------------------------------------------------------------------');
     Lines.Add('');
     Lines.Add('using System;');
+    Lines.Add('using System.Threading.Tasks;');
     Lines.Add('using LingoFuse;');
     Lines.Add('using ' + NsName.Text + ';');
     Lines.Add('');
@@ -861,23 +826,63 @@ begin
         ApiName := ApiNames[i];
         ArgList := BuildCSharpDefaultArgList(F.Params);
         RetType := '';
+        HasParams := Length(F.Params) > 0;
 
         if F.IsFunction then
           RetType := 'var _r = ';
 
-        Lines.Add('        // ---- ' + ApiName.Text + ' ----');
+        // ---- Sync block ----
+        Lines.Add('        // ---- ' + ApiName.Text + ' [sync] ----');
         Lines.Add('        try');
         Lines.Add('        {');
         Lines.Add('            ' + RetType + 'API.' + ApiName + '(' + ArgList + ');');
-        Lines.Add('            Console.WriteLine("  ' + ApiName.Text + ': OK");');
+        Lines.Add('            Console.WriteLine("  ' + ApiName.Text + ' [sync] : OK");');
         Lines.Add('            ok++;');
         Lines.Add('        }');
         Lines.Add('        catch (HTTPCallError e)');
         Lines.Add('        {');
         Lines.Add('            Console.Error.WriteLine(');
-        Lines.Add('                "  ' + ApiName.Text + ': FAILED: " + e.Message +');
+        Lines.Add('                "  ' + ApiName.Text + ' [sync] : FAILED: " + e.Message +');
         Lines.Add('                " (code=" + e.Code + ", http=" + e.HttpStatus + ")");');
         Lines.Add('            failed++;');
+        Lines.Add('        }');
+        Lines.Add('');
+
+        // ---- Async block ----
+        AsyncAsyncResultType := ApiName + 'AsyncResult';
+        if HasParams then
+          AsyncExtraSep := ', '
+        else
+          AsyncExtraSep := '';
+
+        Lines.Add('        // ---- ' + ApiName.Text + ' [async] ----');
+        Lines.Add('        {');
+        Lines.Add('            var tcs = new TaskCompletionSource<' + AsyncAsyncResultType + '>(');
+        Lines.Add('                TaskCreationOptions.RunContinuationsAsynchronously);');
+        Lines.Add('            API.' + ApiName + 'Async(' + ArgList + AsyncExtraSep +
+          'r => tcs.TrySetResult(r));');
+        Lines.Add('            if (tcs.Task.Wait(TimeSpan.FromSeconds(30)))');
+        Lines.Add('            {');
+        Lines.Add('                var r = tcs.Task.Result;');
+        Lines.Add('                if (r.Ok)');
+        Lines.Add('                {');
+        Lines.Add('                    Console.WriteLine("  ' + ApiName.Text + ' [async]: OK");');
+        Lines.Add('                    ok++;');
+        Lines.Add('                }');
+        Lines.Add('                else');
+        Lines.Add('                {');
+        Lines.Add('                    Console.Error.WriteLine(');
+        Lines.Add('                        "  ' + ApiName.Text + ' [async]: FAILED: " + (r.Error ?? "unknown") +');
+        Lines.Add('                        " (code=" + r.Code + ", http=" + r.HttpStatus + ")");');
+        Lines.Add('                    failed++;');
+        Lines.Add('                }');
+        Lines.Add('            }');
+        Lines.Add('            else');
+        Lines.Add('            {');
+        Lines.Add('                Console.Error.WriteLine(');
+        Lines.Add('                    "  ' + ApiName.Text + ' [async]: FAILED: timeout after 30s");');
+        Lines.Add('                failed++;');
+        Lines.Add('            }');
         Lines.Add('        }');
         Lines.Add('');
       end;
@@ -899,7 +904,7 @@ begin
     Lines.Add('');
 
     Result := Lines;
-    Log(PFormat('Generated C# call test program: %d lines, %d routines.',
+    Log(PFormat('Generated C# call test program: %d lines, %d routines (sync + async).',
       [Lines.Count, Length(SupportedFuncs)]));
   finally
     ApiNames.Free;
@@ -907,539 +912,15 @@ begin
   end;
 end;
 
-// ============================================================================
-// README GENERATOR
-// ============================================================================
-
-function GenerateHTTPCsharpTestReadme(Model: TPascal_Func_Model): TPascalStringList;
-var
-  L: TPascalStringList;
-  SupportedFuncs: TArryFunctionStructure;
-  UnitName, NormalizedUnit, NsService, NsCall, AppName, Endpoint, BaseUrl: TP_String;
-  ServiceCs, CallCs, ServiceTest, CallTest, ReadmeName: TP_String;
-  i: integer;
-  FuncCount: integer;
-  ApiNames: TPascalStringList;
-  ApiName: TP_String;
-  f: TFunctionStructure;
-  RetType: TP_String;
-  ArgList: TP_String;
-  HasParams: boolean;
-begin
-  Result := nil;
-  if Model = nil then
-  begin
-    Log('GenerateHTTPCsharpTestReadme: Model is nil');
-    Exit;
-  end;
-
-  UnitName := Model.UnitName;
-  if UnitName.Len = 0 then
-  begin
-    Log('GenerateHTTPCsharpTestReadme: UnitName is empty');
-    Exit;
-  end;
-
-  NormalizedUnit := MakeApiName(UnitName);
-  if (NormalizedUnit.Len > 0) and (NormalizedUnit[1] >= '0') and (NormalizedUnit[1] <= '9') then
-    NormalizedUnit := '_' + NormalizedUnit;
-  NsService := NormalizedUnit + '_http_json_service';
-  NsCall := NormalizedUnit + '_http_json_call';
-  AppName := NormalizedUnit;
-  Endpoint := 'ipc:' + NormalizedUnit + '_http_json';
-  BaseUrl := 'http://127.0.0.1:8081/' + NormalizedUnit;
-
-  ServiceCs := NormalizedUnit + '_http_json_service.cs';
-  CallCs := NormalizedUnit + '_http_json_call.cs';
-  ServiceTest := NormalizedUnit + '_http_json_service_main_test___.cs';
-  CallTest := NormalizedUnit + '_http_json_call_main_test___.cs';
-  ReadmeName := NormalizedUnit + '_http_json_test_csharp.md';
-
-  SupportedFuncs := CollectSupportedFunctions(Model);
-  FuncCount := Length(SupportedFuncs);
-  ApiNames := TPascalStringList.Create;
-  L := TPascalStringList.Create;
-  Result := L;
-  try
-    BuildDisambiguatedApiNames(SupportedFuncs, ApiNames);
-
-    // =========================================================================
-    // Header
-    // =========================================================================
-    L.Add('# ' + UnitName.Text + ' - C# HTTP/JSON Test Programs');
-    L.Add('');
-    L.Add('> **Auto-generated**. Produced by `http_csharp_abi_test_generator_tool.pas`;');
-    L.Add('> this file stays in sync with the generated test programs.');
-    L.Add('>');
-    L.Add('> **Source unit**       : `' + UnitName.Text + '`');
-    L.Add('> **Service test file** : `' + ServiceTest.Text + '`');
-    L.Add('> **Call test file**    : `' + CallTest.Text + '`');
-    L.Add('> **Service module**    : `' + ServiceCs.Text + '` (generated separately)');
-    L.Add('> **Call module**       : `' + CallCs.Text + '` (generated separately)');
-    L.Add('> **Exposed APIs**      : ' + MdInt(FuncCount).Text);
-    L.Add('> **Target framework**  : .NET 8.0 or later');
-    L.Add('>');
-    L.Add('> **Audience**: human engineers and AI assistants who need to');
-    L.Add('> build and run the two C# test programs without reading the');
-    L.Add('> source.');
-    L.Add('');
-    L.Add('---');
-    L.Add('');
-
-    // =========================================================================
-    // 1. Overview
-    // =========================================================================
-    L.Add('## 1. Overview');
-    L.Add('');
-    L.Add('This document describes the two C# test programs that pair with');
-    L.Add('the C# HTTP/JSON service and call modules:');
-    L.Add('');
-    L.Add('| Test program | Pairs with | Purpose |');
-    L.Add('|--------------|-----------|---------|');
-    L.Add('| `' + ServiceTest.Text + '` | `' + ServiceCs.Text + '` | Service-side entry point. Starts the service, or runs an in-process smoke test. |');
-    L.Add('| `' + CallTest.Text + '` | `' + CallCs.Text + '` | Client-side driver. Calls every exposed API with default arguments. |');
-    L.Add('');
-    L.Add('Both test programs are **standalone**: each is meant to be copied');
-    L.Add('to `Program.cs` inside a fresh `dotnet new console` project,');
-    L.Add('alongside the corresponding module.');
-    L.Add('');
-    L.Add('The two test programs are **independent**: you can run one without');
-    L.Add('the other. They become an end-to-end test only when combined with');
-    L.Add('the bridge (see §5).');
-    L.Add('');
-    L.Add('### 1.1 What each test program does');
-    L.Add('');
-    L.Add('**Service test** (`' + ServiceTest.Text + '`)');
-    L.Add('');
-    L.Add('- Default mode: calls `Service.RunService()`, which performs the');
-    L.Add('  full LingoFuse startup sequence and blocks until Ctrl+C.');
-    L.Add('- `--smoke` mode: registers every API on a throwaway `AppHandle`');
-    L.Add('  and invokes each one through `AppHandle.LocalCall`. This');
-    L.Add('  exercises the JSON request parsing, the stub invocation, and');
-    L.Add('  the JSON response serialization, without starting the LingoFuse');
-    L.Add('  mesh.');
-    L.Add('');
-    L.Add('**Call test** (`' + CallTest.Text + '`)');
-    L.Add('');
-    L.Add('- Initializes LingoFuse as a pure consumer.');
-    L.Add('- Calls every exposed API with default arguments.');
-    L.Add('- Prints `OK` or `FAILED: <reason>` per call.');
-    L.Add('- Prints a summary line and exits with code 0 (all OK) or 1');
-    L.Add('  (any failure).');
-    L.Add('');
-    L.Add('### 1.2 Files produced by the toolchain');
-    L.Add('');
-    L.Add('| File | Purpose |');
-    L.Add('|------|---------|');
-    L.Add('| `' + ServiceCs.Text + '` | The service module (produced by the service generator). |');
-    L.Add('| `' + CallCs.Text + '` | The call module (produced by the call generator). |');
-    L.Add('| `' + ServiceTest.Text + '` | The service test program (produced by this generator). |');
-    L.Add('| `' + CallTest.Text + '` | The call test program (produced by this generator). |');
-    L.Add('| `' + ReadmeName.Text + '` | This README. |');
-    L.Add('');
-
-    // =========================================================================
-    // 2. Compatibility
-    // =========================================================================
-    L.Add('## 2. Compatibility');
-    L.Add('');
-    L.Add('| Requirement | Value |');
-    L.Add('|-------------|-------|');
-    L.Add('| .NET | 8.0 or later |');
-    L.Add('| LingoFuse binding | LingoFuse.dll (namespace `LingoFuse`) |');
-    L.Add('| Native LingoFuse library | Installed next to the executable, or on the loader search path |');
-    L.Add('');
-    L.Add('The **call test** additionally requires the bridge (`bridge.py`)');
-    L.Add('and the matching service to be running and reachable through the');
-    L.Add('LingoFuse endpoint.');
-    L.Add('');
-    L.Add('The **service test** in default mode also requires the native');
-    L.Add('library and a reachable endpoint. Its `--smoke` mode requires only');
-    L.Add('the native library (for `AppHandle` / `LocalCall`).');
-    L.Add('');
-
-    // =========================================================================
-    // 3. The service test program
-    // =========================================================================
-    L.Add('## 3. The Service Test Program');
-    L.Add('');
-    L.Add('### 3.1 Build');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('dotnet new console -o ' + NormalizedUnit.Text + '_service_test');
-    L.Add('cd ' + NormalizedUnit.Text + '_service_test');
-    L.Add('cp ../' + ServiceCs.Text + ' .');
-    L.Add('cp ../' + ServiceTest.Text + ' Program.cs');
-    L.Add('dotnet add reference ../LingoFuse/LingoFuse.csproj');
-    L.Add('cp ../LingoFuse64.dll .            # Windows, or .so / .dylib');
-    L.Add('cp ../z_ipc_64.dll .               # Windows, or .so');
-    L.Add('```');
-    L.Add('');
-    L.Add('Before building, **fill in every `InternalCalls.<ApiName>` stub**');
-    L.Add('inside `' + ServiceCs.Text + '`. The stubs contain `TODO`');
-    L.Add('comments; replace the body of each one with a call to the real');
-    L.Add('implementation.');
-    L.Add('');
-    L.Add('### 3.2 Default mode: run the service');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('dotnet run');
-    L.Add('```');
-    L.Add('');
-    L.Add('Expected output:');
-    L.Add('');
-    L.Add('```');
-    L.Add('=== ' + AppName.Text + ' HTTP/JSON service test ===');
-    L.Add('Endpoint: ' + Endpoint.Text);
-    L.Add('API count: ' + MdInt(FuncCount).Text);
-    L.Add('');
-    L.Add('=== ' + AppName.Text + ' HTTP/JSON service ===');
-    L.Add('Endpoint: ' + Endpoint.Text);
-    L.Add('[OK] Service ready. Press Ctrl+C to stop.');
-    L.Add('```');
-    L.Add('');
-    L.Add('Press **Ctrl+C** to stop the service. The service performs a');
-    L.Add('clean shutdown: stop the simulated main thread, free the App, and');
-    L.Add('release the LingoFuse library. The test prints');
-    L.Add('`[OK] Service stopped cleanly.` before exiting.');
-    L.Add('');
-    L.Add('### 3.3 Smoke mode: in-process test');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('dotnet run -- --smoke');
-    L.Add('```');
-    L.Add('');
-    L.Add('The smoke mode does **not** start the LingoFuse mesh and does');
-    L.Add('**not** need the bridge to be running. It only needs the native');
-    L.Add('library (for `AppHandle.LocalCall`).');
-    L.Add('');
-    L.Add('For every exposed API it:');
-    L.Add('');
-    L.Add('1. Creates a throwaway `AppHandle`.');
-    L.Add('2. Registers every API on it via `Service.RegisterAPIs`.');
-    L.Add('3. Builds a request `DataHandle` with the API name and a JSON');
-    L.Add('   request envelope of default arguments.');
-    L.Add('4. Calls `AppHandle.LocalCall` with the request.');
-    L.Add('5. Checks whether the response carries `"code": 0`.');
-    L.Add('');
-    L.Add('Expected output:');
-    L.Add('');
-    L.Add('```');
-    L.Add('=== ' + AppName.Text + ' HTTP/JSON service test ===');
-    L.Add('Endpoint: ' + Endpoint.Text);
-    L.Add('API count: ' + MdInt(FuncCount).Text);
-    L.Add('');
-    L.Add('[smoke] Running in-process LocalCall round trip for every API.');
-    L.Add('[smoke] This does NOT start LingoFuse and does NOT need');
-    L.Add('[smoke] the bridge to be running.');
-    L.Add('');
-    L.Add('  <ApiName1>: OK');
-    L.Add('  <ApiName2>: OK');
-    L.Add('  ...');
-    L.Add('');
-    L.Add('=== Smoke test summary ===');
-    L.Add('Passed: ' + MdInt(FuncCount).Text);
-    L.Add('Failed: 0');
-    L.Add('```');
-    L.Add('');
-    L.Add('### 3.4 Interpreting smoke-mode failures');
-    L.Add('');
-    L.Add('A smoke test for one API can fail for two reasons:');
-    L.Add('');
-    L.Add('- **`non-zero code`** - the callback returned a JSON envelope');
-    L.Add('  with a non-zero `code`. This almost always means the');
-    L.Add('  corresponding `InternalCalls.<ApiName>` stub was not filled in');
-    L.Add('  and threw an exception. Check the stderr output.');
-    L.Add('- **`FAILED: <exception>`** - a .NET exception was thrown before');
-    L.Add('  the callback could produce a response. This usually means the');
-    L.Add('  native library is missing or an argument extraction helper');
-    L.Add('  failed.');
-    L.Add('');
-
-    // =========================================================================
-    // 4. The call test program
-    // =========================================================================
-    L.Add('## 4. The Call Test Program');
-    L.Add('');
-    L.Add('### 4.1 Build');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('dotnet new console -o ' + NormalizedUnit.Text + '_call_test');
-    L.Add('cd ' + NormalizedUnit.Text + '_call_test');
-    L.Add('cp ../' + CallCs.Text + ' .');
-    L.Add('cp ../' + CallTest.Text + ' Program.cs');
-    L.Add('dotnet add reference ../LingoFuse/LingoFuse.csproj');
-    L.Add('cp ../LingoFuse64.dll .            # Windows, or .so / .dylib');
-    L.Add('```');
-    L.Add('');
-    L.Add('### 4.2 Run');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('dotnet run');
-    L.Add('```');
-    L.Add('');
-    L.Add('or, with a custom base URL and endpoint:');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('dotnet run -- ' + BaseUrl.Text + ' ' + Endpoint.Text);
-    L.Add('```');
-    L.Add('');
-    L.Add('Expected output:');
-    L.Add('');
-    L.Add('```');
-    L.Add('=== ' + UnitName.Text + ' HTTP/JSON call test ===');
-    L.Add('Base URL: ' + BaseUrl.Text);
-    L.Add('Endpoint: ' + Endpoint.Text);
-    L.Add('');
-    L.Add('  <ApiName1>: OK');
-    L.Add('  <ApiName2>: OK');
-    L.Add('  ...');
-    L.Add('');
-    L.Add('=== Summary ===');
-    L.Add('Passed: ' + MdInt(FuncCount).Text);
-    L.Add('Failed: 0');
-    L.Add('```');
-    L.Add('');
-    L.Add('The test exits with code 0 when every call succeeded, and code 1');
-    L.Add('otherwise.');
-    L.Add('');
-    L.Add('### 4.3 What "OK" means');
-    L.Add('');
-    L.Add('A call is reported as `OK` when the service returned');
-    L.Add('`{"code": 0, ...}`. The test does **not** verify that the');
-    L.Add('returned value matches any expected value: it only verifies the');
-    L.Add('wire round trip.');
-    L.Add('');
-    L.Add('### 4.4 Testing against a stub service');
-    L.Add('');
-    L.Add('The call test can be run even if the service implementation is');
-    L.Add('still a stub. The stubs return `0` / `""` / `0.0`, so the call');
-    L.Add('test will see `{"code": 0, "result": 0}` and report `OK`. This');
-    L.Add('confirms the wire protocol end to end, but not the business');
-    L.Add('logic.');
-    L.Add('');
-
-    // =========================================================================
-    // 5. End-to-end test scenario
-    // =========================================================================
-    L.Add('## 5. End-to-End Test Scenario');
-    L.Add('');
-    L.Add('The two test programs become an end-to-end test when combined with');
-    L.Add('the bridge. The full setup involves three processes:');
-    L.Add('');
-    L.Add('```');
-    L.Add('  +---------------------+        +--------------+        +---------------------+');
-    L.Add('  |  Service test       |  LF    |  bridge.py   |  HTTP  |  Call test          |');
-    L.Add('  |  ' + ServiceTest.Text + '  | <----> |  :8081       | <----> |  ' + CallTest.Text + '  |');
-    L.Add('  +---------------------+        +--------------+        +---------------------+');
-    L.Add('```');
-    L.Add('');
-    L.Add('### 5.1 Step 1: start the service');
-    L.Add('');
-    L.Add('In terminal 1:');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('cd ' + NormalizedUnit.Text + '_service_test');
-    L.Add('dotnet run');
-    L.Add('```');
-    L.Add('');
-    L.Add('Wait for the line:');
-    L.Add('');
-    L.Add('```');
-    L.Add('[OK] Service ready. Press Ctrl+C to stop.');
-    L.Add('```');
-    L.Add('');
-    L.Add('### 5.2 Step 2: start the bridge');
-    L.Add('');
-    L.Add('In terminal 2:');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('python3 bridge.py --endpoint ' + Endpoint.Text + ' \\');
-    L.Add('    --port 8081 --no-precheck');
-    L.Add('```');
-    L.Add('');
-    L.Add('Wait for the bridge to report that it is listening on port 8081.');
-    L.Add('');
-    L.Add('### 5.3 Step 3: run the call test');
-    L.Add('');
-    L.Add('In terminal 3:');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('cd ' + NormalizedUnit.Text + '_call_test');
-    L.Add('dotnet run');
-    L.Add('```');
-    L.Add('');
-    L.Add('The call test calls every API through the bridge. A successful');
-    L.Add('run prints `Passed: ' + MdInt(FuncCount).Text + '` and `Failed: 0`.');
-    L.Add('');
-    L.Add('### 5.4 Step 4: shut down');
-    L.Add('');
-    L.Add('Stop the bridge (Ctrl+C in terminal 2), then stop the service');
-    L.Add('(Ctrl+C in terminal 1). The service prints');
-    L.Add('`[OK] Service stopped cleanly.` before exiting.');
-    L.Add('');
-    L.Add('### 5.5 Testing without the call test');
-    L.Add('');
-    L.Add('You can also probe the service from the command line:');
-    L.Add('');
-    L.Add('```bash');
-    L.Add('curl -X POST ' + BaseUrl.Text + '/<api-name> \\');
-    L.Add('     -H "Content-Type: application/json" \\');
-    L.Add('     -d ''{"args": [1, 2]}''');
-    L.Add('```');
-    L.Add('');
-
-    // =========================================================================
-    // 6. Troubleshooting
-    // =========================================================================
-    L.Add('## 6. Troubleshooting');
-    L.Add('');
-    L.Add('### 6.1 Service test');
-    L.Add('');
-    L.Add('| Symptom | Likely cause | Fix |');
-    L.Add('|---------|--------------|-----|');
-    L.Add('| `DllNotFoundException: LingoFuse64.dll` | Native library missing | Copy the native library next to the executable |');
-    L.Add('| `BadImageFormatException` | Architecture mismatch | Use the 64-bit native library with a 64-bit runtime |');
-    L.Add('| `PrepareService` returned -1 | Endpoint already in use | Use a different endpoint, or stop the conflicting process |');
-    L.Add('| `PrepareDone` returned 0 | Already running | Use `Framework.Shutdown` between cycles |');
-    L.Add('| `--smoke` reports non-zero code | A stub was not filled in | Search for `TODO` in the service module |');
-    L.Add('');
-    L.Add('### 6.2 Call test');
-    L.Add('');
-    L.Add('| Symptom | Likely cause | Fix |');
-    L.Add('|---------|--------------|-----|');
-    L.Add('| `FAILED: ... code=-1, http=0` | Bridge not running, or the LingoFuse call timed out | Start `bridge.py`; verify the endpoint |');
-    L.Add('| `FAILED: ... code=-3` | Bridge pre-check failed | Add `--no-precheck` to the bridge |');
-    L.Add('| `FAILED: ... code=-4` | Bridge protocol error | Check the bridge log |');
-    L.Add('| `FAILED: ... code=-1, http=200` | Service raised an exception | Check the service console |');
-    L.Add('| Every call fails immediately | Endpoint mismatch between the call test and the bridge | Pass the correct endpoint as the second argument |');
-    L.Add('');
-
-    // =========================================================================
-    // 7. API manifest
-    // =========================================================================
-    L.Add('## 7. API Manifest');
-    L.Add('');
-    L.Add('Total exposed APIs: **' + MdInt(FuncCount).Text + '**.');
-    L.Add('');
-
-    if FuncCount = 0 then
-    begin
-      L.Add('_No supported routines were found in the source unit._');
-      L.Add('');
-    end
-    else
-    begin
-      L.Add('The call test invokes the following APIs with default');
-      L.Add('arguments. The service test''s smoke mode uses the same order.');
-      L.Add('');
-      L.Add('| # | API name | Kind | Default arguments |');
-      L.Add('|---|----------|------|-------------------|');
-
-      for i := 0 to High(SupportedFuncs) do
-      begin
-        f := SupportedFuncs[i];
-        ApiName := ApiNames[i];
-        ArgList := BuildCSharpDefaultArgList(f.Params);
-        if ArgList = '' then
-          ArgList := '(none)'
-        else
-          ArgList := '`' + ArgList + '`';
-
-        if f.IsFunction then
-          RetType := 'function'
-        else
-          RetType := 'procedure';
-
-        L.Add('| ' + MdInt(i + 1).Text +
-          ' | `' + ApiName.Text + '`' +
-          ' | ' + RetType +
-          ' | ' + ArgList + ' |');
-      end;
-
-      L.Add('');
-    end;
-
-    // =========================================================================
-    // 8. For AI Agents
-    // =========================================================================
-    L.Add('## 8. For AI Agents');
-    L.Add('');
-    L.Add('```yaml');
-    L.Add('artifacts:');
-    L.Add('  service_test: ' + ServiceTest.Text);
-    L.Add('  call_test: ' + CallTest.Text);
-    L.Add('  readme: ' + ReadmeName.Text);
-    L.Add('');
-    L.Add('pairs_with:');
-    L.Add('  service_module: ' + ServiceCs.Text);
-    L.Add('  call_module: ' + CallCs.Text);
-    L.Add('  service_namespace: ' + NsService.Text);
-    L.Add('  call_namespace: ' + NsCall.Text);
-    L.Add('');
-    L.Add('service_test:');
-    L.Add('  default_mode: "calls Service.RunService() and blocks on Ctrl+C"');
-    L.Add('  smoke_mode: "dotnet run -- --smoke; in-process LocalCall round trip"');
-    L.Add('  needs_bridge: false   # smoke mode only');
-    L.Add('  needs_native: true    # both modes');
-    L.Add('  exit_codes:');
-    L.Add('    "0": "clean run"');
-    L.Add('    "1": "fatal or smoke-test failure"');
-    L.Add('');
-    L.Add('call_test:');
-    L.Add('  invocation: "API.<ApiName>(defaults) for every API"');
-    L.Add('  needs_bridge: true');
-    L.Add('  needs_native: true');
-    L.Add('  optional_args: "<base_url> <endpoint>"');
-    L.Add('  exit_codes:');
-    L.Add('    "0": "every call succeeded"');
-    L.Add('    "1": "at least one call failed"');
-    L.Add('');
-    L.Add('end_to_end:');
-    L.Add('  step_1: "cd ' + NormalizedUnit.Text + '_service_test && dotnet run"');
-    L.Add('  step_2: "python3 bridge.py --endpoint ' + Endpoint.Text + ' --no-precheck"');
-    L.Add('  step_3: "cd ' + NormalizedUnit.Text + '_call_test && dotnet run"');
-    L.Add('```');
-    L.Add('');
-    L.Add('### 8.1 What these test programs do NOT cover');
-    L.Add('');
-    L.Add('- The **bridge implementation**. See the bridge README.');
-    L.Add('- The **LingoFuse runtime**. See the LingoFuse documentation.');
-    L.Add('- **Business-logic correctness**. The call test verifies the');
-    L.Add('  wire round trip, not the returned value.');
-    L.Add('- **Concurrency**. Both tests are single-threaded.');
-    L.Add('');
-
-    // =========================================================================
-    // 9. Resources
-    // =========================================================================
-    L.Add('## 9. Reference Resources');
-    L.Add('');
-    L.Add('| Resource | Purpose |');
-    L.Add('|----------|---------|');
-    L.Add('| `http_csharp_abi_service_generator_tool.pas` | Service module generator |');
-    L.Add('| `http_csharp_abi_call_generator_tool.pas` | Call module generator |');
-    L.Add('| `http_csharp_abi_test_generator_tool.pas` | This generator |');
-    L.Add('| `http_pas_abi_service_generator_tool.pas` | Paired Pascal service generator |');
-    L.Add('| `http_pas_abi_call_generator_tool.pas` | Paired Pascal call generator |');
-    L.Add('| `http_py_abi_service_generator_tool.pas` | Paired Python service generator |');
-    L.Add('| `http_py_abi_call_generator_tool.pas` | Paired Python call generator |');
-    L.Add('| `http_cpp_abi_service_generator_tool.pas` | Paired C++ service generator |');
-    L.Add('| `http_cpp_abi_call_generator_tool.pas` | Paired C++ call generator |');
-    L.Add('| `http_js_abi_call_generator_tool.pas` | Paired JavaScript call generator |');
-    L.Add('| `bridge.py` | HTTP <-> LingoFuse bridge |');
-    L.Add('');
-    L.Add('---');
-    L.Add('');
-    L.Add('End of document. Generated by `http_csharp_abi_test_generator_tool.pas`');
-    L.Add('');
-
-    Log(PFormat('Generated C# test README: %d lines, %d routines.',
-      [L.Count, FuncCount]));
-  finally
-    ApiNames.Free;
-    // L is returned to the caller; not freed here.
-  end;
-end;
-
+initialization
+  RegisterCodeGenEntry(
+    'csharp', 'C# HTTP/JSON service test program',
+    asBoth, akTestCode,
+    '_http_json_service_main_test___.cs', False,
+    @GenerateHTTPServiceCsharpTestCode);
+  RegisterCodeGenEntry(
+    'csharp', 'C# HTTP/JSON call test program',
+    asBoth, akTestCode,
+    '_http_json_call_main_test___.cs', False,
+    @GenerateHTTPCallCsharpTestCode);
 end.

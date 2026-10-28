@@ -1,17 +1,7 @@
 unit code_decl_to_json_abi_mcp_api_tool_provider_unit;
 
-{$ifdef FPC}
-  {$mode delphi}
-  {$MODESWITCH NestedProcVars}
-  {$modeswitch advancedrecords}
-  {$MODESWITCH NESTEDCOMMENTS}
-  {$CODEPAGE UTF8}
-{$endif}
-{$H+}
-{$R-}
-{$I-}
-{$Q-}
-{$B-}
+{$DEFINE FPC_DELPHI_MODE}
+{$I ..\..\zCore\src\Z.Define.inc}
 
 interface
 
@@ -27,7 +17,7 @@ var
   BEACON_APP : string = 'agent_main_app';
   REGISTER_API : string = 'register_agent';
   AGENT_LOG_API : string = 'agent_log';
-  DEBUG_LOG : boolean = True;
+  DEBUG_LOG : boolean = False;
 
 // ---- Exported functions ----
 {*

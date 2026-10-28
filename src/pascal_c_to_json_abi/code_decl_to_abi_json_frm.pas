@@ -6,12 +6,14 @@ unit code_decl_to_abi_json_frm;
 interface
 
 uses
-  Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls, LazHelpHTML, ComCtrls, Menus, AsyncProcess, ActnList, LCLIntf, PairSplitter, SynHighlighterCpp,
-  SynHighlighterAny, SynEdit, SynHighlighterPas, SynEditMiscClasses, SynHighlighterJScript, lingofuse_helper, lingofuse_import, Z.Core, Z.PascalStrings, Z.UPascalStrings,
-  Z.Parsing, Z.Expression, Z.ListEngine, Z.Notify, Z.UnicodeMixedLib, Z.Status, Z.MemoryStream, Z.Json, Z.HashList.Templet, Z.Pascal_Func_Model, Z.Pascal_Func_Tool,
-  http_pas_abi_service_generator_tool, http_pas_abi_call_generator_tool, http_js_abi_call_generator_tool, http_py_abi_service_generator_tool, http_py_abi_call_generator_tool,
-  http_cpp_abi_service_generator_tool, http_cpp_abi_call_generator_tool, code_decl_to_json_abi_mcp_api_tool_provider_unit, http_cmake_generator_tool,
-  http_csharp_abi_call_generator_tool, http_csharp_abi_service_generator_tool, http_csharp_abi_test_generator_tool;
+  Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls, LazHelpHTML, ComCtrls, Menus,
+  AsyncProcess, ActnList, LCLIntf, PairSplitter, SynHighlighterCpp,
+  SynHighlighterAny, SynEdit, SynHighlighterPas, SynEditMiscClasses, SynHighlighterJScript,
+  code_decl_to_json_abi_registry,
+  code_decl_to_json_abi_mcp_api_tool_provider_unit,
+  lingofuse_helper, lingofuse_import, Z.Core, Z.PascalStrings, Z.UPascalStrings,
+  Z.Parsing, Z.Expression, Z.ListEngine, Z.Notify, Z.UnicodeMixedLib, Z.Status,
+  Z.MemoryStream, Z.Json, Z.HashList.Templet, Z.Pascal_Func_Model, Z.Pascal_Func_Tool;
 
 type
 
@@ -19,23 +21,8 @@ type
 
   Tcode_decl_to_abi_json_form = class(TForm)
     BackToModelJsonButton: TButton;
-    CMake_TestMain_Editor: TSynEdit;
-    CppCallHeaderEditor: TSynEdit;
-    CppCallHeaderSide: TPairSplitterSide;
-    CppCallImplEditor: TSynEdit;
-    CppCallImplSide: TPairSplitterSide;
-    CppCallReadmeEditor: TSynEdit;
-    CMakeEditor: TSynEdit;
-    CppCallSplitter: TPairSplitter;
-    CppServiceHeaderEditor: TSynEdit;
-    CppServiceHeaderSide: TPairSplitterSide;
-    CppServiceImplEditor: TSynEdit;
-    CppServiceImplSide: TPairSplitterSide;
-    CppServiceReadmeEditor: TSynEdit;
-    CppServiceSplitter: TPairSplitter;
     DenormalizeModelToJsonButton: TButton;
     FinalSourceHintLabel: TLabel;
-    FinalSourcePageControl: TPageControl;
     FinalSourceSpacerBevel: TBevel;
     FinalSourceTabSheet: TTabSheet;
     FinalSourceToolbarPanel: TPanel;
@@ -47,26 +34,8 @@ type
     FormatSourceButton: TButton;
     GenerateAllSourcesButton: TButton;
     GoToSourceButton: TButton;
-    HttpCppCallReadmeTabSheet: TTabSheet;
-    HttpCppCallTabSheet: TTabSheet;
-    HttpCppServiceReadmeTabSheet: TTabSheet;
-    HttpCppServiceTabSheet: TTabSheet;
-    HttpJavaScriptCallTabSheet: TTabSheet;
-    HttpJavaScriptTestTabSheet: TTabSheet;
-    HttpPascalCallSplitter: TPairSplitter;
-    HttpPascalCallTabSheet: TTabSheet;
-    HttpPascalServiceSplitter: TPairSplitter;
-    HttpPascalServiceTabSheet: TTabSheet;
-    HttpPythonCallTabSheet: TTabSheet;
-    HttpPythonServiceTabSheet: TTabSheet;
     InsertEmptyUnitButton: TButton;
     InsertTestUnitButton: TButton;
-    JavaScriptCallCodeEditor: TSynEdit;
-    JavaScriptCallReadmeEditor: TSynEdit;
-    JavaScriptCallSplitter: TPairSplitter;
-    JavaScriptCodeSide: TPairSplitterSide;
-    JavaScriptReadmeSide: TPairSplitterSide;
-    JavaScriptTestHtmlEditor: TSynEdit;
     LanguageSelectorComboBox: TComboBox;
     MainPageControl: TPageControl;
     ModelJsonEditor: TSynEdit;
@@ -78,28 +47,7 @@ type
     NormalizeJsonToModelButton: TButton;
     OpenCRuleButton: TButton;
     OpenPascalRuleButton: TButton;
-    PairSplitter1: TPairSplitter;
-    PairSplitterSide1: TPairSplitterSide;
-    PairSplitterSide2: TPairSplitterSide;
     ParseSourceToJsonButton: TButton;
-    PascalCallCodeEditor: TSynEdit;
-    PascalCallCodeSide: TPairSplitterSide;
-    PascalCallReadmeEditor: TSynEdit;
-    PascalCallReadmeSide: TPairSplitterSide;
-    PascalServiceCodeEditor: TSynEdit;
-    PascalServiceCodeSide: TPairSplitterSide;
-    PascalServiceReadmeEditor: TSynEdit;
-    PascalServiceReadmeSide: TPairSplitterSide;
-    PythonCallCodeEditor: TSynEdit;
-    PythonCallCodeSide: TPairSplitterSide;
-    PythonCallReadmeEditor: TSynEdit;
-    PythonCallReadmeSide: TPairSplitterSide;
-    PythonCallSplitter: TPairSplitter;
-    PythonServiceCodeEditor: TSynEdit;
-    PythonServiceCodeSide: TPairSplitterSide;
-    PythonServiceReadmeEditor: TSynEdit;
-    PythonServiceReadmeSide: TPairSplitterSide;
-    PythonServiceSplitter: TPairSplitter;
     RebuildCodeFromJsonButton: TButton;
     SelectLanguageLabel: TLabel;
     SourceCodeEditor: TSynEdit;
@@ -161,14 +109,6 @@ implementation
 
 {$R *.lfm}
 
-type
-  (* A generator is a free function that consumes a TPascal_Func_Model
-     and returns a TPascalStringList of the produced text lines, or nil
-     when the model is unusable. All HTTP/JSON generators follow this
-     contract, which lets the batch-emit step below stay fully data
-     driven: one table entry per artifact. *)
-  TSourceGeneratorFunc = function(Model: TPascal_Func_Model): TPascalStringList;
-
 (* ============================================================================
  * JSON -> source code rebuild
  * ============================================================================ *)
@@ -176,48 +116,59 @@ procedure Tcode_decl_to_abi_json_form.RebuildCodeFromJsonClick(Sender: TObject);
 var
   Report: TPascalStringList;
 begin
-  case CurrentSourceLanguage of
-    TSourceLanguage.slPascal:
-    begin
-      Report := TPascalStringList.Create;
-      with tpascal_func_decl_tool.Create do
+  Report := TPascalStringList.Create;
+  try
+    case CurrentSourceLanguage of
+      TSourceLanguage.slPascal:
       begin
-        LoadFromJson(SourceJsonEditor.Text);
-        SourceCodeEditor.Text := decl_to_pascal(Report);
-        Free;
+        with tpascal_func_decl_tool.Create do
+        try
+          LoadFromJson(SourceJsonEditor.Text);
+          SourceCodeEditor.Text := decl_to_pascal(Report);
+        finally
+          Free;
+        end;
+      end;
+      TSourceLanguage.slC:
+      begin
+        with tpascal_func_decl_tool.Create do
+        try
+          LoadFromJson(SourceJsonEditor.Text);
+          SourceCodeEditor.Text := decl_to_c(Report);
+        finally
+          Free;
+        end;
+      end;
+      else
+      begin
+        DoStatus('Unsupported language.');
+        Exit;
       end;
     end;
-    TSourceLanguage.slC:
-    begin
-      Report := TPascalStringList.Create;
-      with tpascal_func_decl_tool.Create do
-      begin
-        LoadFromJson(SourceJsonEditor.Text);
-        SourceCodeEditor.Text := decl_to_c(Report);
-        Free;
-      end;
-    end;
-    else
-    begin
-      DoStatus('Unsupported language.');
-      exit;
-    end;
-  end;
 
-  DoStatus('Rebuilt source code from JSON.');
-  DoStatus(Report.AsText);
-  MainPageControl.ActivePage := SourceCodeTabSheet;
-  DisposeObject(Report);
+    DoStatus('Rebuilt source code from JSON.');
+    DoStatus(Report.AsText);
+    MainPageControl.ActivePage := SourceCodeTabSheet;
+  finally
+    DisposeObject(Report);
+  end;
 end;
 
+(*
+  final_source_file_ListViewSelectItem
+
+  When the user selects an entry in the generated-file list, load that
+  file into final_Source_edit and pick a syntax highlighter from the
+  file extension. This is the only editor-viewing path in the form.
+*)
 procedure Tcode_decl_to_abi_json_form.final_source_file_ListViewSelectItem(Sender: TObject; Item: TListItem; Selected: boolean);
 begin
-  if Selected then
+  if Selected and (Item.SubItems.Count > 0) then
   begin
     final_Source_edit.Lines.LoadFromFile(Item.SubItems[0]);
     if umlMultipleMatch('*.pas;*.pp;*.lpr;*.dpr', Item.Caption) then
       final_Source_edit.Highlighter := self.PascalSyntaxHighlighter
-    else if umlMultipleMatch('*.cpp;*.c;*.hpp;*.h', Item.Caption) then
+    else if umlMultipleMatch('*.cpp;*.c;*.hpp;*.h;*.cc;*.cxx;*.hh', Item.Caption) then
       final_Source_edit.Highlighter := self.CppSyntaxHighlighter
     else if umlMultipleMatch('*.js', Item.Caption) then
       final_Source_edit.Highlighter := self.JsSyntaxHighlighter
@@ -438,35 +389,47 @@ begin
 end;
 
 (* ============================================================================
- * Core: LV1 Model JSON -> full set of HTTP/JSON target artifacts
+ * Core: LV1 Model JSON -> every artifact registered in CodeGenRegistry
  *
  * Workflow:
  *   1. Parse the LV1 Model JSON into a TPascal_Func_Model.
  *   2. Create a per-unit output directory next to the executable.
  *   3. Dump the three in-editor sources (source.pas/h, source.json,
  *      source_model.json) for traceability.
- *   4. Run every generator through a single data-driven emit helper:
- *      for each (generator, filename-suffix, target editor) triple,
- *      invoke the generator, write the result to disk, and mirror the
- *      text into the corresponding TSynEdit.
- *   5. Switch to the "Final source" tab.
+ *   4. Walk CodeGenRegistry in registration order. For every entry:
+ *        a. call its generator function on the model;
+ *        b. compose the output file name (fixed or unit-prefixed);
+ *        c. write the file to disk;
+ *        d. append it to final_source_file_ListView.
+ *      A generator that returns nil is refusing the model and is
+ *      skipped silently.
+ *   5. Switch to the "Final source" tab and select the first generated
+ *      file so the user sees something immediately.
  *
- * The whole generator fan-out is expressed as one flat list of Emit()
- * calls, so adding or removing an artifact is a one-line change.
+ * The GUI intentionally emits BOTH sides (service and call) plus every
+ * ancillary artifact (test programs, READMEs, CMake build script). No
+ * side filtering is applied here: unlike the command line, the GUI is a
+ * batch generator whose purpose is to produce the whole artifact set
+ * at once.
+ *
+ * The form no longer mirrors generated text into per-language editors:
+ * the single final_Source_edit is populated by the ListView selection
+ * handler when the user clicks an entry.
  * ============================================================================ *)
 procedure Tcode_decl_to_abi_json_form.GenerateAllSourcesClick(Sender: TObject);
 var
   func_model: TPascal_Func_Model;
   unit_name, app_dir: TP_String;
 
-(* Persist the current content of an editor to disk, if non-empty. *)
+(* Persist the current content of an editor to disk, if non-empty, and
+   append it to the file list view so the user sees it. *)
   procedure SaveEditorSnapshot(editor: TSynEdit; const file_name: string);
   var
     tmp: TPascalStringList;
     fn: TP_String;
   begin
-    if editor.Lines.Count = 0 then
-      exit;
+    if (editor = nil) or (editor.Lines.Count = 0) then
+      Exit;
     tmp := TPascalStringList.Create;
     try
       tmp.Assign(editor.Lines);
@@ -486,72 +449,18 @@ var
     end;
   end;
 
-  (* Run a generator, persist its output under
-       <app_dir>/<unit_name><suffix>,
-     and mirror the text into the target editor. Nil results mean the
-     generator refused the model and are silently skipped.
-
-     Two file-name conventions are supported:
-       * unit-prefixed:  <unit_name> + suffix
-         used by every per-language artifact (source, README, ...)
-       * fixed name:     suffix only
-         used by the two C++ build-support files (CMakeLists.txt and
-         test_main___.cpp) which the generated CMake script refers to
-         by their exact names. *)
-  procedure Emit(gen: TSourceGeneratorFunc; const suffix: TP_String);
-  var
-    Text: TPascalStringList;
-    full_name: TP_String;
-  begin
-    Text := gen(func_model);
-    if Text = nil then
-      exit;
-    try
-      full_name := umlCombineFileName(app_dir.Text, unit_name + suffix);
-      Text.SaveToFile(full_name);
-      DoStatus('Saved: %s', [full_name.Text]);
-
-      with final_source_file_ListView.Items.Add do
-      begin
-        Caption := umlGetFileName(full_name).Text;
-        SubItems.Add(full_name);
-        ImageIndex := -1;
-        StateIndex := -1;
-      end;
-    finally
-      DisposeObject(Text);
-    end;
-  end;
-
-  procedure Emit2(gen: TSourceGeneratorFunc; const filename_: TP_String);
-  var
-    Text: TPascalStringList;
-    full_name: TP_String;
-  begin
-    Text := gen(func_model);
-    if Text = nil then
-      exit;
-    try
-      full_name := umlCombineFileName(app_dir.Text, filename_);
-      Text.SaveToFile(full_name);
-      DoStatus('Saved: %s', [full_name.Text]);
-
-      with final_source_file_ListView.Items.Add do
-      begin
-        Caption := umlGetFileName(full_name).Text;
-        SubItems.Add(full_name);
-        ImageIndex := -1;
-        StateIndex := -1;
-      end;
-    finally
-      DisposeObject(Text);
-    end;
-  end;
-
+var
+  i: integer;
+  Entry: PCodeGenEntry;
+  Text: TPascalStringList;
+  full_name: TP_String;
+  saved_count: integer;
 begin
+  MainPageControl.Enabled := False;
   MainPageControl.ActivePage := FinalSourceTabSheet;
   final_source_file_ListView.Items.Clear;
   final_Source_edit.Text := '';
+  final_Source_edit.Highlighter := nil;
 
   func_model := TPascal_Func_Model.Create;
   try
@@ -559,7 +468,7 @@ begin
     if func_model.FuncCount <= 0 then
     begin
       DoStatus('No functions found in the model.');
-      exit;
+      Exit;
     end;
 
     unit_name := func_model.UnitName;
@@ -578,52 +487,68 @@ begin
     SaveEditorSnapshot(SourceJsonEditor, 'source.json');
     SaveEditorSnapshot(ModelJsonEditor, 'source_model.json');
 
-    (* ---- Pascal service / call ---- *)
-    Emit(GenerateHTTPServicePascalCode, '_http_json_service_unit.pas');
-    Emit(GenerateHTTPServicePascalReadme, '_http_json_service_pascal.md');
-    Emit(GenerateHTTPCallPascalCode, '_http_json_call_unit.pas');
-    Emit(GenerateHTTPCallPascalReadme, '_http_json_call_pascal.md');
+    (* ---- Fan out through the registry ----
+     *
+     * Every language support unit has already registered its
+     * artifacts at unit-load time. We walk the registry in
+     * registration order and produce each artifact that the model
+     * accepts. *)
+    saved_count := 0;
+    for i := 0 to CodeGenRegistry.Count - 1 do
+    begin
+      Entry := CodeGenRegistry[i];
 
-    (* ---- JavaScript call (client library + HTML test page) ---- *)
-    Emit(GenerateHTTPCallJsCode, '_http_json_call.js');
-    Emit(GenerateHTTPCallJsReadme, '_http_json_call_js.md');
-    Emit(GenerateHTTPCallJsHtmlCode, '_http_json_call_test.html');
+      try
+        Text := Entry^.Func(func_model);
+      except
+        Text := nil;
+      end;
 
-    (* ---- Python service / call ---- *)
-    Emit(GenerateHTTPServicePythonCode, '_http_json_service.py');
-    Emit(GenerateHTTPServicePythonReadme, '_http_json_service_python.md');
-    Emit(GenerateHTTPCallPythonCode, '_http_json_call.py');
-    Emit(GenerateHTTPCallPythonReadme, '_http_json_call_python.md');
+      if Text = nil then
+        Continue;
+      try
+        // Compose the output file name. A fixed-name artifact is
+        // written under exactly the registered suffix; a unit-prefixed
+        // artifact gets the model's unit name prepended.
+        if Entry^.FixedName then
+          full_name := umlCombineFileName(app_dir.Text, Entry^.Suffix.Text)
+        else
+          full_name := umlCombineFileName(app_dir.Text, unit_name.Text + Entry^.Suffix.Text);
 
-    (* ---- C# service / call ---- *)
-    Emit(GenerateHTTPServiceCsharpCode, '_http_json_service.cs');
-    Emit(GenerateHTTPServiceCsharpReadme, '_http_json_service_csharp.md');
-    Emit(GenerateHTTPCallCsharpCode, '_http_json_call.cs');
-    Emit(GenerateHTTPCallCsharpReadme, '_http_json_call_csharp.md');
+        Text.SaveToFile(full_name);
+        DoStatus('Saved: %s', [full_name.Text]);
 
-    (* ---- C# test programs + test README ---- *)
-    Emit(GenerateHTTPServiceCsharpTestCode, '_http_json_service_main_test___.cs');
-    Emit(GenerateHTTPCallCsharpTestCode, '_http_json_call_main_test___.cs');
-    Emit(GenerateHTTPCsharpTestReadme, '_http_json_test_csharp.md');
+        with final_source_file_ListView.Items.Add do
+        begin
+          Caption := umlGetFileName(full_name).Text;
+          SubItems.Add(full_name);
+          ImageIndex := -1;
+          StateIndex := -1;
+        end;
 
-    (* ---- C++ service (.cpp + .hpp + README) ---- *)
-    Emit(GenerateHTTPServiceCppCode, '_http_json_service.cpp');
-    Emit(GenerateHTTPServiceCppHeader, '_http_json_service.hpp');
-    Emit(GenerateHTTPServiceCppReadme, '_http_json_service_cpp.md');
+        Inc(saved_count);
+      finally
+        DisposeObject(Text);
+      end;
+      Application.ProcessMessages;
+    end;
 
-    (* ---- C++ call (.cpp + .hpp + README) ---- *)
-    Emit(GenerateHTTPCallCppCode, '_http_json_call.cpp');
-    Emit(GenerateHTTPCallCppHeader, '_http_json_call.hpp');
-    Emit(GenerateHTTPCallCppReadme, '_http_json_call_cpp.md');
+    DoStatus('All artifacts generated for unit "%s" (%d files).',
+      [unit_name.Text, saved_count]);
 
-    Emit2(GenerateCMakeScript, 'CMakeLists.txt');
-    Emit2(GenerateTestMainCpp, 'test_main___.cpp');
-
-    DoStatus('All artifacts generated for unit "%s".', [unit_name.Text]);
+    // Auto-select the first generated file so the user sees something
+    // immediately. The selection handler loads it into final_Source_edit.
+    if final_source_file_ListView.Items.Count > 0 then
+    begin
+      final_source_file_ListView.Items[0].Selected := True;
+      final_source_file_ListView.Items[0].Focused := True;
+    end;
   finally
     func_model.Free;
+    MainPageControl.Enabled := True;
   end;
 end;
+
 (* ============================================================================
  * Open the Pascal / C prototype rule documents
  * ============================================================================ *)
@@ -632,7 +557,7 @@ var
   ph, fn: U_String;
 begin
   ph := umlGetFilePath(ParamStr(0));
-  fn := umlCombineFileName(ph, 'C_code_abi_rule.md');
+  fn := umlCombineFileName(ph, 'C_code_json_abi_rule.md');
   if umlFileExists(fn) then
     OpenDocument(fn.Text);
 end;
@@ -642,7 +567,7 @@ var
   ph, fn: U_String;
 begin
   ph := umlGetFilePath(ParamStr(0));
-  fn := umlCombineFileName(ph, 'pascal_code_abi_rule.md');
+  fn := umlCombineFileName(ph, 'pascal_code_json_abi_rule.md');
   if umlFileExists(fn) then
     OpenDocument(fn.Text);
 end;
@@ -685,23 +610,25 @@ begin
     TSourceLanguage.slPascal:
     begin
       with tpascal_func_decl_tool.CreateFrom_Pascal_Code(SourceCodeEditor.Text) do
-      begin
+      try
         SourceJsonEditor.Text := SaveToJson();
+      finally
         Free;
       end;
     end;
     TSourceLanguage.slC:
     begin
       with tpascal_func_decl_tool.CreateFrom_C_Code(SourceCodeEditor.Text) do
-      begin
+      try
         SourceJsonEditor.Text := SaveToJson();
+      finally
         Free;
       end;
     end;
     else
     begin
       DoStatus('Unsupported language.');
-      exit;
+      Exit;
     end;
   end;
 
@@ -716,35 +643,39 @@ procedure Tcode_decl_to_abi_json_form.FormatSourceClick(Sender: TObject);
 var
   Report: TPascalStringList;
 begin
-  case CurrentSourceLanguage of
-    TSourceLanguage.slPascal:
-    begin
-      Report := TPascalStringList.Create;
-      with tpascal_func_decl_tool.CreateFrom_Pascal_Code(SourceCodeEditor.Text) do
+  Report := TPascalStringList.Create;
+  try
+    case CurrentSourceLanguage of
+      TSourceLanguage.slPascal:
       begin
-        SourceCodeEditor.Text := decl_to_pascal(Report);
-        Free;
+        with tpascal_func_decl_tool.CreateFrom_Pascal_Code(SourceCodeEditor.Text) do
+        try
+          SourceCodeEditor.Text := decl_to_pascal(Report);
+        finally
+          Free;
+        end;
+      end;
+      TSourceLanguage.slC:
+      begin
+        with tpascal_func_decl_tool.CreateFrom_C_Code(SourceCodeEditor.Text) do
+        try
+          SourceCodeEditor.Text := decl_to_c(Report);
+        finally
+          Free;
+        end;
+      end;
+      else
+      begin
+        DoStatus('Unsupported language.');
+        Exit;
       end;
     end;
-    TSourceLanguage.slC:
-    begin
-      Report := TPascalStringList.Create;
-      with tpascal_func_decl_tool.CreateFrom_C_Code(SourceCodeEditor.Text) do
-      begin
-        SourceCodeEditor.Text := decl_to_c(Report);
-        Free;
-      end;
-    end;
-    else
-    begin
-      DoStatus('Unsupported language.');
-      exit;
-    end;
-  end;
 
-  DoStatus(Report.AsText);
-  DoStatus('All code rebuilt: only top-level functions preserved.');
-  DisposeObject(Report);
+    DoStatus(Report.AsText);
+    DoStatus('All code rebuilt: only top-level functions preserved.');
+  finally
+    DisposeObject(Report);
+  end;
 end;
 
 procedure Tcode_decl_to_abi_json_form.FormClose(Sender: TObject; var CloseAction: TCloseAction);
@@ -777,8 +708,8 @@ end;
  *
  * This tool is a pure code generator; it does not start any LingoFuse
  * service of its own.
- *   - Create no longer calls TCompute.RunC_NP(Do_Init_Th)
- *   - Destroy no longer calls free_pascal_agent_service()
+ *   - Create does not call TCompute.RunC_NP(Do_Init_Th)
+ *   - Destroy does not call free_pascal_agent_service()
  *   - No LF_SetOptionEx / LF___.LF_Shutdown from here
  * ============================================================================ *)
 constructor Tcode_decl_to_abi_json_form.Create(AOwner: TComponent);
@@ -801,8 +732,9 @@ end;
 
 procedure Tcode_decl_to_abi_json_form.StartMcpService;
 begin
-  LF_SetOptionEx('WaitConnect', 'True');
-  LF_SetOptionEx('Overlap_Connection', 'True');
+  LF_Set_Opt_Quiet(True);
+  LF_Set_Opt_Wait_Connection_ReadyOk(True);
+  LF_Set_Opt_Overlap_Connection(True);
   code_decl_to_json_abi_mcp_api_tool_provider_unit.Execute_And_Reg_all();
 end;
 
