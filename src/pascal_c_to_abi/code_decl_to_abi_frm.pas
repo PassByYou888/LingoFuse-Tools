@@ -6,11 +6,13 @@ unit code_decl_to_abi_frm;
 interface
 
 uses
-  Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls, LazHelpHTML, ComCtrls, Menus, AsyncProcess, ActnList, LCLIntf, PairSplitter, SynHighlighterCpp,
-  SynHighlighterAny, lingofuse_helper, Z.Core, Z.PascalStrings, Z.UPascalStrings, Z.Parsing, Z.Expression, Z.ListEngine, Z.Notify, Z.UnicodeMixedLib, Z.Status, Z.MemoryStream,
-  Z.Json, Z.HashList.Templet, SynEdit, SynHighlighterPas, SynEditMiscClasses, SynHighlighterJScript, lingofuse_import, pas_abi_call_generator_tool, pas_abi_service_generator_tool,
-  py_abi_call_generator_tool, py_abi_service_generator_tool, cpp_abi_call_generator_tool, cpp_abi_service_generator_tool, code_decl_to_abi_mcp_api_tool_provider_unit,
-  cpp_abi_cmake_generator_tool, csharp_abi_call_generator_tool, csharp_abi_service_generator_tool, csharp_abi_test_generator_tool, Z.Pascal_Func_Model, Z.Pascal_Func_Tool;
+  Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls, LazHelpHTML, ComCtrls, Menus,
+  AsyncProcess, ActnList, LCLIntf, PairSplitter, SynHighlighterCpp, SynHighlighterAny,
+  SynEdit, SynHighlighterPas, SynEditMiscClasses, SynHighlighterJScript,
+  lingofuse_helper, Z.Core, Z.PascalStrings, Z.UPascalStrings, Z.Parsing, Z.Expression,
+  Z.ListEngine, Z.Notify, Z.UnicodeMixedLib, Z.Status, Z.MemoryStream,
+  Z.Json, Z.HashList.Templet, lingofuse_import, code_decl_to_abi_registry, code_decl_to_abi_mcp_api_tool_provider_unit,
+  Z.Pascal_Func_Model, Z.Pascal_Func_Tool;
 
 type
 
@@ -347,7 +349,9 @@ procedure Tcode_decl_to_abi_form.GenerateSourceButtonClick(Sender: TObject);
 var
   func_model: TPascal_Func_Model;
   l: TPascalStringList;
-  app_dir, last_fn: TP_String;
+  app_dir, last_fn, out_name: TP_String;
+  i: integer;
+  Entry: PGeneratorEntry;
 
   procedure SaveSynEditCode(edit: TSynEdit; fn: string);
   var
@@ -383,6 +387,7 @@ var
   end;
 
 begin
+  Page_Main.Enabled := False;
   Page_Main.ActivePage := Tab_FinalSource;
   final_source_file_ListView.Items.Clear;
   final_Source_edit.Text := '';
@@ -393,6 +398,7 @@ begin
   app_dir.Text := umlCombinePath(umlGetFilePath(ParamStr(0)), func_model.UnitName);
   umlCreateDirectory(app_dir.Text);
 
+  // ---- Save the intermediate artefacts ------------------------------
   if Edit_Source.Lines.Count > 0 then
   begin
     if current_language = TSourceLanguage.slC then
@@ -407,201 +413,32 @@ begin
   if Edit_ModelJson.Lines.Count > 0 then
     SaveSynEditCode(Edit_ModelJson, 'source_model.json');
 
-  { =================================================================== }
-  { Pascal backend                                                       }
-  { =================================================================== }
-
-  { Pascal service code + README }
-  l := GenerateABIServicePascalCode(func_model);
-  if l <> nil then
+  // ---------------------------------------------------------------------------
+  // Drive every registered generator through the central registry.
+  // The form no longer references any language backend directly.
+  // Any unit that registers a generator in its initialization section
+  // participates automatically.
+  // ---------------------------------------------------------------------------
+  for i := 0 to GetGeneratorCount - 1 do
   begin
-    SaveCode(func_model.UnitName + '_abi_service_unit.pas');
-    disposeObjectAndNil(l);
-  end;
+    Entry := GetGeneratorByIndex(i);
+    if Entry = nil then Continue;
+    if not Assigned(Entry^.Func) then Continue;
 
-  l := GenerateABIServicePascalReadme(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service_pascal.md');
-    disposeObjectAndNil(l);
-  end;
+    l := InvokeGenerator(Entry, func_model);
+    if l = nil then Continue;
 
-  { Pascal call code + README }
-  l := GenerateABICallPascalCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call_unit.pas');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABICallPascalReadme(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call_pascal.md');
-    disposeObjectAndNil(l);
-  end;
-
-  { =================================================================== }
-  { Python backend                                                       }
-  { =================================================================== }
-
-  { Python service code + README }
-  l := GenerateABIServicePyCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service.py');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABIServicePyReadme(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service_python.md');
-    disposeObjectAndNil(l);
-  end;
-
-  { Python call code + README }
-  l := GenerateABICallPyCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call.py');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABICallPyReadme(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call_python.md');
-    disposeObjectAndNil(l);
-  end;
-
-  { =================================================================== }
-  { C++ backend                                                          }
-  { =================================================================== }
-
-  { C++ service (.cpp + .hpp + README) }
-  l := GenerateABIServiceCppCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service.cpp');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABIServiceHppCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service.hpp');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABIServiceCppReadme(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service_cpp.md');
-    disposeObjectAndNil(l);
-  end;
-
-  { C++ call (.cpp + .hpp + README) }
-  l := GenerateABICallCppCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call.cpp');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABICallHppCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call.hpp');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABICallCppReadme(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call_cpp.md');
-    disposeObjectAndNil(l);
-  end;
-
-  { C++ CMake script + test programs }
-  l := GenerateABICmakeScript(func_model);
-  if l <> nil then
-  begin
-    SaveCode('CMakeLists.txt');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABIServiceTestProgram(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service_main.cpp');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABICallTestProgram(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call_main.cpp');
-    disposeObjectAndNil(l);
-  end;
-
-  { =================================================================== }
-  { C# backend                                                           }
-  { =================================================================== }
-
-  { C# service code + README }
-  l := GenerateABIServiceCsharpCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service.cs');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABIServiceCsharpReadme(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service_csharp.md');
-    disposeObjectAndNil(l);
-  end;
-
-  { C# call code + README }
-  l := GenerateABICallCsharpCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call.cs');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABICallCsharpReadme(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call_csharp.md');
-    disposeObjectAndNil(l);
-  end;
-
-  { C# test programs (service test + call test + test README) }
-  l := GenerateABIServiceMainTestCsharpCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_service_main_test___.cs');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABICallMainTestCsharpCode(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_call_main_test___.cs');
-    disposeObjectAndNil(l);
-  end;
-
-  l := GenerateABICsharpTestReadme(func_model);
-  if l <> nil then
-  begin
-    SaveCode(func_model.UnitName + '_abi_test_csharp.md');
-    disposeObjectAndNil(l);
+    try
+      out_name := ResolveFileName(Entry^.FileNameTemplate.Text, func_model.UnitName.Text);
+      SaveCode(out_name.Text);
+    finally
+      DisposeObjectAndNil(l);
+    end;
+    Application.ProcessMessages;
   end;
 
   func_model.Free;
+  Page_Main.Enabled := True;
 end;
 
 procedure Tcode_decl_to_abi_form.final_source_file_ListViewSelectItem(Sender: TObject; Item: TListItem; Selected: boolean);

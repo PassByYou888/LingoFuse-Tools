@@ -1,277 +1,267 @@
 # code_decl_to_abi — User Guide
 
-> **Purpose**: This is the **end-to-end user guide** for `code_decl_to_abi`. It covers the full workflow, in the order you actually perform it:
+> **Purpose**: `code_decl_to_abi` 的端到端用户指南。覆盖完整工作流，按实际操作顺序编排：
 >
-> 1. **Use the tool** — install it, feed it a Pascal unit or a C header, and produce cross-language ABI source code.
-> 2. **Use the generated code** — compile it, wire it into your application, set up the runtime environment, and run a service/caller pair.
+> 1. **使用工具** — 安装、输入 Pascal 单元或 C 头文件、生成跨语言 ABI 源码。
+> 2. **使用生成的代码** — 编译、接入应用、配置运行时环境、运行 service/caller 对。
 >
-> **Audience**: Application developers, integration engineers, and AI agents who want to expose a set of Pascal/C declarations as cross-language binary-ABI services — without reading the tool's source.
+> **Audience**: 应用开发者、集成工程师，以及希望通过工具调用驱动该工具的 AI Agent。
 >
-> **Companion documents**:
-> - `code_decl_to_abi_OPERATIONS.md` — internals, contracts, and how to extend the tool.
-> - `pascal_code_abi_rule.md` — how to write Pascal declarations that the tool can parse.
-> - `C_code_abi_rule.md` — how to write C headers that the tool can parse.
-> - `code_decl_to_json_abi_USER_GUIDE.md` — the HTTP/JSON sibling tool.
+> **Companion documents**: `code_decl_to_abi_OPERATIONS.md`（内部实现与扩展方法），`pascal_code_abi_rule.md` 与 `C_code_abi_rule.md`（输入契约），`code_decl_to_json_abi_USER_GUIDE.md`（HTTP/JSON 兄弟工具）。
 >
-> **Language**: English throughout, both in this document and in every artifact produced by the tool.
+> **Language**: 本指南及工具生成的所有源代码与脚本均使用英文。
 
 ---
 
-## Table of Contents
+## 目录
 
-**Part I — Using the Tool**
+**Part I — 使用工具**
 
-- [Chapter 1  What This Tool Does](#chapter-1--what-this-tool-does)
-- [Chapter 2  Why Binary ABI? The Serialization Efficiency Story](#chapter-2--why-binary-abi-the-serialization-efficiency-story)
-- [Chapter 3  Language Support: Today and Tomorrow](#chapter-3--language-support-today-and-tomorrow)
-- [Chapter 4  Install and Build the Tool](#chapter-4--install-and-build-the-tool)
-- [Chapter 5  Prepare the Input Source](#chapter-5--prepare-the-input-source)
-- [Chapter 6  Generate Code Through the GUI](#chapter-6--generate-code-through-the-gui)
-- [Chapter 7  Generate Code Through the CLI](#chapter-7--generate-code-through-the-cli)
-- [Chapter 8  Generate Code Through an AI Agent (MCP)](#chapter-8--generate-code-through-an-ai-agent-mcp)
-- [Chapter 9  Embed the Generator Programmatically](#chapter-9--embed-the-generator-programmatically)
+- [Chapter 1  工具概览](#chapter-1--工具概览)
+- [Chapter 2  为什么使用二进制 ABI：序列化效率](#chapter-2--为什么使用二进制-abi序列化效率)
+- [Chapter 3  语言支持](#chapter-3--语言支持)
+- [Chapter 4  安装与构建](#chapter-4--安装与构建)
+- [Chapter 5  准备输入源码](#chapter-5--准备输入源码)
+- [Chapter 6  通过 GUI 生成代码](#chapter-6--通过-gui-生成代码)
+- [Chapter 7  通过 CLI 生成代码](#chapter-7--通过-cli-生成代码)
+- [Chapter 8  通过 AI Agent (MCP) 生成代码](#chapter-8--通过-ai-agent-mcp-生成代码)
+- [Chapter 9  程序化嵌入生成器](#chapter-9--程序化嵌入生成器)
 
-**Part II — Using the Generated Code**
+**Part II — 使用生成的代码**
 
-- [Chapter 10  What the Tool Produces, and What Each File Is For](#chapter-10--what-the-tool-produces-and-what-each-file-is-for)
-- [Chapter 11  Read the Companion Markdown First](#chapter-11--read-the-companion-markdown-first)
-- [Chapter 12  Consuming the Pascal Output](#chapter-12--consuming-the-pascal-output)
-- [Chapter 13  Consuming the Python Output](#chapter-13--consuming-the-python-output)
-- [Chapter 14  Consuming the C++ Output](#chapter-14--consuming-the-c-output)
-- [Chapter 15  Consuming the C# Output](#chapter-15--consuming-the-c-output)
-- [Chapter 16  Setting Up the Runtime Environment](#chapter-16--setting-up-the-runtime-environment)
-- [Chapter 17  Running an End-to-End Service/Caller Pair](#chapter-17--running-an-end-to-end-servicecaller-pair)
+- [Chapter 10  产出物清单与职责](#chapter-10--产出物清单与职责)
+- [Chapter 11  生成文件的目录布局与命名](#chapter-11--生成文件的目录布局与命名)
+- [Chapter 12  消费各语言产出](#chapter-12--消费各语言产出)
+- [Chapter 13  运行时环境配置](#chapter-13--运行时环境配置)
+- [Chapter 14  端到端运行 Service/Caller 对](#chapter-14--端到端运行-servicecaller-对)
 
-**Part III — Reference**
+**Part III — 参考**
 
-- [Chapter 18  Type System: What Is Supported and What Is Dropped](#chapter-18--type-system-what-is-supported-and-what-is-dropped)
-- [Chapter 19  The Wire Protocol](#chapter-19--the-wire-protocol)
-- [Chapter 20  Troubleshooting](#chapter-20--troubleshooting)
-- [Chapter 21  Known Limitations and Roadmap](#chapter-21--known-limitations-and-roadmap)
+- [Chapter 15  类型系统](#chapter-15--类型系统)
+- [Chapter 16  线协议](#chapter-16--线协议)
+- [Chapter 17  故障排查](#chapter-17--故障排查)
+- [Chapter 18  已知限制与路线图](#chapter-18--已知限制与路线图)
 
 ---
 
-# Part I — Using the Tool
+# Part I — 使用工具
 
 ---
 
-## Chapter 1  What This Tool Does
+## Chapter 1  工具概览
 
-`code_decl_to_abi` is the **binary-ABI code generator** of the LingoFuse toolchain. It reads a **declaration file** and writes **matching service-side and caller-side source code** in one or more target languages.
+`code_decl_to_abi` 是 LingoFuse 工具链中的**二进制 ABI 代码生成器**。它读取一份**声明文件**，输出一组**匹配的 service 侧与 caller 侧源码**，覆盖多种目标语言。
 
-**Input**: a complete Pascal unit or a complete C header.
+**输入**：一份完整的 Pascal unit 或一份完整的 C header。
 
-**Output**: for each requested target language:
-- a **service library** that registers the declared routines as remote-callable APIs;
-- a **caller library** that exposes one typed function per routine;
-- a **companion Markdown README** per artifact — this is the artifact's own build and deployment manual (see Chapter 11);
-- for C++ and C#, a small amount of build scaffolding (a CMake script, or two console test programs).
+**输出**（每个请求的目标语言一套）：
 
-**One-line summary**: give it a declaration file; it lays out a binary-ABI RPC surface that any supported language can call.
+- 一份 **service 侧库**：将声明的 routine 注册为可远程调用的 API；
+- 一份 **caller 侧库**：为每个 routine 暴露一个强类型函数；
+- 对大部分语言，附加**测试程序**（`*_test*` 或 `*_main*`）；
+- 对大部分非原生语言，附加**测试环境初始化脚本**（`setup_*_tests.ps1`）以及**构建脚本**（`CMakeLists.txt`、`pom.xml`、`Project.toml`、`build.zig`、`build.zig.zon`、`runtests.jl` 等）。
 
-The tool has **three frontends sharing one generator backend**:
+**一句话概括**：给它一份声明文件，它铺开一个任意受支持语言都能调用的二进制 ABI RPC 面。
 
-| Frontend | File | Audience |
-|----------|------|----------|
-| **GUI** | `code_decl_to_abi_frm.pas` | Interactive desktop use |
-| **CLI** | `code_decl_to_abi_cmdline.pas` | Scripts, CI, automation |
-| **MCP** | `code_decl_to_abi_mcp_api_tool_provider_unit.pas` | AI agents via the LingoFuse beacon |
+**新版本变化**：
 
-All three drive the **same generator functions**; the GUI and MCP paths actually share the same button handlers, so they can never drift apart.
+- **不再生成任何 README/`.md` 文档**：所有构建与运行说明都由本指南承载，或由生成脚本自身携带（脚本内嵌帮助与下一步提示）。
+- **目标语言大幅扩展**：从原来的 4 种扩展到 **17 种**（见 Chapter 3）。
+- **测试与构建脚本内嵌**：除了代码，每种语言还附带该语言的测试程序与一套 `setup_*_tests.ps1` 环境初始化脚本；语言生态特有的构建文件（CMake / Maven / Cargo / Pub / rebar3 / gcc 编译脚本）由生成器一并产出。
 
-This guide covers all three, then explains — in Part II — how to take the produced artifacts and turn them into a running service/caller pair.
+工具拥有**三个共享同一后端的前端**：
 
----
+| 前端 | 文件 | 受众 |
+|------|------|------|
+| **GUI** | `code_decl_to_abi_frm.pas` | 桌面交互 |
+| **CLI** | `code_decl_to_abi_cmdline.pas` | 脚本 / CI / 自动化 |
+| **MCP** | `code_decl_to_abi_mcp_api_tool_provider_unit.pas` | 通过 LingoFuse beacon 接入的 AI Agent |
 
-## Chapter 2  Why Binary ABI? The Serialization Efficiency Story
-
-This is why the tool exists alongside its JSON sibling. The binary ABI path is **substantially more efficient** than the HTTP/JSON path for high-concurrency workloads.
-
-### 2.1 Compact, typed payloads — no text encoding overhead
-
-In the ABI wire format every parameter is written as its **native machine representation**:
-
-| Type family | Encoding on the wire |
-|-------------|----------------------|
-| Integers | Little-endian fixed-width binary (1, 2, 4, or 8 bytes) |
-| Floats | IEEE 754 (`Single` = 4 bytes, `Double` = 8 bytes, `Extended` = 10 bytes) |
-| Strings | Raw UTF-8 bytes followed by a single `NUL` terminator |
-
-Compare with JSON, which must **stringify every number** (a 64-bit integer becomes ~8–20 ASCII bytes plus a separator), **escape every quote and backslash**, and **add structural punctuation** (braces, brackets, colons, commas).
-
-For a payload like `{a: int64, b: int64, c: string}`:
-
-- **Binary ABI**: `8 + 8 + (len(c) + 1)` bytes, plus negligible framing.
-- **JSON**: `{"a":...,"b":...,"c":"..."}` — typically 4–10× larger for numeric-heavy payloads, and worse for arrays of numbers.
-
-**Practical consequence**: for the same network bandwidth, the ABI path carries several times more logical requests per second.
-
-### 2.2 No parse/format cost on the hot path
-
-JSON requires:
-
-- **On send**: `IntToStr`, `FloatToStr`, string escaping, structural concatenation.
-- **On receive**: tokenization, number parsing, string unescaping, structural validation.
-
-Each of these allocates and touches memory. Under high concurrency these allocations become the dominant cost — they fragment the heap, pressure the GC (in managed languages), and serialize on allocator locks.
-
-Binary ABI writes and reads **directly into pre-allocated buffers**:
-
-- Sending an `int64` is a single 8-byte `Move`.
-- Sending a string is a `Move` plus a `NUL` byte.
-- Receiving is the mirror operation.
-
-There is **no per-field allocation** for scalars, and the only allocation for strings is the final destination string itself.
-
-### 2.3 Zero-copy in the fast path
-
-The generated ABI code uses LingoFuse's **direct buffer access**:
-
-- `LF_WriteBuffer` / `LF_ReadBuffer` operate on the handle's internal buffer.
-- The generated Pascal service uses `LF_ReadStringBytes` and `LF_WriteStringBytes` for strings, reading and writing **UTF-8 bytes directly** without an intermediate `string`-shaped allocation.
-- For fixed-size fields (`Int64`, `Double`, …), the generated code reads/writes a single stack local and copies it in one `Move`.
-
-The hot path never materializes a JSON AST: no tree to build, no `Variant` to box, no text to scan.
-
-### 2.4 Deterministic, allocation-light under load
-
-| Concern | Binary ABI | HTTP/JSON |
-|---------|-----------|-----------|
-| Per-scalar allocation | 0 | 1+ (boxed number or string fragment) |
-| Per-string allocation | 1 (final) | 2–4 (escape buffer, fragment, final) |
-| Temporary AST | none | yes (JSON object tree) |
-| UTF-8 re-encoding | none (raw bytes) | yes (escape → unescape round-trip) |
-| Text parsing | none | yes (lexer + number parser) |
-| Framing | fixed binary header | variable-length text envelope |
-
-The ABI path scales more gracefully as concurrency rises. This is exactly the profile you want for **service meshes, microservice backplanes, and agent tool registries**.
-
-### 2.5 When to choose ABI over JSON
-
-Choose `code_decl_to_abi` (binary ABI) when:
-
-- You control both ends and they speak LingoFuse natively.
-- Payloads are numeric-heavy or binary-heavy.
-- You are running a high-concurrency service with tight latency budgets.
-- You want to avoid the fixed cost of JSON parsing per call.
-
-Choose `code_decl_to_json_abi` (HTTP/JSON) when:
-
-- One end is a browser, an external HTTP client, or a language without a LingoFuse binding.
-- You need the payloads to be human-readable or debuggable with `curl`.
-- You are bridging to third-party HTTP APIs.
-
-The two tools share the same input format, the same intermediate model, and the same type system; they differ only in the **wire format**.
+三个前端驱动**同一批生成器函数**；GUI 与 MCP 路径共用同一套按钮处理程序，不会出现逻辑分叉。
 
 ---
 
-## Chapter 3  Language Support: Today and Tomorrow
+## Chapter 2  为什么使用二进制 ABI：序列化效率
 
-### 3.1 Current status
+这是本工具相对 JSON 兄弟工具存在的核心理由：**在高并发场景下，二进制 ABI 路径显著更高效**。
 
-The tool ships with **four target languages**, each with a service side and a caller side:
+### 2.1 紧凑、强类型的载荷 — 没有文本编码开销
 
-| Target language | Service side | Caller side | Companion README | Test scaffolding |
-|-----------------|:------------:|:-----------:|:----------------:|:----------------:|
-| **Pascal** | ✅ | ✅ | ✅ | In README |
-| **Python** | ✅ | ✅ | ✅ | `__main__` block inside the module |
-| **C++** | ✅ (`.hpp` + `.cpp`) | ✅ (`.hpp` + `.cpp`) | ✅ | CMake + two `main.cpp` |
-| **C#** | ✅ (`.cs`) | ✅ (`.cs`) | ✅ | Two console programs + test README |
+在 ABI 线格式中，每个参数都以**原生机器表示**写入：
 
-Source languages today: **Pascal** and **C**.
+| 类型族 | 线格式编码 |
+|--------|-------------|
+| 整数 | 小端定宽二进制（1 / 2 / 4 / 8 字节） |
+| 浮点 | IEEE 754（`Single` 4 字节、`Double` 8 字节、`Extended` 10 字节） |
+| 字符串 | 原始 UTF-8 字节 + 一个 NUL 终止符 |
 
-### 3.2 The backend is designed for unbounded extension
+对比 JSON：
 
-Adding a new target language is a **mechanical process**, not an architectural change. The steps are documented in `code_decl_to_abi_OPERATIONS.md` Chapter 14 and are identical for every language:
+- 需要把每个数字**转成文本**（8 字节 `Int64` 通常变成 8–20 个 ASCII 字节加分隔符）；
+- 需要**转义**每个引号、每个反斜杠；
+- 需要**结构性标点**（`{}`、`[]`、`:`、`,`）。
 
-1. Create two generator units: `<lang>_abi_service_generator_tool.pas` and `<lang>_abi_call_generator_tool.pas`.
-2. Provide a type mapping table from the three ABI families (integer / float / string) to the target language's native types.
-3. Register the new units in the main program, the CLI dispatcher, the GUI form, and the MCP tool provider.
-4. Update the CLI's `Detect_Target_Lang` and help text.
-5. Update the MCP `regCount` assertion.
+### 2.2 热路径上没有任何解析/格式化成本
 
-**There is no ceiling.** Any language with (a) a C-ABI-compatible FFI, (b) a runtime that speaks LingoFuse's wire protocol, and (c) a way to marshal the three ABI families is a candidate.
+JSON 在发送端需要 `IntToStr`/`FloatToStr`/转义/拼接，在接收端需要词法分析/数字解析/反转义/结构校验。每次都要分配内存，高并发时这些分配成为主要成本。
 
-### 3.3 Planned expansion
+二进制 ABI **直接写入预分配缓冲区**：
 
-The roadmap is intentionally open-ended. Candidate language families:
+- 发送一个 `Int64` 就是一次 8 字节 `Move`；
+- 发送一个字符串就是一次 `Move` + 一个 NUL 字节；
+- 接收是镜像操作。
 
-- **Systems**: Rust, Go, Zig, Nim, D, Swift, Kotlin/Native.
-- **JVM**: Java, Kotlin, Scala (via JNI or JNA).
-- **.NET**: F#, VB.NET (via P/Invoke).
-- **Functional**: OCaml, Haskell, F#, Elixir, Erlang.
-- **Scripting**: Ruby, PHP, Perl, Lua, Julia.
-- **Domain-specific**: R, MATLAB, Wolfram Language, custom DSLs.
-- **Embedded**: MicroPython, embedded C, Ada, SPARK.
+标量**每个字段零分配**；字符串**只为最终目标字符串分配一次**。
 
-**The user-facing contract does not change** when a language is added: the same CLI flags, the same GUI workflow, and the same MCP tools continue to work.
+### 2.3 热路径中的零拷贝
+
+生成的 ABI 代码使用 LingoFuse 的**直接缓冲区访问**：
+
+- `LF_WriteBuffer` / `LF_ReadBuffer` 直接操作 handle 内部缓冲区；
+- 生成的 Pascal service 用 `LF_ReadStringBytes` / `LF_WriteStringBytes` **直接读写 UTF-8 字节**，不产生中间字符串；
+- 定宽字段（`Int64`、`Double`、……）读/写一个栈局部变量，一次 `Move` 搞定。
+
+热路径从不构建 JSON AST：没有树、没有 `Variant` 装箱、没有文本扫描。
+
+### 2.4 高并发下的确定性、低分配
+
+| 项目 | 二进制 ABI | HTTP/JSON |
+|------|-----------|-----------|
+| 每标量分配 | 0 | 1+（装箱数字或文本片段） |
+| 每字符串分配 | 1（最终目标） | 2–4（转义缓冲、片段、最终） |
+| 临时 AST | 无 | 有（JSON 对象树） |
+| UTF-8 二次编码 | 无（原始字节） | 有（转义 → 反转义往返） |
+| 文本解析 | 无 | 有（词法分析 + 数字解析） |
+| 分帧 | 定宽二进制头 | 变长文本信封 |
+
+并发数上升时，ABI 路径伸缩更优雅。这正是**service mesh、微服务背板、Agent 工具注册表**需要的画像。
+
+### 2.5 何时选择 ABI 而非 JSON
+
+选择 `code_decl_to_abi`（二进制 ABI）：
+
+- 两端都由你控制，且都原生使用 LingoFuse；
+- 载荷偏重数值或二进制；
+- 高并发、延迟预算紧张；
+- 希望避免每次调用的固定 JSON 解析成本。
+
+选择 `code_decl_to_json_abi`（HTTP/JSON）：
+
+- 一端是浏览器、外部 HTTP 客户端，或没有 LingoFuse 绑定的语言；
+- 载荷需可读、可用 `curl` 调试；
+- 需要桥接第三方 HTTP API。
+
+两个工具共享相同的输入格式、中间模型和类型系统，仅在**线格式**上不同。
 
 ---
 
-## Chapter 4  Install and Build the Tool
+## Chapter 3  语言支持
 
-### 4.1 Compiler and platform
+### 3.1 当前状态
 
-| Item | Requirement |
-|------|-------------|
-| Compiler | Free Pascal 3.2+ or Delphi 10.4+ |
-| Language mode | Delphi mode (`{$mode delphi}`) |
-| Source encoding | UTF-8 (`{$CODEPAGE UTF8}`) |
-| Platform | Windows / Linux / macOS |
+工具当前随附 **17 种目标语言**，每种均含 service 侧、caller 侧、测试程序与一套 `setup_*_tests.ps1` 环境初始化脚本。
 
-### 4.2 Runtime dependencies of the **tool**
+| # | 目标语言 | `--lang` ID | Service | Caller | Test 程序 | Setup 脚本 | 生态构建文件 |
+|---|----------|------------|:-------:|:------:|:---------:|:----------:|--------------|
+| 1 | **Pascal** | `pascal` | ✅ | ✅ | ✅ | —（由 test unit 自带） | — |
+| 2 | **Python** | `python` | ✅ | ✅ | ✅ | —（模块含 `__main__`） | — |
+| 3 | **C++** | `cpp` | ✅ | ✅ | ✅ | — | `CMakeLists.txt` |
+| 4 | **C#** | `csharp` | ✅ | ✅ | ✅ | — | — |
+| 5 | **Rust** | `rust` | ✅ | ✅ | ✅ | `setup_rust_tests.ps1` | `Cargo.toml` |
+| 6 | **Go** | `go` | ✅ | ✅ | ✅ | `setup_go_tests.ps1` | `go.mod` / `go.sum` |
+| 7 | **Java** | `java` | ✅ | ✅ | ✅ | `setup_java_tests.ps1` + `run_java_service.ps1` / `run_java_call.ps1` | `pom.xml` |
+| 8 | **Node.js** | `nodejs` | ✅ | ✅ | ✅ | `setup_node_tests.ps1` | `package.json` |
+| 9 | **TypeScript** | `http_ts` | ✅ | ✅ | ✅ | `setup_ts_tests.ps1` | `tsconfig.json` / `package.json` |
+| 10 | **Erlang** | `erlang` | ✅ | ✅ | ✅ | `setup_erlang_tests.ps1` | `rebar.config` / `.app.src` |
+| 11 | **Julia** | `julia` | ✅ | ✅ | ✅ | `setup_julia_tests.ps1` + `run_julia_service.ps1` / `run_julia_call.ps1` | `Project.toml` / `runtests.jl` |
+| 12 | **Zig** | `zig` | ✅ | ✅ | ✅ | `setup_zig_tests.ps1` | `build.zig` / `build.zig.zon` |
+| 13 | **Swift** | `swift` | ✅ | ✅ | ✅ | `setup_swift_tests.ps1` | `Package.swift` |
+| 14 | **Ruby** | `ruby` | ✅ | ✅ | ✅ | `setup_ruby_tests.ps1` | — |
+| 15 | **Fortran** | `fortran` | ✅ | ✅ | ✅ | `setup_fortran_tests.ps1` | —（gcc/gfortran 直接编译） |
+| 16 | **Dart** | `dart` | ✅ | ✅ | ✅ | `setup_dart_tests.ps1` | `pubspec.yaml` |
+| 17 | **R** | `r` | ✅ | ✅ | ✅ | `setup_R_tests.ps1` | — |
 
-These are needed only at **tool runtime**, not at generation time:
+**Source languages**：`pascal`、`c`。
 
-| Dependency | Where to place it | Consequence if missing |
-|------------|-------------------|------------------------|
-| `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib` | Same directory as the tool's executable, or system PATH | All `LF_*` calls fail; MCP tool registration is disabled |
-| `pascal_code_abi_rule.md` | Tool executable directory | GUI's "Pascal rule" button does nothing |
-| `C_code_abi_rule.md` | Tool executable directory | GUI's "C rule" button does nothing |
+### 3.2 后端为无限扩展而设计
 
-The **generator itself** does not require the LingoFuse runtime; only the MCP provider (which lives inside the GUI process) needs it.
+新增一种目标语言是**机械流程**，不涉及架构变更：
 
-### 4.3 Build
+1. 新建两个生成器单元：`<lang>_abi_service_generator_tool.pas` 和 `<lang>_abi_call_generator_tool.pas`；
+2. 视需要新增 test 与 setup 生成器；
+3. 提供从三类 ABI 类型族（整数 / 浮点 / 字符串）到该语言原生类型的映射表；
+4. 在主程序、CLI 分发器、GUI 表单、MCP 工具提供者中注册新单元；
+5. 更新 CLI 的 `Detect_Target_Lang_ID` 与帮助文本；
+6. 更新 MCP 的工具注册计数断言。
+
+**没有天花板**：只要目标语言满足 (a) 有 C-ABI 兼容的 FFI、(b) 有能说 LingoFuse 线协议的运行时、(c) 能编组三类 ABI 类型，它就是候选。
+
+---
+
+## Chapter 4  安装与构建
+
+### 4.1 编译器与平台
+
+| 项目 | 要求 |
+|------|------|
+| 编译器 | Free Pascal 3.2+ 或 Delphi 10.4+ |
+| 语言模式 | Delphi 模式（`{$mode delphi}`） |
+| 源码编码 | UTF-8（`{$CODEPAGE UTF8}`） |
+| 平台 | Windows / Linux / macOS |
+
+### 4.2 **工具自身**的运行时依赖
+
+仅在**工具运行时**需要，生成阶段不需要：
+
+| 依赖 | 放置位置 | 缺失后果 |
+|------|----------|----------|
+| `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib` | 工具可执行文件同目录，或系统 PATH | 所有 `LF_*` 调用失败；MCP 工具注册被禁用 |
+| `pascal_code_abi_rule.md` | 工具可执行文件目录 | GUI 的 "Pascal rule" 按钮无效 |
+| `C_code_abi_rule.md` | 工具可执行文件目录 | GUI 的 "C rule" 按钮无效 |
+
+**生成器本身不需要 LingoFuse 运行时**，只有嵌入在 GUI 进程里的 MCP 提供者需要。
+
+### 4.3 构建
 
 ```bash
 lazbuild -B code_decl_to_abi.lpi
 ```
 
-The tool is compiled as a **console-subsystem** application. This is deliberate:
+工具以**控制台子系统**编译。这样做是刻意的：
 
-- CLI mode produces stdout output correctly.
-- GUI mode still works; the console window is hidden automatically when no CLI argument is present.
+- CLI 模式下 stdout 输出正常；
+- GUI 模式仍工作；无 CLI 参数时控制台窗口自动隐藏。
 
-### 4.4 Verify the build
+### 4.4 验证构建
 
 ```bash
 code_decl_to_abi --help
 ```
 
-Expected: a help page describing the argument forms (see Chapter 7). If the help page prints correctly, the tool is ready.
+预期：输出帮助页（见 Chapter 7）。如果帮助页打印正确，工具就绪。
 
 ---
 
-## Chapter 5  Prepare the Input Source
+## Chapter 5  准备输入源码
 
-Before you run the tool, the input must be written so that the parser can extract the declarations. The rules are different for Pascal and C, and both are strict: **anything that violates the rule is silently dropped**, with a note in the report only.
+在运行工具之前，输入必须能被解析器提取出声明。Pascal 与 C 规则不同，且都很严格：**违反规则的声明会被静默丢弃**，仅在报告里留一行说明。
 
-### 5.1 Pascal input
+### 5.1 Pascal 输入
 
-**Read `pascal_code_abi_rule.md` in full.** It is the parsing contract.
+**完整阅读 `pascal_code_abi_rule.md`** —— 这是解析契约。
 
-Quick summary of the hard rules:
+硬性规则速览：
 
-- The declaration must be **top-level** and in the **`interface`** section. Nested (class/record/interface) routines are dropped.
-- Only these parameter modifiers are accepted: blank, `const`, `in`. **`var` and `out` cause the whole declaration to be dropped.**
-- Only these types are accepted:
-  - Integers: `Integer`, `Int64`, `Cardinal`, `LongInt`, `DWord`, `Word`, `SmallInt`, `Byte`, `UInt64`, `LongWord`
-  - Floats: `Double`, `Single`, `Extended`, `Real`
-  - Strings: `string`, `AnsiString`, `UnicodeString`, `PChar`, `PAnsiChar`, `PWideChar`, `TP_String`, `TPascalString`, `TUPascalString`, `U_String`
-- **Comments** must be **directly above** the declaration. `{ … }` comments must not contain `}` inside — use `(* … *)` if the body contains a closing brace.
-- The return type must be declared **in the signature** (`: T`), not only in the comment.
+- 声明必须**在顶层**、位于 **`interface`** 段。嵌套（类/记录/接口内）的 routine 会被丢弃。
+- 参数修饰符只接受：空、`const`、`in`。**`var` 与 `out` 会导致整条声明被丢弃**。
+- 类型白名单：
+  - 整数：`Integer`、`Int64`、`Cardinal`、`LongInt`、`DWord`、`Word`、`SmallInt`、`Byte`、`UInt64`、`LongWord`
+  - 浮点：`Double`、`Single`、`Extended`、`Real`
+  - 字符串：`string`、`AnsiString`、`UnicodeString`、`PChar`、`PAnsiChar`、`PWideChar`、`TP_String`、`TPascalString`、`TUPascalString`、`U_String`
+- **注释**必须**紧贴**在声明**上方**。`{ … }` 注释内不能有 `}`；如需内嵌花括号请使用 `(* … *)`。
+- 返回类型必须**在签名里声明**（`: T`），不能只在注释里写。
 
-Minimal example:
+最小示例：
 
 ```pascal
 unit MyUnit;
@@ -298,27 +288,27 @@ end;
 end.
 ```
 
-### 5.2 C input
+### 5.2 C 输入
 
-**Read `C_code_abi_rule.md` in full.** It is the parsing contract.
+**完整阅读 `C_code_abi_rule.md`** —— 这是解析契约。
 
-Quick summary of the hard rules:
+硬性规则速览：
 
-- Only **top-level function prototypes ending with `;`** are extracted. Function definitions with bodies are dropped.
-- `struct`, `enum`, `union`, `typedef`, global variables, `#include` lines and other preprocessor directives are dropped.
-- Function-pointer parameters cause the whole declaration to be dropped.
-- Variadic parameters (`...`) cause the whole declaration to be dropped.
-- The following types are accepted:
-  - Integers: `signed char` / `int8_t`, `short` / `int16_t`, `int` / `int32_t`, `long`, `long long` / `int64_t` and their `unsigned` counterparts.
-  - Pointer-width integers: `size_t`, `uintptr_t`, `ssize_t`, `ptrdiff_t`, `intptr_t`.
-  - Floats: `float`, `double`, `long double`.
-  - Strings: `char *`, `const char *`, `char const *`.
-  - `void` (as return type only).
-- **Any other pointer type** — including `void *` — maps to `Pointer`, which the **Pascal-side whitelist rejects**, so the whole declaration is dropped. Use `uint64_t` to carry an address instead.
-- Multi-dimensional arrays are rejected. Single-level `[]` or `[N]` suffixes survive parsing but are then rejected by the Pascal-side whitelist.
-- Comments must be **directly above** the declaration, in `/** … */`, `/* … */`, or `// …` form.
+- 仅提取**顶层函数原型**（以 `;` 结尾）。带函数体的定义被丢弃。
+- `struct`、`enum`、`union`、`typedef`、全局变量、`#include` 和其他预处理指令被丢弃。
+- 函数指针参数会导致整条声明被丢弃。
+- 变参（`...`）会导致整条声明被丢弃。
+- 接受的类型：
+  - 整数：`signed char`/`int8_t`、`short`/`int16_t`、`int`/`int32_t`、`long`、`long long`/`int64_t` 及对应 `unsigned` 变体
+  - 指针宽度整数：`size_t`、`uintptr_t`、`ssize_t`、`ptrdiff_t`、`intptr_t`
+  - 浮点：`float`、`double`、`long double`
+  - 字符串：`char *`、`const char *`、`char const *`
+  - `void`（仅作为返回类型）
+- **其他任何指针类型** —— 包括 `void *` —— 都映射为 `Pointer`，会被 Pascal 侧白名单拒绝，因此整条声明被丢弃。**用 `uint64_t` 传地址**。
+- 多维数组会被拒绝。单层 `[]` / `[N]` 后缀能通过解析，但随即被 Pascal 侧白名单拒绝。
+- 注释必须**紧贴**在声明**上方**，形式为 `/** … */`、`/* … */` 或 `// …`。
 
-Minimal example:
+最小示例：
 
 ```c
 /* my_unit.h */
@@ -337,408 +327,329 @@ int add(int a, int b);
 #endif /* MY_UNIT_H */
 ```
 
-### 5.3 What happens to declarations the tool drops
+### 5.3 被丢弃声明的处置
 
-Anything that violates the rules above is **silently dropped** from the model. The tool writes a line to the `Report` describing the reason. The GUI log shows the report; the CLI prints it to stdout; the MCP `ConvertToXxx` calls also return the failure reason.
+违反上述规则的声明会**被静默丢弃**。工具会向 `Report` 写一条说明。GUI 日志、CLI stdout、MCP `ConvertToXxx` 都可见该原因。
 
-The tool never raises an exception for a dropped declaration — it just won't appear in the output.
+工具对丢弃的声明**不会抛异常** —— 它只是不出现在输出里。
 
 ---
 
-## Chapter 6  Generate Code Through the GUI
+## Chapter 6  通过 GUI 生成代码
 
-Launch the executable with **no arguments** to enter the GUI.
+**无参数**运行可执行文件即进入 GUI。
 
-### 6.1 The five tabs
+### 6.1 五个 Tab
 
 ```
 [Welcome] → [Source Code] → [Source <-> JSON] → [JSON <-> Model] → [Final Source]
 ```
 
-Each tab has a "previous / next" button row at the top and a log panel at the bottom.
+每个 Tab 顶部有「上一步 / 下一步」按钮，底部是日志面板。
 
 ### 6.2 Tab 1 — Welcome
 
-- Explains the tool and the workflow.
-- **Pascal rule doc** opens `pascal_code_abi_rule.md`.
-- **C rule doc** opens `C_code_abi_rule.md`.
-- **Next: Enter source code** moves to Tab 2.
+- 说明工具与工作流；
+- **Pascal rule doc** 打开 `pascal_code_abi_rule.md`；
+- **C rule doc** 打开 `C_code_abi_rule.md`；
+- **Next: Enter source code** 进入 Tab 2。
 
 ### 6.3 Tab 2 — Source Code
 
-This is where you paste the input.
+| 控件 | 作用 |
+|------|------|
+| **Select Language** 标签 | 点击后根据粘贴的文本自动检测源语言 |
+| **Language Selector** 下拉 | `Auto-detect` / `Pascal` / `C` — 手动覆盖 |
+| **Format** | 仅保留顶层声明，丢弃其他 |
+| **Empty unit** | 插入所选语言的最小骨架 |
+| **Test unit** | 插入一份丰富的语法样例 —— 首次运行的好选择 |
+| **Next: Pascal/C → JSON** | 解析当前源码，产生 LV0 JSON，跳到 Tab 3 |
 
-| Control | Effect |
-|---------|--------|
-| **Select Language** label | Click to auto-detect the source language from the pasted text. |
-| **Language Selector** dropdown | `Auto-detect` / `Pascal` / `C` — manual override. |
-| **Format** | Keep only top-level declarations; discard everything else. |
-| **Empty unit** | Insert a minimal skeleton for the selected language. |
-| **Test unit** | Insert a rich syntax sample — good for a first run. |
-| **Next: Pascal/C → JSON** | Parse the current source, produce LV0 JSON, jump to Tab 3. |
+**流程**：
 
-**Procedure**:
-
-1. Paste your Pascal unit or C header.
-2. If you are unsure of the language, click the **Select Language** label to auto-detect.
-3. If the syntax highlighting looks off, pick the language manually.
-4. Click **Next: Pascal/C → JSON**.
+1. 粘贴 Pascal unit 或 C header；
+2. 若不确定语言，点击 **Select Language** 标签自动检测；
+3. 若语法高亮不对，手动选语言；
+4. 点击 **Next: Pascal/C → JSON**。
 
 ### 6.4 Tab 3 — Source ↔ JSON
 
-Shows the **LV0 JSON** (raw parser output).
+展示 **LV0 JSON**（解析器原始输出）。
 
-| Button | Effect |
-|--------|--------|
-| **Back: rebuild code from JSON** | Reverse-rebuild source text from the current JSON, write it back to Tab 2. |
-| **Next: JSON ↔ Model** | Normalize LV0 into LV1 Model, jump to Tab 4. |
+| 按钮 | 作用 |
+|------|------|
+| **Back: rebuild code from JSON** | 从当前 JSON 反向重建源码，写回 Tab 2 |
+| **Next: JSON ↔ Model** | 将 LV0 规范化为 LV1 Model，跳到 Tab 4 |
 
-You may edit the JSON by hand. If the parser mis-classified a type, fix it here and click **Next**.
+可手工编辑 JSON。若解析器误判某类型，可在此修正后点 **Next**。
 
 ### 6.5 Tab 4 — JSON ↔ Model
 
-Shows the **LV1 Model JSON** — the sole input to all generators.
+展示 **LV1 Model JSON** —— 所有生成器的唯一输入。
 
-| Button | Effect |
-|--------|--------|
-| **Back: JSON ↔ Model** | Reverse-restore LV1 to LV0, write back to Tab 3. |
-| **Next: generate source** | Run every generator, jump to Tab 5. |
+| 按钮 | 作用 |
+|------|------|
+| **Back: JSON ↔ Model** | 将 LV1 反向恢复为 LV0，写回 Tab 3 |
+| **Next: generate source** | 运行所有生成器，跳到 Tab 5 |
 
-**At this stage, any routine with an unsupported type has already been dropped.** If a function you expected is missing, this is where you notice it. See Chapter 18.
+**此时，所有类型不受支持的 routine 都已被丢弃。** 若你期望的函数不在，这里就能发现。见 Chapter 15。
 
 ### 6.6 Tab 5 — Final Source
 
-The Final Source tab has one sub-tab per target language and side. When generation completes, all sub-tabs are populated, and **all files are also written to disk** under:
+Final Source Tab 每种语言、每侧各一个子 Tab。生成完成时：
+
+- 所有子 Tab 被填充；
+- **所有文件也被写入磁盘**，位于：
 
 ```
 <exe directory>/<UnitName>/
 ```
 
-The naming follows the convention in Chapter 10.
+命名遵循 Chapter 11 中的约定。
 
-### 6.7 Log panel
+### 6.7 日志面板
 
-The bottom panel is the live `DoStatus` log. It shows:
+底部面板是实时 `DoStatus` 日志。显示：
 
-- Which file was just saved.
-- Any routines skipped during normalization.
-- Any errors thrown by the generators.
-- The registration status of the MCP tool provider.
+- 刚刚保存的文件；
+- 规范化期间被跳过的 routine；
+- 任何生成器抛出的错误；
+- MCP 工具提供者的注册状态。
 
-It is cleared automatically when it exceeds 5000 lines.
+超过 5000 行后自动清空。
 
 ---
 
-## Chapter 7  Generate Code Through the CLI
+## Chapter 7  通过 CLI 生成代码
 
-### 7.1 Trigger condition
+### 7.1 触发条件
 
-Command-line mode fires when **at least one argument** is passed. With no arguments, the tool launches the GUI.
+**至少一个参数**时进入命令行模式。无参数进入 GUI。
 
-### 7.2 Syntax
+### 7.2 语法
 
 ```
 code_decl_to_abi --help
+code_decl_to_abi --list-languages
 code_decl_to_abi <input_file> <output_file>
 code_decl_to_abi --call <input_file> <output_file>
+code_decl_to_abi --lang <id> <input_file> <output_file>
 ```
 
-| Argument | Meaning |
-|----------|---------|
-| `--help` / `-h` / `-?` / `/?` | Print help and exit. Recognized only as the first argument. |
-| `--call` / `-c` | Generate the caller side. Recognized only as the first argument; defaults to service side. |
-| `<input_file>` | Source file. Language is detected from its extension. |
-| `<output_file>` | Output file. Target language is detected from its extension. |
+| 参数 | 含义 |
+|------|------|
+| `--help` / `-h` / `-?` / `/?` | 打印帮助并退出。仅识别为第一个参数 |
+| `--list-languages` / `-ll` | 列出所有注册语言与产物类型。仅识别为第一个参数 |
+| `--call` / `-c` | 生成 caller 侧。仅识别为第一个参数；默认 service 侧 |
+| `--lang` / `-l` | 强制指定目标语言（覆盖扩展名推断） |
+| `<input_file>` | 输入文件。语言按扩展名判断 |
+| `<output_file>` | 输出文件。目标语言按扩展名或 `--lang` 判断 |
 
-### 7.3 Extension → language mapping
+### 7.3 输入语言 → 扩展名
 
-**Source languages**:
-
-| Extension | Source language |
-|-----------|-----------------|
+| 扩展名 | 源语言 |
+|--------|--------|
 | `.pas` / `.pp` / `.p` | Pascal |
 | `.h` / `.hpp` / `.hh` / `.c` / `.cpp` / `.cc` / `.cxx` | C |
 
-**Target languages**:
+### 7.4 目标语言 → 扩展名
 
-| Extension | Target language | Output files |
-|-----------|-----------------|--------------|
-| `.pas` / `.pp` / `.p` | Pascal | one file |
-| `.py` | Python | one file |
-| `.hpp` / `.hh` / `.h` | C++ | `.hpp` + `.cpp` (both written) |
-| `.cpp` / `.cc` / `.cxx` / `.c` | C++ | `.hpp` + `.cpp` (both written) |
-| `.cs` | C# | **the complete set** (see below) |
+| 扩展名 | 目标语言 ID | 产物 |
+|--------|-------------|------|
+| `.pas` / `.pp` / `.p` | `pascal` | service unit / call unit / 两个 test unit |
+| `.py` | `python` | service / call / 两个 test 程序 |
+| `.hpp` / `.hh` / `.h` / `.cpp` / `.cc` / `.cxx` / `.c` | `cpp` | `.hpp` + `.cpp`（服务与调用两侧）+ `CMakeLists.txt` + 两个 `_main.cpp` |
+| `.cs` | `csharp` | service / call / 两个 test 程序 |
+| `.rs` | `rust` | service / call / 两个 test 程序 + `setup_rust_tests.ps1` + `Cargo.toml` |
+| `.go` | `go` | service / call / 两个 test 程序 + `setup_go_tests.ps1` + `go.mod` |
+| `.java` | `java` | service / call / 两个 test 程序 + `setup_java_tests.ps1` + `pom.xml` + 两个 `run_*.ps1` |
+| `.js` | `nodejs` | service / call / 两个 test 程序 + `setup_node_tests.ps1` + `package.json` |
+| `.ts` | `http_ts` | service / call / 两个 test 程序 + `setup_ts_tests.ps1` + `tsconfig.json` |
+| `.erl` | `erlang` | service / call / 两个 `_main.erl` + `setup_erlang_tests.ps1` + `rebar.config` + `.app.src` |
+| `.jl` | `julia` | service / call / 两个 test 程序 + `setup_julia_tests.ps1` + `Project.toml` + `runtests.jl` + 两个 `run_*.ps1` |
+| `.zig` | `zig` | service / call / 两个 test 程序 + `setup_zig_tests.ps1` + `build.zig` + `build.zig.zon` |
+| `.swift` | `swift` | service / call / 两个 test 程序 + `setup_swift_tests.ps1` + `Package.swift` |
+| `.rb` | `ruby` | service / call / 两个 test 程序 + `setup_ruby_tests.ps1` |
+| `.f90` | `fortran` | service / call / 两个 test 程序 + `setup_fortran_tests.ps1` |
+| `.dart` | `dart` | service / call / 两个 test 程序 + `setup_dart_tests.ps1` + `pubspec.yaml` |
+| `.R` | `r` | service / call / 两个 test 程序 + `setup_R_tests.ps1` |
 
-### 7.4 Output naming rules
+### 7.5 输出命名规则
 
-**Pascal and Python** honor your file name as-is.
+**Pascal 与 Python 遵循你给的文件名。**
 
-**C++ and C# replace the file name** with a canonical name derived from the parsed source unit name. The **directory part** of your output argument is respected; only the file name is replaced. Rationale: the generated CMake script (C++) and the two console test programs (C#) reference the files by that name.
+**其他语言会替换文件名**为从解析出的源 unit 名派生的规范名字（如 `<Unit>_abi_service.rs`）。**目录部分**保留；仅文件名被替换。原因：生成的构建脚本（CMake / Maven / Cargo / rebar3 等）和测试程序均按该名字引用。
 
-### 7.5 C++ special case
+### 7.6 C++ 特例
 
-Naming either a `.hpp` or a `.cpp` produces both files with the same base name. Every C++ run also writes a `CMakeLists.txt` and two test programs, so a two-pass CLI invocation (service + caller) leaves a consistent, buildable directory.
+命名 `.hpp` 或 `.cpp` 任一都会产出两个文件（同 base name），外加 `CMakeLists.txt` 与两个测试程序。因此，两次 CLI 调用（service + caller）会留下一个一致的、可构建的目录。
 
-### 7.6 C# special case
+### 7.7 C# 特例
 
-Every `.cs` invocation writes the **complete set**:
+每次 `.cs` 调用都写出**完整集合**（service + call + 两个 test）。`--call` 被接受但**对 `.cs` 无效果**，因为两个 console 测试程序引用**两个**库的命名空间；只出其中一个会导致测试项目无法编译。
 
-- `<UnitName>_abi_service.cs` + `_abi_service_csharp.md`
-- `<UnitName>_abi_call.cs` + `_abi_call_csharp.md`
-- `<UnitName>_abi_service_main_test___.cs`
-- `<UnitName>_abi_call_main_test___.cs`
-- `<UnitName>_abi_test_csharp.md`
+### 7.8 退出码
 
-The `--call` flag is accepted but **ignored** for `.cs`, because the two console test programs reference **both** libraries by namespace; emitting only one of the two would leave the test projects uncompilable.
+| Code | 含义 |
+|:----:|------|
+| `0` | 转换成功 |
+| `1` | 缺少或无效的参数 |
+| `2` | 源解析失败 |
+| `3` | 代码生成失败 |
+| `4` | 文件 I/O 错误 |
 
-### 7.7 Exit codes
-
-| Code | Meaning |
-|:----:|---------|
-| `0` | Conversion succeeded |
-| `1` | Missing or invalid arguments |
-| `2` | Source parsing failed |
-| `3` | Code generation failed |
-| `4` | File I/O error |
-
-### 7.8 Examples
+### 7.9 示例
 
 ```bash
 # Pascal → Pascal service
 code_decl_to_abi calculator.pas calculator_service.pas
-# Output:
-#   calculator_service.pas
-#   calculator_service_readme.md
 
-# Pascal → Pascal caller
-code_decl_to_abi --call calculator.pas calculator_call.pas
-# Output:
-#   calculator_call.pas
-#   calculator_call_readme.md
+# Pascal → Python caller
+code_decl_to_abi --call calculator.pas calculator_call.py
 
-# C → Python service
-code_decl_to_abi ComplexTestUnit.h calculator_service.py
-# Output:
-#   calculator_service.py
-#   calculator_service_readme.md
-
-# C → C++ service (two files + CMake + two test mains)
+# C → C++ service
 code_decl_to_abi ComplexTestUnit.h out/ComplexTestUnit_abi_service.hpp
-# Output:
-#   out/ComplexTestUnit_abi_service.hpp
-#   out/ComplexTestUnit_abi_service.cpp
-#   out/ComplexTestUnit_abi_service_cpp.md
-#   out/CMakeLists.txt
-#   out/ComplexTestUnit_abi_service_main.cpp
-#   out/ComplexTestUnit_abi_call_main.cpp
 
-# C → C# (the complete set is written in a single run)
-code_decl_to_abi ComplexTestUnit.h out/Calculator.cs
-# Output:
-#   out/ComplexTestUnit_abi_service.cs
-#   out/ComplexTestUnit_abi_service_csharp.md
-#   out/ComplexTestUnit_abi_call.cs
-#   out/ComplexTestUnit_abi_call_csharp.md
-#   out/ComplexTestUnit_abi_service_main_test___.cs
-#   out/ComplexTestUnit_abi_call_main_test___.cs
-#   out/ComplexTestUnit_abi_test_csharp.md
+# C → Rust service（自动带 setup_rust_tests.ps1 与 Cargo.toml）
+code_decl_to_abi --lang rust ComplexTestUnit.h out/
+
+# 强制指定语言，忽略扩展名
+code_decl_to_abi --lang java ComplexTestUnit.h out/
 ```
 
-### 7.9 Stdout shape
+### 7.10 Stdout 结构
 
-On success:
+成功时：
 
 ```
 Reading: ComplexTestUnit.h (1234 chars)
-Output : calculator_service.py
-Mode   : service
+Output : out/ComplexTestUnit_abi_service.rs
+Target : rust
 Unit   : ComplexTestUnit
 Funcs  : 28
-Wrote  : calculator_service.py
-Wrote  : calculator_service_readme.md
+Wrote  : out/ComplexTestUnit_abi_service.rs
+Wrote  : out/ComplexTestUnit_abi_call.rs
+Wrote  : out/ComplexTestUnit_abi_service_test.rs
+Wrote  : out/ComplexTestUnit_abi_call_test.rs
+Wrote  : out/Cargo.toml
+Wrote  : out/setup_rust_tests.ps1
 Done.
 ```
 
-On failure, the tool prints a diagnostic line and returns a non-zero exit code. **Do not depend on the exact wording**; depend on the exit code.
+失败时，工具打印一行诊断并返回非零退出码。**不要依赖具体措辞**，只依赖退出码。
 
-### 7.10 What the CLI does **not** do
+### 7.11 CLI **不**做的事
 
-- It does not start the service or the caller. You compile and launch the generated code yourself.
-- It does not start the LingoFuse runtime.
-- It does not start the MCP tool provider.
-- It does not open any network connection.
+- 不启动 service 或 caller。你负责编译并运行生成代码。
+- 不启动 LingoFuse 运行时。
+- 不启动 MCP 工具提供者。
+- 不打开任何网络连接。
 
-**All of that belongs to Part II of this guide.**
+**这些都属于 Part II。**
 
 ---
 
-## Chapter 8  Generate Code Through an AI Agent (MCP)
+## Chapter 8  通过 AI Agent (MCP) 生成代码
 
-### 8.1 Positioning
+### 8.1 定位
 
-`code_decl_to_abi_mcp_api_tool_provider_unit.pas` wraps the entire generator as **31 LingoFuse Call APIs** and registers them with the **agent beacon** (default App `agent_main_app`, default register API `register_agent`). An MCP client can drive the generator entirely through tool calls.
+`code_decl_to_abi_mcp_api_tool_provider_unit.pas` 将整个工具暴露为 **3 个 LingoFuse Call API**，并注册到 **agent beacon**（默认 App `agent_main_app`，默认注册 API `register_agent`）。MCP 客户端可以完全通过工具调用驱动生成。
 
-The provider **simulates GUI operations**: each `internal_call_*` posts work to the main thread via `TCompute.Sync` and invokes the same button event handlers the GUI uses. The GUI and the MCP path are therefore provably in sync.
+提供者**模拟 GUI 操作**：每个 `internal_call_*` 通过 `TCompute.Sync` 投递任务到主线程，并调用与 GUI 相同的按钮处理程序。因此 GUI 路径与 MCP 路径**可证明一致**。
 
-### 8.2 Requirements for agent mode
+### 8.2 Agent 模式要求
 
-- The `code_decl_to_abi` **GUI is running**. The MCP provider lives inside the GUI process; closing the GUI takes the tools offline.
-- A **beacon service is online** (`agent_main_app` by default).
-- Both sides use the same LingoFuse endpoint (`ipc:agent` by default).
-- The LingoFuse runtime is reachable.
+- `code_decl_to_abi` **GUI 正在运行**。MCP 提供者活在 GUI 进程内；关闭 GUI 即工具离线。
+- **beacon 服务在线**（默认 `agent_main_app`）。
+- 两端使用相同 LingoFuse 端点（默认 `ipc:agent`）。
+- LingoFuse 运行时可达。
 
-### 8.3 The three-phase tool workflow
+### 8.3 三步式工具工作流
 
-Every tool follows the same three-phase pattern:
-
-```
-Step 1  SetSourceCode(Source, Language)
-Step 2  ConvertToXxx    (one or many)
-Step 3  GetLastXxx      (read one or many)
-```
-
-- **Step 1 is SETUP.** It does not produce any files.
-- **Step 2 branches are independent.** After one `SetSourceCode`, you may trigger any number of `ConvertToXxx` calls.
-- **Step 3 is pure read.** It pulls cached results from the artifact editors.
-
-### 8.4 The 31 tools
-
-**Step 1 (1 tool)**
-
-| Tool | Parameters | Return |
-|------|------------|--------|
-| `CodeDeclToAbi_SetSourceCode` | `Source: string`, `Language: string` | `{"status":"ok"}` |
-
-`Language` accepts `"pascal"` or `"c"`, case-insensitive. It names the **source** language; passing `"python"` / `"cpp"` / `"csharp"` is a client-side confusion between source and target and is rejected.
-
-**Step 2 (9 tools)**
-
-| Tool | Return |
-|------|--------|
-| `CodeDeclToAbi_ConvertToPascalService` | `{"result":…,"readme":…}` |
-| `CodeDeclToAbi_ConvertToPascalCall` | `{"result":…,"readme":…}` |
-| `CodeDeclToAbi_ConvertToPythonService` | `{"result":…,"readme":…}` |
-| `CodeDeclToAbi_ConvertToPythonCall` | `{"result":…,"readme":…}` |
-| `CodeDeclToAbi_ConvertToCppService` | `{"result":…,"impl":…,"readme":…}` |
-| `CodeDeclToAbi_ConvertToCppCall` | `{"result":…,"impl":…,"readme":…}` |
-| `CodeDeclToAbi_ConvertToCsharpService` | `{"result":…,"readme":…}` |
-| `CodeDeclToAbi_ConvertToCsharpCall` | `{"result":…,"readme":…}` |
-| `CodeDeclToAbi_ConvertToCsharpTest` | `{"result":…,"impl":…,"readme":…}` |
-
-**Step 3 (21 readers)**
-
-Each `ConvertToXxx` has one reader per artifact it produces — for example:
-
-- `CodeDeclToAbi_GetLastPascalServiceCode` / `...Readme`
-- `CodeDeclToAbi_GetLastPascalCallCode` / `...Readme`
-- `CodeDeclToAbi_GetLastPythonServiceCode` / `...Readme`
-- `CodeDeclToAbi_GetLastPythonCallCode` / `...Readme`
-- `CodeDeclToAbi_GetLastCppServiceHeader` / `...Impl` / `...Readme`
-- `CodeDeclToAbi_GetLastCppCallHeader` / `...Impl` / `...Readme`
-- `CodeDeclToAbi_GetLastCsharpServiceCode` / `...Readme`
-- `CodeDeclToAbi_GetLastCsharpCallCode` / `...Readme`
-- `CodeDeclToAbi_GetLastCsharpServiceTestCode`
-- `CodeDeclToAbi_GetLastCsharpCallTestCode`
-- `CodeDeclToAbi_GetLastCsharpTestReadme`
-
-### 8.5 Recommended sequences
+三个工具遵循同一个三步模式：
 
 ```
-# Minimum complete flow (one language, service + caller)
-SetSourceCode(MyUnitText, "pascal")
-ConvertToPascalService()
-ConvertToPascalCall()
-GetLastPascalServiceCode()
-GetLastPascalServiceReadme()      # ← read this for build/test
-GetLastPascalCallCode()
-GetLastPascalCallReadme()         # ← read this for build/test
+Step 1  CodeDeclToAbi_GenerateAll   — 一次性生成全部目标的所有产物
+Step 2  CodeDeclToAbi_GetTargetList — 列举本次会话产生的产物文件名
+Step 3  CodeDeclToAbi_GetTargetCode — 按文件名读取某个产物内容
 ```
 
+- **Step 1 是唯一的"工作"步骤**：它一次性跑完整个流水线（解析 → 规范化 → 生成 → 写盘）。
+- **Step 2 与 Step 3 都是纯读取**：它们不触发新的生成，不修改状态。
+
+### 8.4 三个工具
+
+**Step 1**
+
+| 工具 | 参数 | 返回 |
+|------|------|------|
+| `CodeDeclToAbi_GenerateAll` | `Source: string`、`Language: string` | `{"status":"ok","unit":"<U>","count":N}` 或 `{"error":"<message>"}` |
+
+`Language` 接受 `"pascal"` 或 `"c"`（大小写不敏感）。它表示**源**语言；传入 `"python"` / `"cpp"` / `"csharp"` 会被拒绝（客户端把源语言和目标语言搞混）。
+
+**Step 2**
+
+| 工具 | 参数 | 返回 |
+|------|------|------|
+| `CodeDeclToAbi_GetTargetList` | 无 | `{"count":N,"files":["<name1>",...]}` |
+
+返回文件名列表（不是路径）。文件名列表顺序不作保证，请按名使用。
+
+**Step 3**
+
+| 工具 | 参数 | 返回 |
+|------|------|------|
+| `CodeDeclToAbi_GetTargetCode` | `FileName: string` | `{"name":"<file>","content":"<text>"}` 或 `{"error":"..."}` |
+
+`FileName` 必须是 Step 2 返回的**精确文件名**，包含扩展名。比较大小写敏感。
+
+### 8.5 推荐序列
+
 ```
-# One source, multiple targets
-SetSourceCode(MyUnitText, "pascal")
-ConvertToPascalService()
-ConvertToPythonService()
-ConvertToCppService()
-ConvertToCsharpService()
-ConvertToCsharpTest()
-...
+# 最小完整流程
+CodeDeclToAbi_GenerateAll(Source = "<contents of calculator.pas>", Language = "pascal")
+CodeDeclToAbi_GetTargetList()
+CodeDeclToAbi_GetTargetCode("Calculator_abi_service_unit.pas")
+CodeDeclToAbi_GetTargetCode("Calculator_abi_call_unit.pas")
 ```
 
-### 8.6 Agent-mode notes
+### 8.6 Agent 模式注意事项
 
-1. **The source language must be `pascal` or `c`**; anything else is rejected.
-2. **The order is mandatory**: Step 1 → Step 2 → Step 3.
-3. **`ConvertToXxx` is cached per source.** Re-running it after a `SetSourceCode` change re-parses; re-running without a source change is a no-op.
-4. **The GUI must be alive.** There is no headless MCP mode.
-5. **Generating code with an agent ≠ running the code.** Part II of this guide still applies.
-6. **Point agents at the `.md` files.** After a successful `ConvertToXxx`, the `readme` field in the response points at the companion `.md`. Tell agents to read that `.md` for build commands, test programs, and CMake scripts.
+1. **源语言必须是 `pascal` 或 `c`**；其他一律拒绝。
+2. **顺序强制**：Step 1 → Step 2 → Step 3。
+3. **`GenerateAll` 是同步的**：所有产物写入磁盘后，它才返回。
+4. **GUI 必须活着**：没有无头 MCP 模式。
+5. **生成代码 ≠ 运行代码**：Part II 仍然适用。
+6. **产物清单是不稳定的**：`count` 取决于源 unit 中有多少 routine 通过类型白名单，不是编译期常量。
 
-### 8.7 Example agent interaction
+### 8.7 Agent 交互示例
 
 ```
-# 1. Feed the source
-CodeDeclToAbi_SetSourceCode(
+# 1. 一次性生成全部目标
+CodeDeclToAbi_GenerateAll(
     Source   = "<contents of calculator.pas>",
     Language = "pascal")
+# 返回 {"status":"ok","unit":"Calculator","count":17}
 
-# 2. Produce both sides
-CodeDeclToAbi_ConvertToPascalService()
-CodeDeclToAbi_ConvertToPascalCall()
+# 2. 列举本次产物
+CodeDeclToAbi_GetTargetList()
+# 返回 {"count":17,"files":["Calculator_abi_service_unit.pas","Calculator_abi_call_unit.pas","Calculator_abi_service.py",...]}
 
-# 3. Read the artifacts (and the companions)
-CodeDeclToAbi_GetLastPascalServiceCode()
-CodeDeclToAbi_GetLastPascalServiceReadme()   # ← the build/run guide
-CodeDeclToAbi_GetLastPascalCallCode()
-CodeDeclToAbi_GetLastPascalCallReadme()      # ← the build/run guide
+# 3. 读取你需要的产物
+CodeDeclToAbi_GetTargetCode("Calculator_abi_service_unit.pas")
+CodeDeclToAbi_GetTargetCode("Calculator_abi_call.py")
+CodeDeclToAbi_GetTargetCode("CMakeLists.txt")
 ```
 
-The agent can then either forward the artifacts to a user or, if the environment permits, execute the build/run instructions directly from the `.md`.
+Agent 随后可将产物交给用户，或在允许的前提下直接执行生成脚本。
 
 ---
 
-## Chapter 9  Embed the Generator Programmatically
+## Chapter 9  程序化嵌入生成器
 
-For tools and services that want to embed the generator rather than launch it, `code_decl_to_abi` exposes a small set of public functions. These are the same functions the CLI, GUI, and MCP provider call internally.
+对希望嵌入生成器（而非启动它）的工具与服务，`code_decl_to_abi` 公开一组小型 API。这些正是 CLI、GUI、MCP 提供者内部调用的函数。
 
-### 9.1 Generator entry points
-
-Every generator unit exports one function per artifact:
-
-```pascal
-function GenerateABIServicePascalCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABIServicePascalReadme(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallPascalCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallPascalReadme(Model: TPascal_Func_Model): TPascalStringList;
-
-function GenerateABIServicePyCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABIServicePyReadme(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallPyCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallPyReadme(Model: TPascal_Func_Model): TPascalStringList;
-
-function GenerateABIServiceHppCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABIServiceCppCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABIServiceCppReadme(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallHppCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallCppCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallCppReadme(Model: TPascal_Func_Model): TPascalStringList;
-
-function GenerateABIServiceCsharpCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABIServiceCsharpReadme(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallCsharpCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallCsharpReadme(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABIServiceMainTestCsharpCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallMainTestCsharpCode(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICsharpTestReadme(Model: TPascal_Func_Model): TPascalStringList;
-
-function GenerateABICmakeScript(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABIServiceTestProgram(Model: TPascal_Func_Model): TPascalStringList;
-function GenerateABICallTestProgram(Model: TPascal_Func_Model): TPascalStringList;
-```
-
-Each returns a `TPascalStringList` that the caller must dispose.
-
-### 9.2 Model building
+### 9.1 模型构建
 
 ```pascal
 var
@@ -752,9 +663,9 @@ begin
     try
       Model := TPascal_Func_Model.Create;
       try
-        Model.Typ_Normalize_Func := tnf_ABI;   // required by the ABI generators
+        Model.Typ_Normalize_Func := tnf_ABI;   // 生成 ABI 时必需
         Model.LoadFromParser(Parser, Report);
-        // Now Model is ready for the generator functions above.
+        // 现在 Model 可供生成器函数使用
       finally
         Model.Free;
       end;
@@ -767,9 +678,25 @@ begin
 end;
 ```
 
-For a C header, substitute `CreateFrom_C_Code`. `LoadFromParser` applies the same six filters described in Chapter 18, so the model is guaranteed to contain only routines whose types are supported.
+C header 输入时，将 `CreateFrom_Pascal_Code` 换成 `CreateFrom_C_Code`。`LoadFromParser` 应用 Chapter 15 描述的六道过滤，因此 Model 中只包含类型受支持的 routine。
 
-### 9.3 Minimum viable embedding
+### 9.2 生成器入口
+
+每个生成器单元导出一到多个函数，每个函数返回一份 `TPascalStringList`，调用者负责释放。
+
+**注意新版本不再有 `*Readme` 函数**。示例（Rust）：
+
+```pascal
+function GenerateABIServiceRsCode(Model: TPascal_Func_Model): TPascalStringList;
+function GenerateABICallRsCode(Model: TPascal_Func_Model): TPascalStringList;
+function GenerateABIServiceTestRsCode(Model: TPascal_Func_Model): TPascalStringList;
+function GenerateABICallTestRsCode(Model: TPascal_Func_Model): TPascalStringList;
+function GenerateRustTestSetupScript(Model: TPascal_Func_Model): TPascalStringList;
+```
+
+其他语言类似：`GenerateABIService<Lang>Code`、`GenerateABICall<Lang>Code`，视需要附加 `GenerateABI<Lang>TestCode`、`Generate<Lang>TestSetupScript`、`GenerateABICmakeScript` 等。
+
+### 9.3 最小可行嵌入
 
 ```pascal
 var
@@ -801,589 +728,541 @@ end;
 
 ---
 
-# Part II — Using the Generated Code
+# Part II — 使用生成的代码
 
-The tool's job ends when the files are written to disk. Part II explains what to do with them.
+工具的职责在文件写入磁盘时终止。Part II 说明如何处理它们。
 
 ---
 
-## Chapter 10  What the Tool Produces, and What Each File Is For
+## Chapter 10  产出物清单与职责
 
-### 10.1 The directory layout
+### 10.1 每种语言的产出
 
-Under the GUI, all generated files land in:
+**Pascal**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service_unit.pas` |
+| caller | `<Unit>_abi_call_unit.pas` |
+| service test | `<Unit>_abi_service_test_unit.pas` |
+| call test | `<Unit>_abi_call_test_unit.pas` |
+
+**Python**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.py`（含 `__main__` 测试入口） |
+| caller | `<Unit>_abi_call.py` |
+| service test | `<Unit>_abi_service_test.py` |
+| call test | `<Unit>_abi_call_test.py` |
+
+**C++**
+
+| 类别 | 文件名 |
+|------|--------|
+| service 头 | `<Unit>_abi_service.hpp` |
+| service 实现 | `<Unit>_abi_service.cpp` |
+| caller 头 | `<Unit>_abi_call.hpp` |
+| caller 实现 | `<Unit>_abi_call.cpp` |
+| 构建脚本 | `CMakeLists.txt` |
+| service test | `<Unit>_abi_service_main.cpp` |
+| call test | `<Unit>_abi_call_main.cpp` |
+
+**C#**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.cs` |
+| caller | `<Unit>_abi_call.cs` |
+| service test | `<Unit>_abi_service_test___.cs` |
+| call test | `<Unit>_abi_call_test___.cs` |
+
+**Rust**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.rs` |
+| caller | `<Unit>_abi_call.rs` |
+| service test | `<Unit>_abi_service_test.rs` |
+| call test | `<Unit>_abi_call_test.rs` |
+| setup | `setup_rust_tests.ps1` |
+
+**Go**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.go` |
+| caller | `<Unit>_abi_call.go` |
+| service test | `<Unit>_abi_service_test.go` |
+| call test | `<Unit>_abi_call_test.go` |
+| setup | `setup_go_tests.ps1` |
+
+**Java**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>AbiService.java` |
+| caller | `<Unit>AbiCall.java` |
+| service test | `<Unit>AbiServiceMain.java` |
+| call test | `<Unit>AbiCallTestMain.java` |
+| 构建 | `pom.xml` |
+| setup + run | `setup_java_tests.ps1` / `run_java_service.ps1` / `run_java_call.ps1` |
+
+**Node.js**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.js` |
+| caller | `<Unit>_abi_call.js` |
+| service test | `<Unit>_abi_service_test.js` |
+| call test | `<Unit>_abi_call_test.js` |
+| setup | `setup_node_tests.ps1` |
+
+**TypeScript**（`http_ts`）
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.ts` |
+| caller | `<Unit>_abi_call.ts` |
+| service test | `<Unit>_abi_service_test.ts` |
+| call test | `<Unit>_abi_call_test.ts` |
+| setup | `setup_ts_tests.ps1` |
+
+**Erlang**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.erl` |
+| caller | `<Unit>_abi_call.erl` |
+| service test | `<Unit>_abi_service_main.erl` |
+| call test | `<Unit>_abi_call_main.erl` |
+| setup | `setup_erlang_tests.ps1` |
+
+**Julia**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.jl` |
+| caller | `<Unit>_abi_call.jl` |
+| service test | `<Unit>_abi_service_test.jl` |
+| call test | `<Unit>_abi_call_test.jl` |
+| setup / run | `setup_julia_tests.ps1` / `run_julia_service.ps1` / `run_julia_call.ps1` |
+| 构建 | `Project.toml` / `runtests.jl` |
+
+**Zig**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.zig` |
+| caller | `<Unit>_abi_call.zig` |
+| service test | `<Unit>_abi_service_test.zig` |
+| call test | `<Unit>_abi_call_test.zig` |
+| setup | `setup_zig_tests.ps1` |
+
+**Swift**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.swift` |
+| caller | `<Unit>_abi_call.swift` |
+| service test | `<Unit>_abi_service_test.swift` |
+| call test | `<Unit>_abi_call_test.swift` |
+| setup | `setup_swift_tests.ps1` |
+
+**Ruby**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.rb` |
+| caller | `<Unit>_abi_call.rb` |
+| service test | `<Unit>_abi_service_test.rb` |
+| call test | `<Unit>_abi_call_test.rb` |
+| setup | `setup_ruby_tests.ps1` |
+
+**Fortran**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.f90` |
+| caller | `<Unit>_abi_call.f90` |
+| service test | `<Unit>_abi_service_test.f90` |
+| call test | `<Unit>_abi_call_test.f90` |
+| setup | `setup_fortran_tests.ps1` |
+
+**Dart**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.dart` |
+| caller | `<Unit>_abi_call.dart` |
+| service test | `<Unit>_abi_service_test.dart` |
+| call test | `<Unit>_abi_call_test.dart` |
+| setup | `setup_dart_tests.ps1` |
+
+**R**
+
+| 类别 | 文件名 |
+|------|--------|
+| service | `<Unit>_abi_service.R` |
+| caller | `<Unit>_abi_call.R` |
+| service test | `<Unit>_abi_service_test.R` |
+| call test | `<Unit>_abi_call_test.R` |
+| setup | `setup_R_tests.ps1` |
+
+### 10.2 各文件职责
+
+- **Service 代码**：把 API 注册进 LingoFuse，解码二进制请求，调用用户的 `internal_call_<Api>` 桩，编码二进制响应。
+- **Caller 代码**：每个 API 一个强类型函数，编组参数，发起 LingoFuse 调用，反序列化结果，在错误时抛出语言相应的异常。
+- **测试程序**：可独立运行的最小程序，端到端跑通产物。所有语言都有，形态各异（`__main__` 块、独立 `main`、`examples/` 下的 `main.rs`、`escript` 入口等）。
+- **`setup_*_tests.ps1`**：一键环境初始化脚本。承载了该语言的**构建、依赖安装、语法检查、冒烟测试、下一步提示**，等价于旧版 README 的可执行形态。
+
+### 10.3 使用前必须编辑的地方
+
+**每种**目标语言均需：
+
+1. **填写 `internal_call_<Api>` 桩体**。工具输出 `TODO` 占位；你替换成对真实实现的调用。
+2. **放置运行时库**（`LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib`）到进程可寻址处。见 Chapter 13。
+3. **先启动 service 进程**，再启动任何 caller 进程。见 Chapter 14。
+
+其余 —— 线格式、序列化助手、回调、注册函数 —— 已经正确。
+
+---
+
+## Chapter 11  生成文件的目录布局与命名
+
+### 11.1 GUI 模式的目录布局
+
+在 GUI 下，所有产物写入：
 
 ```
 <exe directory>/<UnitName>/
 ```
 
-Under the CLI, the caller chooses the directory (via the output argument), and the file names are:
+### 11.2 CLI 模式的目录布局
 
-- **Pascal and Python**: exactly what you named them.
-- **C++ and C#**: canonical names derived from the source unit name.
+在 CLI 下，目录由调用者决定（通过输出参数）；文件名规则：
 
-### 10.2 The file inventory
+- **Pascal / Python**：完全按你给的；
+- **其他语言**：按源 unit 名派生的规范名（如 `<Unit>_abi_service.rs`）。
 
-| Target | Code files | Companion Markdown | Test scaffolding |
-|--------|-----------|--------------------|------------------|
-| **Pascal service** | `<Unit>_abi_service_unit.pas` | `<Unit>_abi_service_pascal.md` | Inside the README |
-| **Pascal caller** | `<Unit>_abi_call_unit.pas` | `<Unit>_abi_call_pascal.md` | Inside the README |
-| **Python service** | `<Unit>_abi_service.py` | `<Unit>_abi_service_python.md` | `__main__` block inside the module |
-| **Python caller** | `<Unit>_abi_call.py` | `<Unit>_abi_call_python.md` | Inside the README |
-| **C++ service** | `<Unit>_abi_service.hpp` + `.cpp` | `<Unit>_abi_service_cpp.md` | CMake + `<Unit>_abi_service_main.cpp` |
-| **C++ caller** | `<Unit>_abi_call.hpp` + `.cpp` | `<Unit>_abi_call_cpp.md` | CMake + `<Unit>_abi_call_main.cpp` |
-| **C# service** | `<Unit>_abi_service.cs` | `<Unit>_abi_service_csharp.md` | none (class library only) |
-| **C# caller** | `<Unit>_abi_call.cs` | `<Unit>_abi_call_csharp.md` | none (class library only) |
-| **C# tests** | two `*_main_test___.cs` | `<Unit>_abi_test_csharp.md` | two console entry points |
+### 11.3 Setup 脚本的默认输出
 
-### 10.3 Responsibilities of each file
+`setup_*_tests.ps1` 由生成器固定写在输出目录根部，文件名固定为：
 
-- **Service code**: registers the API with LingoFuse, decodes binary requests, calls the user's `internal_call_<Api>` stub, encodes binary responses.
-- **Caller code**: exposes a typed function per API, serializes arguments, issues the LingoFuse call, deserializes the result, raises a language-appropriate exception on error.
-- **README (`.md`)**: **the runnable build/deploy guide for the artifact.** See Chapter 11.
-- **Test scaffolding**: a minimal runnable program that exercises the artifact end to end. Every language has one; the form differs.
+- `setup_rust_tests.ps1`
+- `setup_go_tests.ps1`
+- `setup_java_tests.ps1`
+- `setup_node_tests.ps1`
+- `setup_ts_tests.ps1`
+- `setup_erlang_tests.ps1`
+- `setup_julia_tests.ps1`
+- `setup_zig_tests.ps1`
+- `setup_swift_tests.ps1`
+- `setup_ruby_tests.ps1`
+- `setup_fortran_tests.ps1`
+- `setup_dart_tests.ps1`
+- `setup_R_tests.ps1`
 
-### 10.4 What you must edit before using the generated code
+以及部分语言附加的 run 脚本、构建脚本（`pom.xml`、`CMakeLists.txt`、`Project.toml`、`build.zig`、`build.zig.zon` 等）。
 
-For **every** target language, you must:
+### 11.4 一个完整示例
 
-1. **Fill in the `internal_call_<Api>` stub bodies.** The tool emits `TODO` placeholders; you replace them with calls to your real implementation.
-2. **Place the runtime library** (`LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib`) where the process can find it. See Chapter 16.
-3. **Start the service process** before any caller process. See Chapter 17.
+假设输入是 `Calculator.pas`，目标目录 `out/`，要求全部语言的 service 侧：
 
-Everything else — the wire format, the serialization helpers, the callbacks, the registration functions — is already correct.
+```
+out/
+├── Calculator_abi_service_unit.pas       (Pascal service)
+├── Calculator_abi_service_test_unit.pas
+├── Calculator_abi_service.py             (Python service)
+├── Calculator_abi_service_test.py
+├── Calculator_abi_service.hpp            (C++ service)
+├── Calculator_abi_service.cpp
+├── Calculator_abi_service_main.cpp
+├── CMakeLists.txt
+├── Calculator_abi_service.cs             (C# service)
+├── Calculator_abi_service_test___.cs
+├── Calculator_abi_service.rs             (Rust service)
+├── Calculator_abi_service_test.rs
+├── setup_rust_tests.ps1
+├── Cargo.toml
+├── Calculator_abi_service.go             (Go service)
+├── setup_go_tests.ps1
+├── go.mod
+├── CalculatorAbiService.java             (Java service)
+├── pom.xml
+├── setup_java_tests.ps1
+├── run_java_service.ps1
+├── Calculator_abi_service.js             (Node.js service)
+├── setup_node_tests.ps1
+├── Calculator_abi_service.ts             (TypeScript service)
+├── setup_ts_tests.ps1
+├── Calculator_abi_service.erl            (Erlang service)
+├── setup_erlang_tests.ps1
+├── rebar.config
+├── Calculator_abi_service.jl             (Julia service)
+├── Project.toml
+├── setup_julia_tests.ps1
+├── run_julia_service.ps1
+├── Calculator_abi_service.zig            (Zig service)
+├── setup_zig_tests.ps1
+├── build.zig
+├── build.zig.zon
+├── Calculator_abi_service.swift          (Swift service)
+├── setup_swift_tests.ps1
+├── Calculator_abi_service.rb             (Ruby service)
+├── setup_ruby_tests.ps1
+├── Calculator_abi_service.f90            (Fortran service)
+├── setup_fortran_tests.ps1
+├── Calculator_abi_service.dart           (Dart service)
+├── setup_dart_tests.ps1
+├── Calculator_abi_service.R              (R service)
+└── setup_R_tests.ps1
+```
+
+调用侧同理，只是文件名由 `_service` 换成 `_call`。
 
 ---
 
-## Chapter 11  Read the Companion Markdown First
+## Chapter 12  消费各语言产出
 
-Before you write a single line of build script:
+本章按语言给出**构建与运行**的高层流程。**确切的构建命令与依赖安装在 `setup_*_tests.ps1` 的 `-Help` 输出与脚本顶部注释里**（脚本自身就是该语言的构建手册）。
 
-> **Open the companion `.md` file for the artifact you want to build.**
+### 12.1 Pascal
 
-The `.md` and the code were produced from the **same `TPascal_Func_Model`** in the same pass. This means:
+- **构建**：`fpc -Fu<dir-with-lingofuse_import.pas> -Fu<dir-with-Z.Core.pas> your_program.pas`
+- **填充桩体**：打开 `_abi_service_unit.pas`，将 `internal_call_<Api>` 函数体替换为对真实函数的调用。
+- **调用**：`_abi_call_unit.pas` 完全生成 —— 无需编辑，直接编译调用。
+- **shutdown 顺序**：`LF_ExitMainThread` → `LF_FreeApp(App)`（仅 service）→ `LF_Shutdown`。
 
-- They never drift apart. Regenerating updates both.
-- The README always describes the current code.
-- You can hand the `.md` to another engineer (or to an agent) and they can reproduce your build.
+### 12.2 Python
 
-### 11.1 What the README contains
+- **依赖**：`pip install py-lingofuse`，或 `PYTHONPATH` 指向 `<v3>/src`。
+- **填充桩体**：打开 `_abi_service.py`，替换 `internal_call_<Api>` 的函数体。
+- **运行 service**：`python <Unit>_abi_service.py`（模块自带 `__main__`）。
+- **运行 call test**：`python <Unit>_abi_call_test.py`。
+- **超时调整**：`import <Unit>_abi_call as abi; abi.ABI_TIMEOUT = 30000`。
 
-Every companion README follows the same twelve-section structure:
+### 12.3 C++
 
-| § | Title | Content |
-|:-:|-------|---------|
-| 1 | Overview | What the code is, design principles, quick start |
-| 2 | Application Scope | When to use / not use it |
-| 3 | Compatibility | Compilers, runtime versions, platforms, dependencies, threading |
-| 4 | Wire Protocol | Request/response shapes, encoding rules, call sequence |
-| 5 | Runtime Architecture | Startup order, call sequence, timeouts, target App name |
-| 6 | Type Mapping | Supported types, unsupported types, endianness, NUL framing |
-| 7 | Deployment | Directory layout, build commands, startup order, shutdown order |
-| 8 | Testing | A fully copy-pasteable test program |
-| 9 | API Reference | Summary table + per-API details |
-| 10 | Troubleshooting | Symptom / cause / fix table |
-| 11 | Self-Assessment Checklist | Questions a reader should be able to answer |
-| 12 | Reference Resources | Related toolchain index |
+- **构建**：推荐 CMake —— `cmake -S . -B build -DLINGOFUSE_CPP_DIR=<dir-with-LingoFuse.h>; cmake --build build`。
+- **填充桩体**：打开 `_abi_service.cpp`，替换 `internal_call_<Api>` 桩体。
+- **运行**：先 `./<Unit>_abi_service_main`，再 `./<Unit>_abi_call_main`。
+- **MSVC**：必须加 `/utf-8`。
+- **超时/目标 App**：在 `<Unit>_abi` 命名空间调整 `ABI_Timeout` 与 `ABI_TargetApp`。
 
-### 11.2 Language-specific build detail that lives in the README
+### 12.4 C#
 
-| Target | Build detail that only the README carries |
-|--------|-------------------------------------------|
-| **Pascal** | The exact `fpc -Fu<…>` command line, including search paths for `lingofuse_import.pas` and `Z.Core` |
-| **Python** | `PYTHONPATH` and `pip install` instructions; the module's own `__main__` block is the test program |
-| **C++** | A complete CMake script plus raw `g++` / `clang++` / MSVC / MinGW invocations |
-| **C#** | `dotnet new console` + copy + `dotnet run` walkthrough; the `DllImportResolver` behavior |
+- **构建**：每个 `.cs` 库都是一个 class library（**没有 `Main`**）。测试程序独立成一个 console 项目。
+- **填充桩体**：打开 `_abi_service.cs`，替换 `InternalCalls.InternalCall_<Api>` 方法体。
+- **运行 service test**：
+  ```bash
+  dotnet new console -o service_test && cd service_test
+  cp ../<Unit>_abi_service.cs .
+  cp ../<Unit>_abi_service_test___.cs Program.cs
+  cp ../LingoFuse64.dll .
+  dotnet run
+  ```
+- **运行 call test**：同上，换 `_call.cs` 与 `_call_test___.cs`。
 
-### 11.3 Practical consequence for this guide
+### 12.5 Rust
 
-Because the `.md` files carry the language-specific build details, **this user guide does not try to reproduce every build command for every language**. Chapters 12–15 give the high-level workflow and point you at the exact README section you need.
+- **构建**：`cargo build`
+- **填充桩体**：`src/service.rs` 中的 `internal_call_<Api>` 函数体。
+- **运行**：`cargo run --example service_test`，另一个终端 `cargo run --example call_test`。
+- **环境**：先生成 `setup_rust_tests.ps1`，按 `-Help` 使用。
+
+### 12.6 Go
+
+- **构建**：`go build ./...`
+- **填充桩体**：`<Unit>_abi_service.go` 中的 `internalCall<Api>`。
+- **运行**：`setup_go_tests.ps1` 会把库与两个 test 主程序整理到 `.go_clean_build/`，随后 `go run ./<Unit>_abi_service_test` 与 `go run ./<Unit>_abi_call_test`。
+
+### 12.7 Java
+
+- **构建**：`mvn -q -DskipTests compile`（`pom.xml` 已生成）。
+- **填充桩体**：`<Unit>AbiService.java` 中的 `internal_call_<Api>` 方法体。
+- **运行**：`run_java_service.ps1` / `run_java_call.ps1`。
+
+### 12.8 Node.js
+
+- **依赖**：`npm install`（在 `setup_node_tests.ps1` 中已包含 lingofuse-js 的本地链接）。
+- **填充桩体**：`<Unit>_abi_service.js` 中的 `internal_call_<Api>` 函数体。
+- **运行**：`node <Unit>_abi_service_test.js` 与 `node <Unit>_abi_call_test.js`。
+
+### 12.9 TypeScript（`http_ts`）
+
+- **依赖**：`npm install`（`setup_ts_tests.ps1` 会生成 `tsconfig.json`、`package.json`，并自动链接 `lingofuse-ts`）。
+- **填充桩体**：`<Unit>_abi_service.ts` 中的 `internal_call_<Api>`。
+- **运行**：默认 `tsx` 执行 `.ts`；加 `-Compiled` 会用 `tsc` 编译到 `dist/` 后运行 `.js`。
+
+### 12.10 Erlang
+
+- **构建**：`setup_erlang_tests.ps1` 生成 `rebar.config` 与 `.app.src`，并编译。
+- **填充桩体**：`<Unit>_abi_service.erl` 中的 `internal_call_<Api>`。
+- **运行**：`erl -noshell -pa ... -eval "<Unit>_abi_service_main:main([])."` 与对应 call 主程序。
+
+### 12.11 Julia
+
+- **构建**：`setup_julia_tests.ps1` 生成 `Project.toml` 与 `runtests.jl`。
+- **填充桩体**：`<Unit>_abi_service.jl` 中的 `_internal_call_<Api>_default`。
+- **运行**：`run_julia_service.ps1`（终端 A）与 `run_julia_call.ps1`（终端 B）。要求 `--threads=2`。
+
+### 12.12 Zig
+
+- **构建**：`zig build`
+- **填充桩体**：`<Unit>_abi_service.zig` 中的 `internal_call_<api>`。
+- **运行**：`zig-out/bin/<Unit>_abi_service_test` 与 `zig-out/bin/<Unit>_abi_call_test`。
+
+### 12.13 Swift
+
+- **构建**：`swift build`（`Package.swift` 由 setup 脚本生成）。
+- **填充桩体**：`<Unit>_abi_service.swift` 中的 `internalCall_<Api>`。
+- **运行**：`swift run ServiceTest`（终端 A）与 `swift run CallTest`（终端 B）。
+
+### 12.14 Ruby
+
+- **依赖**：`lingofuse` gem（setup 脚本会校验其存在与 API 完整性）。
+- **填充桩体**：`<Unit>_abi_service.rb` 中的 `internal_call_<Api>`。
+- **运行**：`ruby <Unit>_abi_service_test.rb` 与 `ruby <Unit>_abi_call_test.rb`。
+
+### 12.15 Fortran
+
+- **构建**：`setup_fortran_tests.ps1` 使用 `gfortran` 直接编译（需要 gcc / g++ / gfortran）。
+- **填充桩体**：`<Unit>_abi_service.f90` 中的 `internal_call_<api>`。
+- **运行**：`.fortran_build/<Unit>_abi_service_test.exe` 与 `_call_test.exe`。
+
+### 12.16 Dart
+
+- **构建**：`dart pub get`（`setup_dart_tests.ps1` 生成 `pubspec.yaml`，链接 `lingofuse` Dart 包，拷贝 `lf_dart_bridge.dll`）。
+- **填充桩体**：`<Unit>_abi_service.dart` 中的 `internal_call_<Api>`。
+- **运行**：`dart run <Unit>_abi_service_test.dart` 与 `dart run <Unit>_abi_call_test.dart`。
+
+### 12.17 R
+
+- **依赖**：`lingofuse` R 包（setup 脚本会探测 API surface 完整性）、可选 `bit64`。
+- **填充桩体**：`<Unit>_abi_service.R` 中的 `internal_call_<Api>`。
+- **运行**：`Rscript --vanilla <Unit>_abi_service_test.R` 与 `<Unit>_abi_call_test.R`。
 
 ---
 
-## Chapter 12  Consuming the Pascal Output
+## Chapter 13  运行时环境配置
 
-The Pascal target produces two files: a service unit and a caller unit. Both are self-contained `.pas` files that you compile into your own program.
+本章对**所有目标语言**适用。覆盖每个生成程序在运行时都需要的二进制文件与端点。
 
-### 12.1 What you receive
+### 13.1 运行时二进制
 
-- `<Unit>_abi_service_unit.pas` — service library.
-- `<Unit>_abi_call_unit.pas` — caller library.
-- `<Unit>_abi_service_pascal.md` and `<Unit>_abi_call_pascal.md` — the two READMEs.
-
-### 12.2 Filling in the service stubs
-
-Open `<Unit>_abi_service_unit.pas`. Each routine appears as a generated stub:
-
-```pascal
-function internal_call_Add_Add(a: Int64; b: Int64): Int64;
-begin
-  Result := 0;
-  // Result := MyUnit.Add(a, b);   // ← replace with your real function
-end;
-```
-
-Replace the placeholder body with a call to your real function. The signature already matches.
-
-**If the body must run on the main thread** (for example, to touch UI controls), the generated stub contains a synchronised variant in a block comment. Uncomment the two block comments and the `//` lines inside them; the synchronised form uses `TCompute.Sync` from `Z.Core`, which is already imported.
-
-### 12.3 Compiling
-
-The exact `fpc -Fu<…>` command line — including every search path — is in the README's **§7 Deployment**.
-
-In general, you need:
-
-- `-Fu<dir-with-lingofuse_import.pas>`
-- `-Fu<dir-with-Z.Core.pas>`
-- `-Fu<dir-with-lingofuse_helper.pas>` (optional, but used by the test programs)
-
-### 12.4 Running the test harness
-
-The README's **§8 Testing** contains a complete, copy-paste-ready service program and a caller program. Compile both, start the service first, then start the caller. Expected output is spelled out in the README.
-
-### 12.5 Filling in the caller side
-
-The caller unit exports one free function per API:
-
-```pascal
-function Add(a: Int64; b: Int64): Int64;
-```
-
-The implementation is fully generated: it serializes `a` and `b`, calls the service over LingoFuse, reads the response, and raises `EABI_RemoteError` on failure. **You do not edit the caller unit.** You just compile it and call the functions.
-
-### 12.6 Deployment
-
-The README's **§7.5 Runtime files** table tells you exactly which binaries must sit next to the executable. In practice:
-
-- `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib`
-- `z_ipc_*.dll` / `libz_ipc_*.so`
-
-### 12.7 Shutdown order
-
-Always:
-
-1. `LF_ExitMainThread`
-2. `LF_FreeApp(App)` (service only)
-3. `LF_Shutdown`
-
-Skipping a step leaks resources or crashes on exit.
-
----
-
-## Chapter 13  Consuming the Python Output
-
-The Python target produces two modules: a service module and a caller module. Both are self-contained `.py` files.
-
-### 13.1 What you receive
-
-- `<Unit>_abi_service.py` — service module, **runnable as a program**.
-- `<Unit>_abi_call.py` — caller module.
-- `<Unit>_abi_service_python.md` and `<Unit>_abi_call_python.md` — the two READMEs.
-
-### 13.2 Installing the `lingofuse` package
-
-Both modules import from `lingofuse._lf_native` and `lingofuse.lf_io`. Two sources are supported:
-
-| # | Source | How |
-|---|--------|-----|
-| 1 | Standalone `py-lingofuse` repository or PyPI package | `pip install py-lingofuse` |
-| 2 | `lingofuse/` directory shipped with the v3 toolchain | Point `PYTHONPATH` at `<v3>/src` |
-
-The README's **§3.3** spells out both, including Windows PowerShell syntax.
-
-### 13.3 Filling in the service stubs
-
-Open `<Unit>_abi_service.py`. Each routine appears as a generated stub:
-
-```python
-def internal_call_Add(a: int, b: int) -> int:
-    # TODO: call the real function, for example:
-    #     return my_engine.add(a, b)
-    return 0
-```
-
-Replace the body with a call to your real function. The signature is already correct.
-
-### 13.4 Running the service
-
-**The module is its own test program.** It contains a full `if __name__ == "__main__":` block:
-
-```bash
-python <Unit>_abi_service.py
-```
-
-Expected output:
-
-```
-=== <Unit>_abi service ===
-[OK] Service ready. Type 'exit' and press Enter to quit.
-```
-
-While this is running, you can start the caller module in another terminal.
-
-### 13.5 Calling from Python
-
-```python
-from lingofuse._lf_native import (
-    LF_ResetPrepare, LF_PrepareClient, LF_PrepareDone,
-    LF_ExitMainThread, LF_Shutdown,
-)
-from lingofuse.lf_io import cstr
-import <Unit>_abi_call as abi
-
-LF_ResetPrepare()
-LF_PrepareClient(cstr("ipc:<Unit>_abi"), None)
-if LF_PrepareDone() != 1:
-    raise SystemExit(1)
-try:
-    print(abi.Add(3, 4))
-finally:
-    LF_ExitMainThread()
-    LF_Shutdown()
-```
-
-### 13.6 Adjusting the timeout
-
-```python
-import <Unit>_abi_call as abi
-abi.ABI_TIMEOUT = 30000  # 30 seconds
-```
-
-A value of `0` disables the timeout.
-
-### 13.7 Deployment
-
-The README's **§7.5 Runtime files** table applies. In practice, place next to your Python script (or on the loader search path):
-
-- `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib`
-- `z_ipc_*.dll` / `libz_ipc_*.so`
-
----
-
-## Chapter 14  Consuming the C++ Output
-
-The C++ target produces **four files per side**: `.hpp` + `.cpp` for the library, a README, and shared CMake plus test programs.
-
-### 14.1 What you receive
-
-For a service build:
-
-- `<Unit>_abi_service.hpp` — declaration header.
-- `<Unit>_abi_service.cpp` — implementation.
-- `<Unit>_abi_service_cpp.md` — the README.
-- `CMakeLists.txt` — build script covering both service and caller.
-- `<Unit>_abi_service_main.cpp` — service test entry point.
-- `<Unit>_abi_call_main.cpp` — caller test entry point (produced even in service mode).
-
-### 14.2 Filling in the service stubs
-
-Open `<Unit>_abi_service.cpp`. Each routine appears as a generated stub:
-
-```cpp
-int64_t internal_call_Add(int64_t a, int64_t b) {
-    // TODO: replace the body with a call to the real function.
-    //     return MyEngine::Add(a, b);
-    (void)a;
-    (void)b;
-    return 0;
-}
-```
-
-Two ways to fill it in:
-
-- **Option A (in place)**: replace the `TODO` and `return 0;` lines with your call. Leave the `(void)` lines; they silence unused-parameter warnings when the body is short.
-- **Option B (separate TU)**: the stubs are declared in the `.hpp`, so you can delete the placeholder bodies from the `.cpp` and provide your own definitions in a separate translation unit. The `Safe_Write_*` helpers are declared `inline` in the header, so they remain available to your file.
-
-### 14.3 Building
-
-The README's **§7.3 Build commands** section gives the exact invocations. If you use CMake, you only need to set one variable:
-
-```bash
-cmake -S . -B build -DLINGOFUSE_CPP_DIR=<dir-with-LingoFuse.h>
-cmake --build build --config Release
-```
-
-This produces:
-
-- `lingofuse_c_wrapper` (static library from `LingoFuse.c`)
-- `<Unit>_abi_service` (static library, if the service `.cpp` exists)
-- `<Unit>_abi_service_test` (executable, if the service main exists)
-- `<Unit>_abi_call` and `<Unit>_abi_call_test` (same for the caller side)
-
-### 14.4 Running the tests
-
-In one terminal:
-
-```bash
-./<Unit>_abi_service_test
-```
-
-Wait for `[OK] Service ready`, then in another terminal:
-
-```bash
-./<Unit>_abi_call_test
-```
-
-Expected output is spelled out in the README's **§8 Testing** and in the shared test README.
-
-### 14.5 The runtime loading contract
-
-**C++ test programs call `LF_LoadLibrary()` first.** This function takes no arguments; the wrapper searches:
-
-1. the directory containing the current executable, then
-2. the OS default loader search path.
-
-There is no environment-variable override at the C ABI level. Either place the runtime next to the executable, or put it on `PATH` / `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH`. See Chapter 16.
-
-### 14.6 MSVC users
-
-Add `/utf-8` to the compiler command line. Otherwise the non-ASCII characters in the API description strings are encoded with the system codepage and will not match the UTF-8 encoding LingoFuse expects.
-
-### 14.7 Adjusting the timeout and the target App name
-
-Both live in the `<Unit>_abi` namespace:
-
-```cpp
-<Unit>_abi::ABI_Timeout  = 30000;                      // 30 seconds
-<Unit>_abi::ABI_TargetApp = "my_other_service_abi";    // change target
-```
-
----
-
-## Chapter 15  Consuming the C# Output
-
-The C# target produces **three files**: a service library, a caller library, and two console test programs plus a shared test README.
-
-### 15.1 What you receive
-
-In a single run:
-
-- `<Unit>_abi_service.cs` — service library, class library, **no `Main`**.
-- `<Unit>_abi_service_csharp.md` — service README.
-- `<Unit>_abi_call.cs` — caller library, class library, **no `Main`**.
-- `<Unit>_abi_call_csharp.md` — caller README.
-- `<Unit>_abi_service_main_test___.cs` — service test program.
-- `<Unit>_abi_call_main_test___.cs` — caller test program.
-- `<Unit>_abi_test_csharp.md` — shared test README.
-
-### 15.2 The **entry-point-free** convention
-
-**The service and caller libraries deliberately contain no `Main`.** A C# project may have exactly one entry point; if the service library brought its own `Main`, any host program — or the paired test program — would immediately trigger `CS0017: Program has more than one entry point defined`.
-
-The two console test programs live in their own files, and each is meant to be compiled into **its own .NET console project** alongside the matching library.
-
-### 15.3 Filling in the service stubs
-
-Open `<Unit>_abi_service.cs`. Each routine appears as a generated stub inside the `InternalCalls` class:
-
-```csharp
-public static int InternalCall_Add(int a, int b)
-{
-    // TODO: replace the body with a call to the real function.
-    //     return MyEngine.Add(a, b);
-    return 0;
-}
-```
-
-Replace the placeholder body with a call to your real function.
-
-The callbacks in the `Callbacks` class hold a `static readonly` field per delegate, so the CLR cannot garbage-collect the callback delegate while the native layer still holds its pointer. **Do not remove those fields.**
-
-### 15.4 Building and running the service test
-
-The shared test README (`<Unit>_abi_test_csharp.md`) gives the exact `dotnet` commands. In short:
-
-```bash
-dotnet new console -o <Unit>_service_test
-cd <Unit>_service_test
-cp ../<Unit>_abi_service.cs .
-cp ../<Unit>_abi_service_main_test___.cs Program.cs
-cp ../runtime/LingoFuse64.dll .        # or .so / .dylib
-dotnet run
-```
-
-Expected output:
-
-```
-=== <Unit> ABI service test ===
-[OK] Service ready on ipc:<Unit>_abi.
-[OK] Registered N API(s).
-[OK] Press Enter to shut down.
-```
-
-### 15.5 Building and running the caller test
-
-In another terminal:
-
-```bash
-dotnet new console -o <Unit>_call_test
-cd <Unit>_call_test
-cp ../<Unit>_abi_call.cs .
-cp ../<Unit>_abi_call_main_test___.cs Program.cs
-cp ../runtime/LingoFuse64.dll .
-dotnet run
-```
-
-Expected: a per-API pass/fail line and a final summary; a non-zero exit code if any API failed.
-
-### 15.6 Coexistence with the service module
-
-Both `.cs` files can live side by side in the same project without symbol collisions because:
-
-- the service module uses the namespace `<Unit>_abi`;
-- the caller module uses the namespace `<Unit>_abi_call`;
-- each module owns its own `LfNative`, `LfIo`, and `EABI_RemoteError`, scoped to its own namespace.
-
-### 15.7 The runtime library path
-
-The runtime is resolved lazily on the first `LF_*` call through a `DllImportResolver` that maps the logical name `"LingoFuse"` to:
-
-| Platform | File |
-|----------|------|
-| Windows x64 | `LingoFuse64.dll` |
-| Windows x86 | `LingoFuse32.dll` |
-| Linux / BSD | `liblingofuse.so` |
-| macOS | `liblingofuse.dylib` |
-
-Place the file in the application directory, or on the OS loader search path.
-
-### 15.8 Adjusting the timeout and the target App name
-
-Both are static fields on the `ABI` class:
-
-```csharp
-ABI.Timeout   = 30000;                      // 30 seconds
-ABI.TargetApp = "my_other_service_abi";
-```
-
----
-
-## Chapter 16  Setting Up the Runtime Environment
-
-This chapter applies to **every target language**. It covers the binary files and the endpoint that every generated program needs at runtime.
-
-### 16.1 The runtime binaries
-
-| File | Role |
+| 文件 | 作用 |
 |------|------|
-| `LingoFuse64.dll` (Windows) / `liblingofuse.so` (Linux) / `liblingofuse.dylib` (macOS) | The LingoFuse core runtime. Every `LF_*` call goes through it. |
-| `z_ipc_*.dll` / `libz_ipc_*.so` | The IPC transport plugin. Required for loopback endpoints. |
-| `LingoFuse.hpp` / `lf_io.hpp` (C++ only) | C++ wrapper headers. |
-| `LingoFuse.h` / `LingoFuse.c` (C++ only) | C ABI declarations and the dynamic-loading wrapper source. |
+| `LingoFuse64.dll`（Windows）/ `liblingofuse.so`（Linux）/ `liblingofuse.dylib`（macOS） | LingoFuse 核心运行时。所有 `LF_*` 调用经由此 |
+| `z_ipc_*.dll` / `libz_ipc_*.so` | IPC 传输插件。loopback 端点必需 |
+| `LingoFuse.hpp` / `lf_io.hpp`（仅 C++） | C++ 包装头 |
+| `LingoFuse.h` / `LingoFuse.c`（仅 C++） | C ABI 声明与动态加载包装源码 |
 
-### 16.2 Where to place the binaries
+### 13.2 放置位置
 
-| Environment | Where to place them |
-|-------------|---------------------|
-| Pascal / Python / C++ / C# | Next to the executable, or on the OS loader search path |
+| 环境 | 放置位置 |
+|------|----------|
+| Pascal / Python / C++ / C# 等 | 可执行文件同目录，或系统 loader search path |
 | Linux / BSD | `LD_LIBRARY_PATH` |
 | macOS | `DYLD_LIBRARY_PATH` |
-| Windows | `PATH`, or the executable's own directory |
+| Windows | `PATH`，或可执行文件同目录 |
 
-The C++ test programs call `LF_LoadLibrary()` explicitly; all other languages rely on the OS loader.
+C++ 测试程序显式调用 `LF_LoadLibrary()`；其他语言依赖 OS loader。
 
-### 16.3 The default IPC endpoint
+### 13.3 默认 IPC 端点
 
-By convention, every ABI service listens on:
+按约定，每个 ABI service 监听：
 
 ```
 ipc:<UnitName>_abi
 ```
 
-for example, for a source unit named `Calculator`, the endpoint is `ipc:Calculator_abi`. The `<UnitName>` is the name the parser extracted from the source file. The generated code uses this endpoint consistently across languages, so a Python caller can reach a Pascal service, or a C# caller can reach a C++ service, without any manual coordination.
+例如源 unit 为 `Calculator` 时端点就是 `ipc:Calculator_abi`。`<UnitName>` 由解析器从源文件提取。所有语言的生成代码都使用同一端点约定，因此 Python caller 可直连 Pascal service，C# caller 可直连 C++ service —— 无需手工协调。
 
-### 16.4 Threading the runtime correctly
+### 13.4 运行时线程模型
 
-The runtime is **fully thread-safe** at the C ABI level. However:
+运行时在 C ABI 层**完全线程安全**。但：
 
-- **Callbacks execute on worker threads**, not the main thread. Every generated callback is wrapped in a language-appropriate guard so that no exception escapes into the C stack.
-- **Do not call `LF_Call` / `LF_Notify` from inside a callback.** Doing so deadlocks the calling worker thread. If you need to reach another service from inside a callback, offload the work to a separate thread (`TThread.CreateAnonymousThread`, `threading.Thread`, `std::thread`, `Task.Run`).
-- **Do not block inside a callback.** Long-running callbacks tie up worker threads from the pool.
+- **回调在 worker 线程执行**，不是主线程。每个生成的回调都被语言相应的守卫包装，避免异常逃逸到 C 栈。
+- **回调内不要调用 `LF_Call` / `LF_Notify`**。会导致 worker 线程自锁。若需在回调中到达另一个服务，请将工作投递到独立线程。
+- **回调内不要阻塞**。长时间运行的回调会占用 worker 池线程。
 
-### 16.5 Environment variables for the runtime
+### 13.5 运行时环境变量
 
-| Variable | Purpose |
-|----------|---------|
-| `LD_LIBRARY_PATH` (Linux) / `DYLD_LIBRARY_PATH` (macOS) | Add extra directories to the loader search path. |
-| `PATH` (Windows) | Same, on Windows. |
+| 变量 | 作用 |
+|------|------|
+| `LD_LIBRARY_PATH`（Linux）/ `DYLD_LIBRARY_PATH`（macOS） | 追加 loader 搜索目录 |
+| `PATH`（Windows） | 同上，Windows 用 |
 
-There is **no environment-variable override** for the LingoFuse runtime name itself, and no way to point at a runtime in an arbitrary directory at the C ABI level. Either place the runtime next to the executable, or put it on the loader search path.
+**没有**通过环境变量覆盖 LingoFuse 运行时文件名的机制，也**没有**在 C ABI 层指向任意目录运行时的方式。要么放到可执行文件同目录，要么放到 loader search path。
 
 ---
 
-## Chapter 17  Running an End-to-End Service/Caller Pair
+## Chapter 14  端到端运行 Service/Caller 对
 
-This chapter is the **shortest possible end-to-end recipe**: two processes, one service, one caller, running on the same machine over loopback IPC.
+本章是**最短的端到端配方**：两个进程，一个 service，一个 caller，同机 loopback IPC。
 
-### 17.1 Overview
+### 14.1 流程示意
 
 ```mermaid
 flowchart LR
-    A["Process 1 — Service<br/>registers APIs on ipc:&lt;Unit&gt;_abi"]
-    B["Process 2 — Caller<br/>connects to ipc:&lt;Unit&gt;_abi"]
+    A["Process 1 — Service<br/>在 ipc:&lt;Unit&gt;_abi 上注册 API"]
+    B["Process 2 — Caller<br/>连接 ipc:&lt;Unit&gt;_abi"]
     A -. "LF_Call" .-> B
     B -. "response" .-> A
 ```
 
-### 17.2 Step 1 — Build the service and the caller
+### 14.2 Step 1 — 构建 service 与 caller
 
-For each language, follow the corresponding chapter of Part II:
+每种语言按 Chapter 12 对应小节或 `setup_*_tests.ps1 -Help` 执行。你最终会得到两个可执行文件（Python 是两个可运行模块），都指向同一端点。
 
-- **Pascal** — Chapter 12
-- **Python** — Chapter 13
-- **C++** — Chapter 14
-- **C#** — Chapter 15
+### 14.3 Step 2 — 放置运行时二进制
 
-In every case, you end up with two executables (or, for Python, two runnable modules) that both reference the same endpoint.
+确保两个进程都能找到 `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib` 与 `z_ipc_*.dll` / `libz_ipc_*.so`。见 Chapter 13。
 
-### 17.3 Step 2 — Place the runtime binaries
+### 14.4 Step 3 — 启动 service
 
-Make sure both processes can find:
+在**终端 1**：
 
-- `LingoFuse64.dll` / `liblingofuse.so` / `liblingofuse.dylib`
-- `z_ipc_*.dll` / `libz_ipc_*.so`
+- Pascal / C++ / C# / Rust / Go / Zig / Swift / Fortran：运行你编译的 service 可执行文件；
+- Python：`python <Unit>_abi_service.py`；
+- Node.js：`node <Unit>_abi_service_test.js`；
+- Java：`run_java_service.ps1`；
+- Julia：`run_julia_service.ps1`；
+- Dart：`dart run <Unit>_abi_service_test.dart`；
+- Ruby：`ruby <Unit>_abi_service_test.rb`；
+- Erlang：`erl -noshell -pa ... -eval "<Unit>_abi_service_main:main([])."`；
+- R：`Rscript --vanilla <Unit>_abi_service_test.R`；
+- TypeScript：`node <tsx> <Unit>_abi_service_test.ts` 或 `node dist/<Unit>_abi_service_test.js`。
 
-See Chapter 16.
-
-### 17.4 Step 3 — Start the service
-
-In **terminal 1**:
-
-- Pascal: run your compiled service executable.
-- Python: `python <Unit>_abi_service.py`.
-- C++: `./<Unit>_abi_service_test`.
-- C#: `dotnet run` inside the service test project.
-
-Wait for the service to print something equivalent to:
+等待打印类似：
 
 ```
 [OK] Service ready on ipc:<Unit>_abi.
 ```
 
-### 17.5 Step 4 — Start the caller
+### 14.5 Step 4 — 启动 caller
 
-In **terminal 2**:
+在**终端 2**：
 
-- Pascal: run your compiled caller executable.
-- Python: `python <Unit>_abi_client.py`.
-- C++: `./<Unit>_abi_call_test`.
-- C#: `dotnet run` inside the caller test project.
+- 同语言对应 call test；
+- 或你自己的应用代码直接 import caller 库。
 
-The caller will connect, invoke every API once (for the test programs) or invoke the APIs you actually call (for your own application), and print the results.
+test 程序会为每个 API 调用一次并打印结果；你的应用按需调用。
 
-### 17.6 Step 5 — Shut down cleanly
+### 14.6 Step 5 — 干净关闭
 
-In the service terminal:
+在 service 终端：
 
-1. Press Enter (or type `exit`) to trigger shutdown.
-2. Observe `[OK] Shutdown complete.`
-3. The service releases its App handle and shuts down the runtime.
+1. 按 Enter（或输入 `exit`）触发 shutdown；
+2. 看到 `[OK] Shutdown complete.`；
+3. service 释放 App handle 并关闭运行时。
 
-The caller side shuts down on its own when its program exits.
+caller 侧在程序退出时自行关闭。
 
-### 17.7 A worked example
+### 14.7 完整示例
 
-Suppose the source is:
+源：
 
 ```pascal
 unit Calculator;
@@ -1400,209 +1279,217 @@ implementation
 end.
 ```
 
-After generation and compilation:
+生成并编译后：
 
-1. The service process registers the APIs `Add` and `Mul` on `ipc:Calculator_abi`.
-2. The caller process connects to `ipc:Calculator_abi` and calls `Add(20, 22)`.
-3. The caller prints `42`.
+1. service 进程在 `ipc:Calculator_abi` 上注册 `Add` 与 `Mul`；
+2. caller 进程连接 `ipc:Calculator_abi` 并调用 `Add(20, 22)`；
+3. caller 打印 `42`。
 
-### 17.8 Mixed-language deployments
+### 14.8 混合语言部署
 
-The ABI wire protocol is language-agnostic. You can mix:
+ABI 线协议与语言无关。你可以：
 
-- a Python service with a C++ caller,
-- a Pascal service with a C# caller,
-- a C++ service with a Python caller,
-- any other combination.
+- Python service ↔ C++ caller；
+- Pascal service ↔ C# caller；
+- C++ service ↔ Python caller；
+- 任意其他组合。
 
-The only requirements are that both ends were generated from **the same source unit** and that they both speak LingoFuse's ABI wire format.
-
----
-
-# Part III — Reference
+唯一要求：两端都由**同一源 unit**生成，且都说 LingoFuse 二进制 ABI 线格式。
 
 ---
 
-## Chapter 18  Type System: What Is Supported and What Is Dropped
+# Part III — 参考
 
-### 18.1 The three supported families
+---
 
-Only three families are supported by the generators.
+## Chapter 15  类型系统
 
-**Integer family**: `integer`, `longint`, `int64`, `cardinal`, `dword`, `longword`, `uint64`, `word`, `smallint`, `byte`.
+### 15.1 三个受支持类型族
 
-**Float family**: `double`, `single`, `extended`, `real`.
+**整数族**：`integer`、`longint`、`int64`、`cardinal`、`dword`、`longword`、`uint64`、`word`、`smallint`、`byte`。
 
-**String family**: `string`, `ansistring`, `unicodestring`, `tpascalstring`, `tupascalstring`, `tp_string`, `pchar`, `pansichar`, `pwidechar`.
+**浮点族**：`double`、`single`、`extended`、`real`。
 
-### 18.2 Target-language mapping
+**字符串族**：`string`、`ansistring`、`unicodestring`、`tpascalstring`、`tupascalstring`、`tp_string`、`pchar`、`pansichar`、`pwidechar`。
 
-| ABI family | Pascal | Python | C++ | C# |
-|-----------|--------|--------|-----|-----|
-| String | `string` | `str` | `std::string` | `string` |
-| Float | preserved (`Double` / `Single` / `Extended` / `Real`) | `float` | `double` / `float` | `double` / `float` |
-| Integer | preserved (`Integer` / `Int64` / …) | `int` | `int32_t` / `int64_t` / … | `int` / `long` / … |
+### 15.2 各目标语言类型映射（节选）
 
-### 18.3 Unsupported types — silent drop
+| ABI 族 | Pascal | Python | C++ | C# | Rust | Go | Java | Node.js | Zig | Swift | Ruby |
+|--------|--------|--------|-----|-----|------|-----|------|---------|-----|-------|------|
+| String | `string` | `str` | `std::string` | `string` | `String` | `string` | `String` | `string` | `[]u8` | `String` | `String` |
+| Float (double) | `Double` | `float` | `double` | `double` | `f64` | `float64` | `double` | `number` | `f64` | `Double` | `Float` |
+| Float (single) | `Single` | `float` | `float` | `float` | `f32` | `float32` | `float` | `number` | `f32` | `Float` | `Float` |
+| Int32 | `Integer` | `int` | `int32_t` | `int` | `i32` | `int32` | `int` | `number` | `i32` | `Int32` | `Integer` |
+| Int64 | `Int64` | `int` | `int64_t` | `long` | `i64` | `int64` | `long` | `bigint` | `i64` | `Int64` | `Integer` |
 
-The following cause the **entire routine to be silently dropped**:
+（完整映射见各生成器单元中的 `ABI_Type_To_<Lang>_Decl` 函数。）
 
-- `Boolean`, `WordBool`, `LongBool`
-- `Variant`, `OleVariant`
-- Arrays, records, classes, interfaces
-- Enums, sets, generics
-- Pointers, function pointers
-- `Currency`, `Comp`, `TDateTime`
-- Any C `struct` / `enum` / `union`
-- Any C pointer other than `char *` / `const char *` / `char const *`
+### 15.3 不受支持类型 — 静默丢弃
 
-### 18.4 The six filters in `LoadFromParser`
+以下类型会导致**整条 routine 被静默丢弃**：
 
-The model-building stage enforces six filters. Any of them tripping causes the routine to disappear from the model:
+- `Boolean`、`WordBool`、`LongBool`
+- `Variant`、`OleVariant`
+- 数组、记录、类、接口
+- 枚举、集合、泛型
+- 指针、函数指针
+- `Currency`、`Comp`、`TDateTime`
+- 任何 C `struct` / `enum` / `union`
+- 除 `char *` / `const char *` / `char const *` 之外的任何 C 指针
+
+### 15.4 `LoadFromParser` 的六道过滤
+
+模型构建阶段执行六道过滤，任何一道触发都会让该 routine 从模型中消失：
 
 1. `IsProc = False`
-2. `NestLevel <> 0` (declared inside a class, record, or interface)
-3. Empty parameter name
-4. `var` / `out` parameter modifier
-5. Unsupported parameter type
-6. Unsupported return type
+2. `NestLevel <> 0`（声明在类、记录或接口内部）
+3. 空参数名
+4. `var` / `out` 参数修饰符
+5. 参数类型不受支持
+6. 返回类型不受支持
 
-**Workaround**: serialize complex values into a `string` before passing them; deserialize on the receiving side.
+**变通方法**：在调用前将复杂值序列化为 `string`，接收侧再反序列化。
 
 ---
 
-## Chapter 19  The Wire Protocol
+## Chapter 16  线协议
 
-### 19.1 Request and response shape
+### 16.1 请求与响应形态
 
 ```mermaid
 flowchart LR
     A["Request = [field1][field2]...[fieldN]"] --> B["Response = [status:uint8_t][payload]"]
-    B --> C["status = 0x00<br/>payload = serialized result"]
-    B --> D["status = 0xFF<br/>payload = UTF-8 error message"]
+    B --> C["status = 0x00<br/>payload = 序列化结果"]
+    B --> D["status = 0xFF<br/>payload = UTF-8 错误消息"]
 ```
 
-### 19.2 Field encodings
+### 16.2 字段编码
 
-| Type | Encoding |
+| 类型 | 编码 |
+|------|------|
+| 整数 | 小端定宽 |
+| 浮点 | IEEE 754（`Single` 4 字节、`Double` 8 字节、`Extended` 10 字节） |
+| 字符串 | 原始 UTF-8 字节 + 一个 NUL 终止符 |
+
+### 16.3 状态字节语义
+
+| Status | 含义 | Payload |
+|:------:|------|---------|
+| `0x00` | 成功 | 序列化结果；procedure 时为空 |
+| `0xFF` | 失败 | UTF-8 错误消息 |
+
+生成的 service 总是在写任何载荷前先写两个状态之一。生成的 caller 先读状态；非 `0x00` 时抛出语言相应的异常。
+
+### 16.4 并发画像
+
+线格式刻意做到**低分配**：
+
+- 从不构建 JSON AST；
+- 字符串以原始 UTF-8 字节搬运，不做转义/反转义往返；
+- 无文本解析：无数字解析器、无词法分析、无结构校验；
+- 每次调用的分配：handle 一次（从池中复用），加上每个目标字符串一次。
+
+这正是**高并发 service mesh 与微服务背板**需要的画像。
+
+### 16.5 跨语言混用
+
+线格式与语言无关。任何正确实现编码器与解码器的语言都能与任何其他语言通信。当前 17 个后端对相同签名产生的线格式**逐字节相同**。
+
+---
+
+## Chapter 17  故障排查
+
+### 17.1 生成期问题
+
+| 症状 | 根因 | 修复 |
+|------|------|------|
+| CLI 报 "cannot detect source language" | 输入文件扩展名不在源语言表 | 重命名，或更新 `Detect_Source_Lang` |
+| CLI 报 "cannot detect target language" | 输出文件扩展名不在目标语言表，且未给 `--lang` | 重命名、或用 `--lang` 指定 |
+| 期望的 routine 不在模型中 | 六道过滤之一触发 | 见 Chapter 15 |
+| 全部 routine 缺失 | 源中没有顶层 routine，或全部未通过类型检查 | 查看报告 |
+| MCP `GenerateAll` 返回 `{"error":"Unsupported source language"}` | 传了目标语言（`python` / `cpp` / `csharp`）而非源语言 | 传 `pascal` 或 `c` |
+| MCP `GetTargetCode` 返回 `{"error":"File ... is not in the current target list"}` | 文件名有误，或未先调用 `GetTargetList` | 先 `GetTargetList` 并按返回文件名精确匹配 |
+| MCP `RegisterTools` 返回 False | beacon 不可达，或 `regCount` 不匹配 | 检查 `LF_CheckApiEx(BEACON_APP, REGISTER_API)` |
+
+### 17.2 构建期问题
+
+| 症状 | 语言 | 修复 |
+|------|------|------|
+| `Can't find unit Z.Core` | Pascal | 加 `-Fu<dir-with-Z.Core.pas>` |
+| `Can't find unit lingofuse_import` | Pascal | 加 `-Fu<dir-with-lingofuse_import.pas>` |
+| `ModuleNotFoundError: lingofuse` | Python | `pip install py-lingofuse`，或设 `PYTHONPATH` |
+| `fatal error: LingoFuse.hpp: No such file` | C++ | 加 `-I<dir-with-LingoFuse.hpp>`，或设 `LINGOFUSE_CPP_DIR` |
+| `undefined reference to LF_*` | C++ | 加 `-lLingoFuse` 与 `-L<dir>` |
+| `error CS0017: Program has more than one entry point` | C# | 你给生成的库加了 `Main`，或旧拷贝残留。删旧再重新生成 |
+| `error CS0246: type or namespace not found` | C# | 匹配的库 `.cs` 不在项目中 |
+| `cargo build` 找不到 `lingofuse` crate | Rust | `setup_rust_tests.ps1 -Help` 检查 `Cargo.toml` 中 `lingofuse = { path = ... }` |
+| `go: module not found` | Go | `setup_go_tests.ps1` 检查 `go.mod` 与 `replace` 指令 |
+| `mvn compile` 找不到依赖 | Java | `setup_java_tests.ps1` 检查 `lib/lingofuse.jar` 与 `pom.xml` systemPath |
+| `npm install` 失败 | Node.js / TS | `setup_node_tests.ps1` / `setup_ts_tests.ps1` 检查网络与 `LingoFuseJs` / `LingoFuseTs` 路径 |
+| `tsc --noEmit` 报错 | TypeScript | 检查 `tsconfig.json` 的 `strict`/`module` 设置；重新用 `-Force` 生成 |
+| rebar3 编译失败 | Erlang | 检查 OTP ≥ 27、`rebar.config`、`lingofuse.beam` 的 ebin 路径 |
+| Julia `Pkg.develop` 失败 | Julia | `setup_julia_tests.ps1 -Help`，需要 Julia 注册表可访问 |
+| `zig build` 报 invalid fingerprint | Zig | 重跑 `setup_zig_tests.ps1`（脚本会自动修正 fingerprint） |
+| `swift build` 找不到 `LingoFuse` 包 | Swift | `setup_swift_tests.ps1 -Help`，检查 `Package.swift` 中 `LingofuseDir` |
+| `gfortran` 未找到 | Fortran | 安装 MinGW-w64 / MSYS2，`setup_fortran_tests.ps1 -Help` |
+| `dart pub get` 失败 | Dart | `setup_dart_tests.ps1 -Help`，检查 `lingofuse` Dart 包与 `pubspec.yaml` |
+| `lingofuse` R 包 API 不完整 | R | `setup_R_tests.ps1 -Help`，脚本会校验 API surface |
+
+### 17.3 运行期问题
+
+| 症状 | 根因 | 修复 |
+|------|------|------|
+| `DllNotFoundException: LingoFuse64.dll` | 运行时库不在 search path | 放到可执行文件同目录；见 Chapter 13 |
+| `BadImageFormatException` | 架构不匹配（32-bit vs 64-bit） | 使用与平台匹配的运行时 |
+| `LF_PrepareDone` 返回 0 | 其他组件已启动主线程，或 service 未启动 | 重排启动顺序，或确认 service 在跑 |
+| `EABI_RemoteError: nil (timeout)` | App 名不匹配，或超时过短 | 检查 `TargetApp` / `DEFAULT_APP_NAME`；加大超时 |
+| `EABI_RemoteError: "input truncated"` | 字段比预期少 | 确认两端由同一模型生成 |
+| `EABI_RemoteError: <garbled bytes>` | 编码不一致 | 确认两端使用相同类型表 |
+| 回调从不触发 | `internal_call_*` 桩仍是占位 | 替换桩体 |
+| 回调内部死锁 | 在回调内做了阻塞的 LingoFuse 调用 | 将调用投递到独立线程 |
+| Service UI 崩溃 | worker 线程回调触及 UI | 编组到主线程，或启用同步桩变体（Pascal） |
+
+### 17.4 下一步该看哪里
+
+- **Pascal / Python / C++ / C# / 其他 17 种** —— 对应 `setup_*_tests.ps1 -Help` 输出即该语言的环境手册；脚本顶部注释也承载构建说明。
+- **线级问题** —— Chapter 16 给出每个 API 的精确字节布局。
+
+---
+
+## Chapter 18  已知限制与路线图
+
+### 18.1 当前限制
+
+- **17 种目标语言**（Pascal、Python、C++、C#、Rust、Go、Java、Node.js、TypeScript、Erlang、Julia、Zig、Swift、Ruby、Fortran、Dart、R）。JavaScript 完整覆盖由 `code_decl_to_json_abi` 承担。
+- **三个类型族**（整数、浮点、字符串）。复杂类型需由调用方序列化为 `string`。
+- **两种源语言**（Pascal、C）。新增源语言是已文档化流程。
+- **不再生成 README/`.md` 文档**：所有构建与运行说明由本指南承载，或由 `setup_*_tests.ps1` 的内嵌帮助携带。
+- **MCP 提供者与 GUI 同生命周期**：没有无头 MCP 模式。
+- **CLI 不启动 service 或运行时**：由 Part II 覆盖。
+
+### 18.2 路线图
+
+生成器后端设计为**支持无限多目标语言**。新增语言的机械流程在 `code_decl_to_abi_OPERATIONS.md` Chapter 14 中记录，对每种语言都一样。
+
+未来版本将继续扩展，包括但不限于：
+
+- 系统语言：Nim、D、OCaml。
+- JVM：Kotlin、Scala。
+- .NET：F#、VB.NET。
+- 函数式：Haskell、Elixir、Clojure。
+- 脚本：PHP、Perl、Lua。
+- 领域专用：MATLAB、Wolfram Language。
+
+新增语言时，**用户契约不变**：相同的 CLI 标志、相同的 GUI Tab、相同的 MCP 工具继续工作。差别只是后端多了一组 `<lang>_abi_*` 生成器单元，以及该语言特有的一套构建与测试脚本。
+
+### 18.3 `code_decl_to_abi` vs `code_decl_to_json_abi`
+
+| 场景 | 推荐工具 |
 |------|----------|
-| Integer | Little-endian, fixed width |
-| Float | IEEE 754 (`Single` 4 bytes, `Double` 8 bytes, `Extended` 10 bytes) |
-| String | Raw UTF-8 bytes followed by a single `NUL` terminator |
+| 两端都是 LingoFuse 原生，高并发服务 | **`code_decl_to_abi`** |
+| 数值重或二进制重载荷 | **`code_decl_to_abi`** |
+| 一端是浏览器、外部 HTTP 客户端、无 LingoFuse 绑定的语言 | `code_decl_to_json_abi` |
+| 载荷需可读、可 `curl` 调试 | `code_decl_to_json_abi` |
+| 需要桥接第三方 HTTP API | `code_decl_to_json_abi` |
 
-### 19.3 Status byte semantics
-
-| Status | Meaning | Payload |
-|:------:|---------|---------|
-| `0x00` | Success | Serialized result, or empty for a procedure |
-| `0xFF` | Failure | UTF-8 error message |
-
-The generated service always writes one of these two statuses before writing any payload. The generated caller reads the status first and raises its language-appropriate exception when the status is not `0x00`.
-
-### 19.4 Concurrency profile
-
-The wire format is deliberately allocation-light:
-
-- No JSON AST is ever built.
-- Strings are moved as raw UTF-8 bytes; no escape/unescape round trip.
-- No text parse: no number parser, no lexer, no structural validation.
-- Per-call allocations: one for the handle (recycled from a pool), plus one per string destination.
-
-This is exactly the profile you want for high-concurrency service meshes and microservice backplanes.
-
-### 19.5 Cross-language mixing
-
-The wire format is language-agnostic. Any language with a correct implementation of the encoder and decoder can talk to any other. The four current backends all emit byte-identical wire formats for the same signature.
-
----
-
-## Chapter 20  Troubleshooting
-
-### 20.1 Generation-time issues
-
-| Symptom | Root cause | Fix |
-|---------|-----------|-----|
-| CLI reports "cannot detect source language" | The input file's extension is not in the source language table | Rename the file, or update `Detect_Source_Lang` (see OPERATIONS Chapter 15) |
-| CLI reports "cannot detect target language" | The output file's extension is not in the target language table | Rename the output, or update `Detect_Target_Lang` (see OPERATIONS Chapter 9) |
-| A routine you expected is missing from the model | One of the six filters tripped | See Chapter 18 |
-| All routines are missing | The source has no top-level routines, or every routine failed the type check | Check the report |
-| MCP `SetSourceCode` returns `{"error":"Unsupported source language"}` | You passed a target language (`python` / `cpp` / `csharp`) instead of a source language | Pass `pascal` or `c` |
-| MCP `ConvertToXxx` returns empty | `SetSourceCode` was not called first, or the source text is empty | Call `SetSourceCode` first |
-| MCP `RegisterTools` returns False | Beacon is not reachable, or `regCount` mismatch | Check `LF_CheckApiEx(BEACON_APP, REGISTER_API)` |
-
-### 20.2 Build-time issues
-
-| Symptom | Language | Fix |
-|---------|----------|-----|
-| `Can't find unit Z.Core` | Pascal | Add `-Fu<dir-with-Z.Core.pas>` |
-| `Can't find unit lingofuse_import` | Pascal | Add `-Fu<dir-with-lingofuse_import.pas>` |
-| `ModuleNotFoundError: lingofuse` | Python | `pip install py-lingofuse`, or set `PYTHONPATH` |
-| `fatal error: LingoFuse.hpp: No such file` | C++ | Add `-I<dir-with-LingoFuse.hpp>` |
-| `undefined reference to LF_*` | C++ | Add `-lLingoFuse` and `-L<dir>` |
-| `error CS0017: Program has more than one entry point` | C# | You added a `Main` to a generated library, or an old copy of the library is still present. Delete it and regenerate. |
-| `error CS0246: type or namespace not found` | C# | The matching library `.cs` file is not in the project |
-
-### 20.3 Runtime issues
-
-| Symptom | Root cause | Fix |
-|---------|-----------|-----|
-| `DllNotFoundException: LingoFuse64.dll` | Runtime library not on the search path | Copy it next to the executable; see Chapter 16 |
-| `BadImageFormatException` | Architecture mismatch (32-bit vs 64-bit) | Use the matching runtime for your platform |
-| `LF_PrepareDone` returns 0 | Another component already started the main thread, or the service is not running | Reorder startup, or check that the service is up |
-| `EABI_RemoteError: nil (timeout)` | App name mismatch, or timeout too short | Check `TargetApp` / `DEFAULT_APP_NAME`; increase the timeout |
-| `EABI_RemoteError: "input truncated"` | Fewer fields than expected | Verify both sides were generated from the same model |
-| `EABI_RemoteError: <garbled bytes>` | Encoding mismatch | Verify both sides use the same type table |
-| Callback never fires | The `internal_call_*` stub is still the placeholder | Replace the stub body |
-| Deadlock inside a callback | A blocking LingoFuse call was made inside a callback | Offload the call to a separate thread |
-| UI crashes in the service | A worker-thread callback touched the UI | Marshal to the main thread, or enable the synchronised stub variant (Pascal) |
-
-### 20.4 Where to look next
-
-- **Pascal / Python / C++ / C#** — the corresponding README's §10 Troubleshooting table is tuned to that target and is the fastest place to look.
-- **Wire-level problems** — the README's §4 Wire Protocol shows the exact byte layout for every API in your service.
-
----
-
-## Chapter 21  Known Limitations and Roadmap
-
-### 21.1 Current limitations
-
-- **Four target languages** (Pascal, Python, C++, C#). The JavaScript path is provided by `code_decl_to_json_abi`.
-- **Three type families** (integer, float, string). Complex types must be serialized to `string` by the caller.
-- **Two source languages** (Pascal, C). Adding a new source language is a documented process.
-- **MCP provider is tied to the GUI's lifetime.** There is no headless MCP mode.
-- **The CLI does not start the service or the runtime.** Part II of this guide covers that.
-
-### 21.2 Roadmap
-
-The generator backend is engineered to support **an unbounded number of target languages**. The mechanical procedure for adding a new language is documented in `code_decl_to_abi_OPERATIONS.md` Chapter 14, and is identical for every language.
-
-Future releases will extend coverage to additional language families, including but not limited to:
-
-- Systems languages: Rust, Go, Zig, Nim, D, Swift.
-- JVM languages: Java, Kotlin, Scala.
-- .NET languages: F#, VB.NET.
-- Functional languages: OCaml, Haskell, F#, Elixir, Erlang.
-- Scripting languages: Ruby, PHP, Perl, Lua, Julia.
-- Domain-specific ecosystems: R, MATLAB, Wolfram Language.
-
-When a language is added, **the user-facing contract does not change**: the same CLI flags, the same GUI tabs, and the same MCP tools continue to work. The only difference is a new set of `<lang>_abi_*` generator units in the backend and a new companion `.md` per artifact.
-
-### 21.3 When to use this tool versus `code_decl_to_json_abi`
-
-| Scenario | Recommended tool |
-|----------|------------------|
-| Both ends are LingoFuse-native, high-concurrency service | **`code_decl_to_abi`** |
-| Numeric-heavy or binary-heavy payloads | **`code_decl_to_abi`** |
-| One end is a browser, an external HTTP client, or a language without a LingoFuse binding | `code_decl_to_json_abi` |
-| Payloads must be human-readable or debuggable with `curl` | `code_decl_to_json_abi` |
-| You need to bridge to third-party HTTP APIs | `code_decl_to_json_abi` |
-
-The two tools share the same input format, the same intermediate model, and the same type system; they differ only in the **wire format**.
-
----
-
-**Document version**: 2.0
-**Document role**: End-to-end user guide for `code_decl_to_abi` — covering both **using the tool** (Chapters 1–9) and **using the generated code** (Chapters 10–17), with reference material for the type system, wire protocol, and troubleshooting.
-**Companion documents**: `code_decl_to_abi_OPERATIONS.md` (internals), `pascal_code_abi_rule.md` and `C_code_abi_rule.md` (input contracts), and the four per-language README files produced by the tool itself.
-**Language of the tool and of every generated artifact**: English.
+两工具共享相同输入格式、中间模型和类型系统；仅**线格式**不同。

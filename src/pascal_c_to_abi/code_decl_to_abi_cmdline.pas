@@ -1,166 +1,16 @@
 unit code_decl_to_abi_cmdline;
 
-(*
-  code_decl_to_abi_cmdline
-
-  Command-line front end for the code_decl_to_abi generator.
-
-  This unit is fully independent from the GUI and from LingoFuse. It
-  performs the same parsing and code generation work as the graphical
-  tool, but it never creates a form and never touches the UI thread. It
-  is intended to be called at the very start of the host program, before
-  the LCL application object is created.
-
-  Typical usage inside the host program (code_decl_to_abi.lpr):
-
-      begin
-        if not Process_CommandLine then
-        begin
-          exitCode := CommandLine_ExitCode;
-          exit;
-        end;
-
-        RequireDerivedFormResource := True;
-        Application.Scaled := True;
-        Application.MainFormOnTaskbar := True;
-        Application.Initialize;
-        Application.CreateForm(Tcode_decl_to_abi_form, code_decl_to_abi_form);
-        Application.Run;
-      end.
-
-  Process_CommandLine returns True when the process has no command-line
-  arguments at all, indicating that the caller should continue with the
-  normal GUI startup. It returns False when a command-line action has
-  been handled; the host program should then exit with the code stored
-  in CommandLine_ExitCode.
-
-  CONSOLE HANDLING
-  ----------------
-
-  The host project is built as a CONSOLE-subsystem application (via the
-  {$apptype console} directive). This is required so that the parent
-  shell waits for our output before printing its next prompt; a GUI-
-  subsystem build would let the parent shell return immediately and
-  would interleave the shell prompt with our help text.
-
-  Two console behaviours are handled by this unit:
-
-      - No command-line arguments. The console window that a console-
-        subsystem build allocates at startup is hidden before returning
-        True. The LCL application then runs exactly as a normal GUI
-        application; double-clicking the executable does not leave an
-        empty console window on screen.
-
-      - At least one command-line argument. The console is kept visible.
-        A custom DoStatus hook routes every message straight to standard
-        output, bypassing the queue-based mechanism of Z.Status that
-        requires a running main loop. When the requested work is done
-        the function flushes stdout and returns False so that the host
-        program exits normally with the code in CommandLine_ExitCode.
-
-  All status output goes through DoStatus. No direct WriteLn is used by
-  this unit's logic; only the console hook (private to this unit)
-  writes to standard output.
-
-  Supported command-line forms:
-
-      code_decl_to_abi --help
-      code_decl_to_abi <input_file> <output_file>
-      code_decl_to_abi --call <input_file> <output_file>
-
-  The source language is detected from the input file extension. The
-  target language is detected from the output file extension. The
-  direction (service or call) is controlled by the --call flag; the
-  default is service.
-
-  OUTPUT NAMING PER TARGET
-  ------------------------
-
-  Pascal and Python honour the file name you provide as-is.
-
-  C++ and C# do NOT use your file name directly. They derive the real
-  names from the parsed source-unit name, because the companion CMake
-  script (C++) and the two console projects (C#) reference the files by
-  that canonical name. The DIRECTORY part of your output argument is
-  respected; the file name itself is replaced.
-
-  C++ OUTPUT NAMING
-  -----------------
-
-  For the C++ target the tool produces a header / implementation pair
-  plus a CMakeLists.txt and two runnable test programs:
-
-      Service side writes:
-          <UnitName>_abi_service.hpp
-          <UnitName>_abi_service.cpp
-          <UnitName>_abi_service_cpp.md
-      Call side writes:
-          <UnitName>_abi_call.hpp
-          <UnitName>_abi_call.cpp
-          <UnitName>_abi_call_cpp.md
-
-  Both sides additionally write:
-
-      CMakeLists.txt
-      <UnitName>_abi_service_main.cpp
-      <UnitName>_abi_call_main.cpp
-
-  The generator emits the CMake script and the two test programs in both
-  modes, so running the CLI twice (once for the service side, once for
-  the call side) leaves a consistent, buildable directory.
-
-  C# OUTPUT NAMING AND MODE
-  -------------------------
-
-  The C# backend produces the complete set in a SINGLE invocation. The
-  --call flag is accepted for interface compatibility but is IGNORED
-  when the output extension is .cs. Every run writes:
-
-      <UnitName>_abi_service.cs
-      <UnitName>_abi_service_csharp.md
-      <UnitName>_abi_call.cs
-      <UnitName>_abi_call_csharp.md
-      <UnitName>_abi_service_main_test___.cs
-      <UnitName>_abi_call_main_test___.cs
-      <UnitName>_abi_test_csharp.md
-
-  Rationale: the two console test programs reference both the service
-  library and the call library by namespace. Emitting only one of the
-  two libraries would leave the test projects uncompilable until a
-  second run completed the picture. Producing the full set in one go
-  keeps every artefact consistent.
-
-  README COMPANIONS
-  -----------------
-
-  Every successful run also produces one or more companion Markdown
-  READMEs describing the generated artefacts. The READMEs are the real
-  build/deploy guides for the generated code and should be read before
-  writing any build script.
-*)
+{$DEFINE FPC_DELPHI_MODE}
+{$I ..\..\zCore\src\Z.Define.inc}
 
 interface
 
 uses
   SysUtils;
 
-(*
-  Exit code produced by the last Process_CommandLine call. The host
-  program should pass this value to the process exit code (Delphi mode:
-  exitCode := CommandLine_ExitCode; exit;).
-*)
 var
   CommandLine_ExitCode: Integer = 0;
 
-(*
-  Inspect the process command line.
-
-  Return value:
-    True   no command-line arguments were supplied; the caller should
-           continue with the normal GUI startup.
-    False  a command-line action was performed; the caller should exit
-           with the code stored in CommandLine_ExitCode.
-*)
 function Process_CommandLine: Boolean;
 
 implementation
@@ -178,16 +28,7 @@ uses
   Z.UnicodeMixedLib,
   Z.Pascal_Func_Model,
   Z.Pascal_Func_Tool,
-  pas_abi_service_generator_tool,
-  pas_abi_call_generator_tool,
-  py_abi_service_generator_tool,
-  py_abi_call_generator_tool,
-  cpp_abi_service_generator_tool,
-  cpp_abi_call_generator_tool,
-  cpp_abi_cmake_generator_tool,
-  csharp_abi_service_generator_tool,
-  csharp_abi_call_generator_tool,
-  csharp_abi_test_generator_tool;
+  code_decl_to_abi_registry;
 
 const
   EXIT_OK           = 0;
@@ -198,115 +39,12 @@ const
 
 type
   TSourceLang = (slPascal, slC, slUnknown);
-  TTargetLang = (tlPascal, tlPython, tlCpp, tlCsharp, tlUnknown);
   TTargetMode = (tmService, tmCall);
 
-(* ------------------------------------------------------------------------ *)
-(* Console output hook                                                        *)
-(* ------------------------------------------------------------------------ *)
-
-(*
-  DoStatus hook used in command-line mode. Every message is written to
-  standard output immediately. Because the host project is built as a
-  console-subsystem application, WriteLn reaches the same console the
-  parent shell is already waiting on; no AttachConsole or AllocConsole
-  is needed.
-*)
 procedure CmdLine_DoStatus_Hook(Text_: SystemString; const ID: Integer);
 begin
   WriteLn(Text_);
 end;
-
-(* ------------------------------------------------------------------------ *)
-(* Help text                                                                  *)
-(* ------------------------------------------------------------------------ *)
-
-procedure Print_Help;
-begin
-  DoStatus('code_decl_to_abi - LF-ABI interface code generator');
-  DoStatus('');
-  DoStatus('USAGE');
-  DoStatus('  code_decl_to_abi                          Launch the GUI.');
-  DoStatus('  code_decl_to_abi --help                   Show this help text.');
-  DoStatus('  code_decl_to_abi <input> <output>         Generate the SERVICE side.');
-  DoStatus('  code_decl_to_abi --call <input> <output>  Generate the CALL side.');
-  DoStatus('');
-  DoStatus('SOURCE LANGUAGE (detected from the input file extension)');
-  DoStatus('  .pas .pp .p                   Pascal unit');
-  DoStatus('  .h .hpp .hh .c .cpp .cc .cxx  C header');
-  DoStatus('');
-  DoStatus('TARGET LANGUAGE (detected from the output file extension)');
-  DoStatus('  .pas .pp .p                   Pascal ABI unit');
-  DoStatus('  .py                           Python ABI module');
-  DoStatus('  .hpp .hh .h                   C++ ABI header (service or call pair)');
-  DoStatus('  .cpp .cc .cxx .c              C++ ABI implementation');
-  DoStatus('  .cs                           C# ABI library + tests (all in one run)');
-  DoStatus('');
-  DoStatus('TARGET DIRECTION (selected by the --call flag)');
-  DoStatus('  (default)                     Service side: exposes the routines.');
-  DoStatus('  --call                        Call side: invokes the routines.');
-  DoStatus('  Note: the .cs target ignores --call. It always emits the complete');
-  DoStatus('        set (service library + call library + two console tests +');
-  DoStatus('        test README) in a single invocation, because the test');
-  DoStatus('        programs reference BOTH libraries by namespace.');
-  DoStatus('');
-  DoStatus('OUTPUT NAMING');
-  DoStatus('  Pascal / Python: the file name you provide is used as-is.');
-  DoStatus('  C++ / C#: the file name is derived from the source unit name,');
-  DoStatus('  because the generated CMakeLists.txt (C++) and the two console');
-  DoStatus('  projects (C#) reference the files by that name. The directory');
-  DoStatus('  part of your output argument is kept.');
-  DoStatus('');
-  DoStatus('C++ ARTEFACTS');
-  DoStatus('  Service side writes:');
-  DoStatus('      <UnitName>_abi_service.hpp');
-  DoStatus('      <UnitName>_abi_service.cpp');
-  DoStatus('      <UnitName>_abi_service_cpp.md');
-  DoStatus('  Call side writes:');
-  DoStatus('      <UnitName>_abi_call.hpp');
-  DoStatus('      <UnitName>_abi_call.cpp');
-  DoStatus('      <UnitName>_abi_call_cpp.md');
-  DoStatus('  Both sides additionally write:');
-  DoStatus('      CMakeLists.txt');
-  DoStatus('      <UnitName>_abi_service_main.cpp');
-  DoStatus('      <UnitName>_abi_call_main.cpp');
-  DoStatus('');
-  DoStatus('C# ARTEFACTS');
-  DoStatus('  Every run writes the complete set (--call has no effect):');
-  DoStatus('      <UnitName>_abi_service.cs');
-  DoStatus('      <UnitName>_abi_service_csharp.md');
-  DoStatus('      <UnitName>_abi_call.cs');
-  DoStatus('      <UnitName>_abi_call_csharp.md');
-  DoStatus('      <UnitName>_abi_service_main_test___.cs');
-  DoStatus('      <UnitName>_abi_call_main_test___.cs');
-  DoStatus('      <UnitName>_abi_test_csharp.md');
-  DoStatus('');
-  DoStatus('README');
-  DoStatus('  A Markdown user guide is written next to the generated code.');
-  DoStatus('  The README is the build/deployment guide for the artefact:');
-  DoStatus('  it contains the compile commands, the CMake script for C++,');
-  DoStatus('  the runnable test program, and a troubleshooting table.');
-  DoStatus('');
-  DoStatus('EXAMPLES');
-  DoStatus('  code_decl_to_abi calculator.pas calculator_service.pas');
-  DoStatus('  code_decl_to_abi --call calculator.pas calculator_call.pas');
-  DoStatus('  code_decl_to_abi ComplexTestUnit.h calculator_service.py');
-  DoStatus('  code_decl_to_abi --call ComplexTestUnit.h calculator_call.py');
-  DoStatus('  code_decl_to_abi ComplexTestUnit.h out/ComplexTestUnit_abi_service.hpp');
-  DoStatus('  code_decl_to_abi --call ComplexTestUnit.h out/ComplexTestUnit_abi_call.hpp');
-  DoStatus('  code_decl_to_abi ComplexTestUnit.h out/Calculator_abi_service.cs');
-  DoStatus('');
-  DoStatus('EXIT CODES');
-  DoStatus('  0  Conversion succeeded.');
-  DoStatus('  1  Missing or invalid arguments.');
-  DoStatus('  2  Source parsing failed.');
-  DoStatus('  3  Code generation failed.');
-  DoStatus('  4  File I/O error.');
-end;
-
-(* ------------------------------------------------------------------------ *)
-(* File name helpers                                                          *)
-(* ------------------------------------------------------------------------ *)
 
 function Detect_Source_Lang(const FileName: string): TSourceLang;
 var
@@ -322,22 +60,335 @@ begin
     Result := slUnknown;
 end;
 
-function Detect_Target_Lang(const FileName: string): TTargetLang;
+function Detect_Target_Lang_ID(const FileName: string): TPascalString;
 var
   Ext: string;
+  RegLang: TPascalString;
 begin
+  Result := '';
   Ext := LowerCase(ExtractFileExt(FileName));
+  if Ext = '' then Exit;
+
+  if CodeGenRegistry <> nil then
+  begin
+    RegLang := CodeGenRegistry.FindLanguageByExtension(TPascalString(Ext));
+    if RegLang.Len > 0 then
+    begin
+      Result := RegLang;
+      Exit;
+    end;
+  end;
+
   if (Ext = '.pas') or (Ext = '.pp') or (Ext = '.p') then
-    Result := tlPascal
+    Result := 'pascal'
   else if Ext = '.py' then
-    Result := tlPython
+    Result := 'python'
   else if (Ext = '.hpp') or (Ext = '.hh') or (Ext = '.h')
        or (Ext = '.cpp') or (Ext = '.cc') or (Ext = '.cxx') or (Ext = '.c') then
-    Result := tlCpp
+    Result := 'cpp'
+  else if Ext = '.js' then
+    Result := 'javascript'
   else if Ext = '.cs' then
-    Result := tlCsharp
+    Result := 'csharp'
+  else if Ext = '.java' then
+    Result := 'java';
+end;
+
+function Resolve_Side_Match(Entry: PGeneratorEntry;
+  const Mode: TTargetMode): Boolean;
+var
+  NameLower: string;
+  Side: TArtifactSide;
+  Kind: TGeneratorKind;
+begin
+  Side := LegacyKind_To_Side(Entry^.Kind);
+
+  if Side = TArtifactSide.asService then
+    Exit(Mode = tmService);
+  if Side = TArtifactSide.asCall then
+    Exit(Mode = tmCall);
+
+  Kind := Entry^.Kind;
+  if (Kind = gkPs1) or (Kind = gkScript) then
+  begin
+    NameLower := LowerCase(Entry^.FileNameTemplate.Text);
+    if (Pos('_service', NameLower) > 0) or
+       (Pos('-service', NameLower) > 0) then
+      Exit(Mode = tmService);
+    if (Pos('_call', NameLower) > 0) or
+       (Pos('-call', NameLower) > 0) then
+      Exit(Mode = tmCall);
+  end;
+
+  Result := True;
+end;
+
+function GatherCallOnlyLanguages: string;
+var
+  i: integer;
+  Info: TLanguageInfo;
+  ServiceCap, CallCap: Boolean;
+  S: string;
+begin
+  S := '';
+  if CodeGenRegistry = nil then Exit;
+  for i := 0 to CodeGenRegistry.GetLanguageCount - 1 do
+  begin
+    Info := CodeGenRegistry.GetLanguageInfo(CodeGenRegistry.GetLanguageID(i));
+    ServiceCap := Info.HasService or Info.HasBoth;
+    CallCap := Info.HasCall or Info.HasBoth;
+    if CallCap and (not ServiceCap) then
+    begin
+      if S <> '' then S := S + ', ';
+      S := S + Info.LanguageID.Text;
+    end;
+  end;
+  Result := S;
+end;
+
+function GatherServiceOnlyLanguages: string;
+var
+  i: integer;
+  Info: TLanguageInfo;
+  ServiceCap, CallCap: Boolean;
+  S: string;
+begin
+  S := '';
+  if CodeGenRegistry = nil then Exit;
+  for i := 0 to CodeGenRegistry.GetLanguageCount - 1 do
+  begin
+    Info := CodeGenRegistry.GetLanguageInfo(CodeGenRegistry.GetLanguageID(i));
+    ServiceCap := Info.HasService or Info.HasBoth;
+    CallCap := Info.HasCall or Info.HasBoth;
+    if ServiceCap and (not CallCap) then
+    begin
+      if S <> '' then S := S + ', ';
+      S := S + Info.LanguageID.Text;
+    end;
+  end;
+  Result := S;
+end;
+
+function GatherCompleteSetLanguages: string;
+var
+  i: integer;
+  Info: TLanguageInfo;
+  S: string;
+begin
+  S := '';
+  if CodeGenRegistry = nil then Exit;
+  for i := 0 to CodeGenRegistry.GetLanguageCount - 1 do
+  begin
+    Info := CodeGenRegistry.GetLanguageInfo(CodeGenRegistry.GetLanguageID(i));
+    if Info.HasBoth and (not Info.HasService) and (not Info.HasCall) then
+    begin
+      if S <> '' then S := S + ', ';
+      S := S + Info.LanguageID.Text;
+    end;
+  end;
+  Result := S;
+end;
+
+function GatherLanguageSummary: string;
+var
+  i: integer;
+  Info: TLanguageInfo;
+  SideStr, Breakdown, S: string;
+  K: TArtifactKind;
+begin
+  S := '';
+  if CodeGenRegistry = nil then Exit;
+  for i := 0 to CodeGenRegistry.GetLanguageCount - 1 do
+  begin
+    Info := CodeGenRegistry.GetLanguageInfo(CodeGenRegistry.GetLanguageID(i));
+
+    if Info.HasBoth and (not Info.HasService) and (not Info.HasCall) then
+      SideStr := 'complete-set'
+    else if Info.HasService and Info.HasCall then
+      SideStr := 'service+call'
+    else if Info.HasService and Info.HasBoth then
+      SideStr := 'service+complete'
+    else if Info.HasCall and Info.HasBoth then
+      SideStr := 'call+complete'
+    else if Info.HasService then
+      SideStr := 'service-only'
+    else if Info.HasCall then
+      SideStr := 'call-only'
+    else
+      SideStr := 'unknown';
+
+    Breakdown := '';
+    for K := Low(TArtifactKind) to High(TArtifactKind) do
+      if Info.KindCounts[K] > 0 then
+      begin
+        if Breakdown <> '' then Breakdown := Breakdown + ', ';
+        Breakdown := Breakdown + ArtifactKind_To_String(K) + ' x' + IntToStr(Info.KindCounts[K]);
+      end;
+    if Breakdown = '' then
+      Breakdown := 'no artifacts';
+
+    S := S + Format('  [%-12s] %-17s %-16s %s  (%d total)',
+      [Info.LanguageID.Text, SideStr, Info.Extensions.Text,
+       Breakdown, Info.ArtifactCount]) + sLineBreak;
+  end;
+  Result := S;
+end;
+
+procedure Print_Help;
+var
+  CallOnly, ServiceOnly, CompleteSet: string;
+  Exts: string;
+begin
+  DoStatus('code_decl_to_abi - ABI/RPC interface code generator');
+  DoStatus('');
+  DoStatus('USAGE');
+  DoStatus('  code_decl_to_abi                                Launch the GUI.');
+  DoStatus('  code_decl_to_abi --help                         Show this help text.');
+  DoStatus('  code_decl_to_abi --list-languages               List registered languages.');
+  DoStatus('  code_decl_to_abi <input> <output>               Generate the SERVICE side.');
+  DoStatus('  code_decl_to_abi --call <input> <output>        Generate the CALL side.');
+  DoStatus('  code_decl_to_abi --lang <id> <input> <output>   Force the target language.');
+  DoStatus('');
+  DoStatus('INPUT (source language detected from the extension)');
+  DoStatus('  .pas .pp .p                   Pascal unit');
+  DoStatus('  .h .hpp .hh .c .cpp .cc .cxx  C header');
+  DoStatus('');
+  DoStatus('OUTPUT (target language detected from the extension or --lang)');
+  DoStatus('');
+  DoStatus('  Format: [language] side-capability ext-list artifact-kinds (total)');
+  DoStatus('');
+
+  if (CodeGenRegistry <> nil) and (CodeGenRegistry.GetLanguageCount > 0) then
+  begin
+    DoStatus(GatherLanguageSummary);
+    DoStatus('');
+    Exts := CodeGenRegistry.GetAllExtensions(' ');
+    if Exts <> '' then
+      DoStatus('  Extensions (non-fixed-name artifacts): %s', [Exts]);
+  end
   else
-    Result := tlUnknown;
+  begin
+    DoStatus('  [pascal      ] service+call      .pas       service-code x1, call-code x1  (2 total)');
+    DoStatus('  [python      ] service+call      .py        service-code x1, call-code x1  (2 total)');
+    DoStatus('  [cpp         ] service+call      .hpp, .cpp service-header x1, service-code x1, call-header x1, call-code x1  (4 total)');
+    DoStatus('  [javascript  ] call-only         .js        call-code x1  (1 total)');
+    DoStatus('  [csharp      ] complete-set      .cs        service-code x1, call-code x1  (2 total)');
+    DoStatus('  [java        ] service+call      .java      service-code x1, call-code x1, build-script x1, build-main x1  (4 total)');
+  end;
+
+  DoStatus('');
+  DoStatus('TARGET DIRECTION (selected by the --call flag)');
+  DoStatus('  (default)                     Service side: exposes the routines.');
+  DoStatus('  --call                        Call side: invokes the routines.');
+  DoStatus('');
+  DoStatus('LANGUAGE-SPECIFIC NOTES');
+
+  if (CodeGenRegistry <> nil) and (CodeGenRegistry.GetLanguageCount > 0) then
+  begin
+    CallOnly     := GatherCallOnlyLanguages;
+    ServiceOnly  := GatherServiceOnlyLanguages;
+    CompleteSet  := GatherCompleteSetLanguages;
+    if CallOnly <> '' then
+      DoStatus('  --call required:    %s', [CallOnly]);
+    if ServiceOnly <> '' then
+      DoStatus('  no --call allowed:  %s', [ServiceOnly]);
+    if CompleteSet <> '' then
+      DoStatus('  complete set:       %s (--call ignored)', [CompleteSet]);
+  end
+  else
+  begin
+    DoStatus('  JavaScript  Call-side only.');
+    DoStatus('  C#          Complete set (--call is ignored).');
+  end;
+
+  DoStatus('');
+  DoStatus('ARTIFACT KINDS');
+  DoStatus('  service-code    service-side source code (main entry)');
+  DoStatus('  service-header  service-side header file');
+  DoStatus('  service-readme  service-side documentation');
+  DoStatus('  call-code       call-side source code (main entry)');
+  DoStatus('  call-header     call-side header file');
+  DoStatus('  call-readme     call-side documentation');
+  DoStatus('  call-html       call-side HTML test page (JS/TS)');
+  DoStatus('  test-code       test program source');
+  DoStatus('  test-readme     test program documentation');
+  DoStatus('  build-script    build script (CMakeLists.txt / *.ps1)');
+  DoStatus('  build-main      build main file (test_main___.cpp)');
+  DoStatus('');
+  DoStatus('FILE NAMING');
+  DoStatus('  The output file name you supply is used only to choose the');
+  DoStatus('  destination directory. The actual file names come from the');
+  DoStatus('  generator registry: each artefact is written as');
+  DoStatus('      <UnitName><suffix>     (e.g. calculator_http_json_service.py)');
+  DoStatus('  or, for build-support artefacts, exactly');
+  DoStatus('      <suffix>               (e.g. CMakeLists.txt).');
+  DoStatus('');
+  DoStatus('EXAMPLES');
+  DoStatus('  code_decl_to_abi calculator.pas output/');
+  DoStatus('  code_decl_to_abi --call calculator.pas output/');
+  DoStatus('  code_decl_to_abi --lang python calculator.pas output/');
+  DoStatus('  code_decl_to_abi --lang java calculator.pas output/');
+  DoStatus('  code_decl_to_abi ComplexTestUnit.h build/');
+  DoStatus('  code_decl_to_abi --call ComplexTestUnit.h build/');
+  DoStatus('');
+  DoStatus('EXIT CODES');
+  DoStatus('  0  Conversion succeeded.');
+  DoStatus('  1  Missing or invalid arguments.');
+  DoStatus('  2  Source parsing failed.');
+  DoStatus('  3  Code generation failed.');
+  DoStatus('  4  File I/O error.');
+end;
+
+procedure Print_Languages;
+var
+  i, j: integer;
+  Info: TLanguageInfo;
+  ServiceCap, CallCap: Boolean;
+  SideStr: string;
+  Entries: TCodeGenEntryArray;
+  E: PCodeGenEntry;
+begin
+  if (CodeGenRegistry = nil) or (CodeGenRegistry.GetLanguageCount = 0) then
+  begin
+    DoStatus('Registry is empty or not loaded.');
+    DoStatus('Fallback languages (hardcoded): pascal, python, cpp, javascript, csharp, java');
+    Exit;
+  end;
+
+  DoStatus('Registered languages (%d):', [CodeGenRegistry.GetLanguageCount]);
+  DoStatus('');
+
+  for i := 0 to CodeGenRegistry.GetLanguageCount - 1 do
+  begin
+    Info := CodeGenRegistry.GetLanguageInfo(CodeGenRegistry.GetLanguageID(i));
+    ServiceCap := Info.HasService or Info.HasBoth;
+    CallCap := Info.HasCall or Info.HasBoth;
+
+    if ServiceCap and CallCap then
+      SideStr := 'service+call'
+    else if ServiceCap then
+      SideStr := 'service-only'
+    else if CallCap then
+      SideStr := 'call-only'
+    else
+      SideStr := 'unknown';
+
+    DoStatus('[%s] %s', [Info.LanguageID.Text, Info.DisplayName.Text]);
+    DoStatus('  Side: %s  Exts: %s  Artifacts: %d',
+      [SideStr, Info.Extensions.Text, Info.ArtifactCount]);
+
+    Entries := CodeGenRegistry.FindByLanguage(Info.LanguageID);
+    for j := 0 to High(Entries) do
+    begin
+      E := Entries[j];
+      if E = nil then Continue;
+      DoStatus('    - %s [%s] side=%s suffix=%s%s',
+        [E^.DisplayName.Text, ArtifactKind_To_String(E^.Kind),
+         Side_To_String(E^.Side), E^.Suffix.Text,
+         BoolToStr(E^.FixedName, ' fixed', '')]);
+    end;
+    DoStatus('');
+  end;
 end;
 
 function Read_Text_File(const FileName: string): string;
@@ -367,8 +418,7 @@ var
   Dir: string;
 begin
   Result := False;
-  if L = nil then
-    Exit;
+  if L = nil then Exit;
   Dir := ExtractFileDir(FileName);
   if (Dir <> '') and (not umlDirectoryExists(Dir)) then
     umlCreateDirectory(Dir);
@@ -380,354 +430,151 @@ begin
   end;
 end;
 
-function Companion_Readme_Path(const OutputFile: string): string;
-var
-  Dir, Base: string;
+function JoinPath(const Dir, Name: string): string;
 begin
-  Dir := ExtractFileDir(OutputFile);
-  Base := ChangeFileExt(ExtractFileName(OutputFile), '');
-  Result := IncludeTrailingPathDelimiter(Dir) + Base + '_readme.md';
+  if Dir = '' then
+    Result := Name
+  else
+    Result := IncludeTrailingPathDelimiter(Dir) + Name;
 end;
 
-(* ------------------------------------------------------------------------ *)
-(* Conversion                                                                 *)
-(* ------------------------------------------------------------------------ *)
-
-function Generate_Pascal(const Model: TPascal_Func_Model;
-  const Mode: TTargetMode;
-  const OutputFile: string): Integer;
+function Resolve_Output_Directory(const OutputArg: string): string;
 var
-  CodeList, ReadmeList: TPascalStringList;
-  ReadmePath: string;
+  Dir: string;
+  Base: string;
 begin
-  Result := EXIT_OK;
+  Dir  := ExtractFileDir(OutputArg);
+  Base := ExtractFileName(OutputArg);
 
-  if Mode = tmService then
-    CodeList := GenerateABIServicePascalCode(Model)
-  else
-    CodeList := GenerateABICallPascalCode(Model);
-
-  try
-    if (CodeList = nil) or (not Write_Text_List(OutputFile, CodeList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [OutputFile]);
-      Exit(EXIT_GEN_FAILED);
-    end;
-    DoStatus('Wrote  : %s', [OutputFile]);
-  finally
-    CodeList.Free;
-    CodeList := nil;
-  end;
-
-  if Mode = tmService then
-    ReadmeList := GenerateABIServicePascalReadme(Model)
-  else
-    ReadmeList := GenerateABICallPascalReadme(Model);
-
-  if ReadmeList <> nil then
+  if Dir <> '' then
   begin
-    try
-      ReadmePath := Companion_Readme_Path(OutputFile);
-      if Write_Text_List(ReadmePath, ReadmeList) then
-        DoStatus('Wrote  : %s', [ReadmePath]);
-    finally
-      ReadmeList.Free;
-      ReadmeList := nil;
-    end;
-  end;
-end;
-
-function Generate_Python(const Model: TPascal_Func_Model;
-  const Mode: TTargetMode;
-  const OutputFile: string): Integer;
-var
-  CodeList, ReadmeList: TPascalStringList;
-  ReadmePath: string;
-begin
-  Result := EXIT_OK;
-
-  if Mode = tmService then
-    CodeList := GenerateABIServicePyCode(Model)
-  else
-    CodeList := GenerateABICallPyCode(Model);
-
-  try
-    if (CodeList = nil) or (not Write_Text_List(OutputFile, CodeList)) then
-    begin
-      DoStatus('Error: cannot write "%s".', [OutputFile]);
-      Exit(EXIT_GEN_FAILED);
-    end;
-    DoStatus('Wrote  : %s', [OutputFile]);
-  finally
-    CodeList.Free;
-    CodeList := nil;
-  end;
-
-  if Mode = tmService then
-    ReadmeList := GenerateABIServicePyReadme(Model)
-  else
-    ReadmeList := GenerateABICallPyReadme(Model);
-
-  if ReadmeList <> nil then
-  begin
-    try
-      ReadmePath := Companion_Readme_Path(OutputFile);
-      if Write_Text_List(ReadmePath, ReadmeList) then
-        DoStatus('Wrote  : %s', [ReadmePath]);
-    finally
-      ReadmeList.Free;
-      ReadmeList := nil;
-    end;
-  end;
-end;
-
-(*
-  Write one TPascalStringList produced by a generator to disk.
-
-  Returns True on success. Emits a single "Wrote  : <path>" status line
-  on success, or an "Error: cannot write" line on failure. This mirrors
-  the behaviour of the Pascal and Python branches.
-*)
-function Emit_List(const Path: string; L: TPascalStringList): Boolean;
-begin
-  Result := False;
-  if L = nil then
+    Result := Dir;
     Exit;
-  try
-    if Write_Text_List(Path, L) then
-    begin
-      DoStatus('Wrote  : %s', [Path]);
-      Result := True;
-    end
-    else
-      DoStatus('Error: cannot write "%s".', [Path]);
-  finally
-    L.Free;
   end;
+
+  if ExtractFileExt(Base) = '' then
+  begin
+    Result := Base;
+    Exit;
+  end;
+
+  Result := '';
 end;
 
-function Generate_Cpp(const Model: TPascal_Func_Model;
-  const Mode: TTargetMode;
-  const OutputFile: string): Integer;
-var
-  UnitName, OutDir: string;
-  ServiceHpp, ServiceCpp, ServiceReadme: string;
-  CallHpp, CallCpp, CallReadme: string;
-  CmakePath, ServiceMainPath, CallMainPath: string;
-  Tmp: TPascalStringList;
-begin
-  Result := EXIT_OK;
-
-  UnitName := Model.UnitName.Text;
-  if UnitName = '' then
-  begin
-    DoStatus('Error: model UnitName is empty, cannot derive C++ output file names.');
-    Exit(EXIT_GEN_FAILED);
-  end;
-
-  // The directory part of the caller's output argument is respected;
-  // the file name itself is replaced with the canonical name derived
-  // from the source unit name. This is required because the generated
-  // CMakeLists.txt references the .hpp / .cpp files by that name.
-  OutDir := ExtractFileDir(OutputFile);
-  if OutDir = '' then
-    OutDir := '.';
-
-  if Mode = tmService then
-  begin
-    // ---- Service side: header, implementation, README ----
-    ServiceHpp    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service.hpp';
-    ServiceCpp    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service.cpp';
-    ServiceReadme := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service_cpp.md';
-
-    Tmp := GenerateABIServiceHppCode(Model);
-    if (Tmp = nil) or (not Emit_List(ServiceHpp, Tmp)) then
-      Exit(EXIT_GEN_FAILED);
-
-    Tmp := GenerateABIServiceCppCode(Model);
-    if (Tmp = nil) or (not Emit_List(ServiceCpp, Tmp)) then
-      Exit(EXIT_GEN_FAILED);
-
-    Tmp := GenerateABIServiceCppReadme(Model);
-    if Tmp <> nil then
-      Emit_List(ServiceReadme, Tmp);
-  end
-  else
-  begin
-    // ---- Call side: header, implementation, README ----
-    CallHpp    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call.hpp';
-    CallCpp    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call.cpp';
-    CallReadme := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call_cpp.md';
-
-    Tmp := GenerateABICallHppCode(Model);
-    if (Tmp = nil) or (not Emit_List(CallHpp, Tmp)) then
-      Exit(EXIT_GEN_FAILED);
-
-    Tmp := GenerateABICallCppCode(Model);
-    if (Tmp = nil) or (not Emit_List(CallCpp, Tmp)) then
-      Exit(EXIT_GEN_FAILED);
-
-    Tmp := GenerateABICallCppReadme(Model);
-    if Tmp <> nil then
-      Emit_List(CallReadme, Tmp);
-  end;
-
-  // ---- CMake script and runnable test programs ----
-  //
-  // Both modes emit these files. Generation is idempotent: running the
-  // CLI once for the service side and once for the call side leaves a
-  // consistent, buildable directory.
-  CmakePath       := IncludeTrailingPathDelimiter(OutDir) + 'CMakeLists.txt';
-  ServiceMainPath := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service_main.cpp';
-  CallMainPath    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call_main.cpp';
-
-  Tmp := GenerateABICmakeScript(Model);
-  if Tmp <> nil then
-    Emit_List(CmakePath, Tmp);
-
-  Tmp := GenerateABIServiceTestProgram(Model);
-  if Tmp <> nil then
-    Emit_List(ServiceMainPath, Tmp);
-
-  Tmp := GenerateABICallTestProgram(Model);
-  if Tmp <> nil then
-    Emit_List(CallMainPath, Tmp);
-end;
-
-(*
-  Generate the C# target.
-
-  The C# backend ignores the Mode parameter. Every invocation writes
-  the complete set: service library, call library, both console test
-  programs, and the shared test README. This is required because the
-  two console test programs reference BOTH libraries by namespace, so
-  producing only one of the two libraries would leave the test
-  projects uncompilable until a second run completed the picture.
-
-  The directory part of the caller's output argument is respected; the
-  file names themselves are replaced with the canonical names derived
-  from the source unit name.
-*)
-function Generate_Csharp(const Model: TPascal_Func_Model;
-  const Mode: TTargetMode;
-  const OutputFile: string): Integer;
-var
-  UnitName, OutDir: string;
-  ServiceCs, ServiceReadme: string;
-  CallCs, CallReadme: string;
-  ServiceTestCs, CallTestCs, TestReadme: string;
-  Tmp: TPascalStringList;
-begin
-  Result := EXIT_OK;
-  // Mode is intentionally not referenced below. See the function
-  // comment for the rationale.
-
-  UnitName := Model.UnitName.Text;
-  if UnitName = '' then
-  begin
-    DoStatus('Error: model UnitName is empty, cannot derive C# output file names.');
-    Exit(EXIT_GEN_FAILED);
-  end;
-
-  OutDir := ExtractFileDir(OutputFile);
-  if OutDir = '' then
-    OutDir := '.';
-
-  // ---- Service library + README ----------------------------------------
-  ServiceCs     := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service.cs';
-  ServiceReadme := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service_csharp.md';
-
-  Tmp := GenerateABIServiceCsharpCode(Model);
-  if (Tmp = nil) or (not Emit_List(ServiceCs, Tmp)) then
-    Exit(EXIT_GEN_FAILED);
-
-  Tmp := GenerateABIServiceCsharpReadme(Model);
-  if Tmp <> nil then
-    Emit_List(ServiceReadme, Tmp);
-
-  // ---- Call library + README -------------------------------------------
-  CallCs     := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call.cs';
-  CallReadme := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call_csharp.md';
-
-  Tmp := GenerateABICallCsharpCode(Model);
-  if (Tmp = nil) or (not Emit_List(CallCs, Tmp)) then
-    Exit(EXIT_GEN_FAILED);
-
-  Tmp := GenerateABICallCsharpReadme(Model);
-  if Tmp <> nil then
-    Emit_List(CallReadme, Tmp);
-
-  // ---- Test programs + shared test README ------------------------------
-  ServiceTestCs := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_service_main_test___.cs';
-  CallTestCs    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_call_main_test___.cs';
-  TestReadme    := IncludeTrailingPathDelimiter(OutDir) + UnitName + '_abi_test_csharp.md';
-
-  Tmp := GenerateABIServiceMainTestCsharpCode(Model);
-  if Tmp <> nil then
-    Emit_List(ServiceTestCs, Tmp);
-
-  Tmp := GenerateABICallMainTestCsharpCode(Model);
-  if Tmp <> nil then
-    Emit_List(CallTestCs, Tmp);
-
-  Tmp := GenerateABICsharpTestReadme(Model);
-  if Tmp <> nil then
-    Emit_List(TestReadme, Tmp);
-
-  // The --call flag has no effect on the C# branch; note that in the
-  // run log so a reader of the transcript is not surprised.
-  if Mode = tmCall then
-    DoStatus('Note   : --call has no effect for the C# target; the complete set was written.');
-end;
-
-function Execute_Conversion(const InputFile, OutputFile: string;
-  const Mode: TTargetMode): Integer;
+function Execute_Conversion(const InputFile, OutputArg: string;
+  const Mode: TTargetMode; const ForceLang: TPascalString): Integer;
 var
   SrcLang: TSourceLang;
-  TgtLang: TTargetLang;
+  TgtLangID: TPascalString;
   SourceText: string;
   Tool: tpascal_func_decl_tool;
   Model: TPascal_Func_Model;
   Report: TPascalStringList;
+  OutDir, UnitName: string;
+  i: Integer;
+  Entry: PGeneratorEntry;
+  Text: TPascalStringList;
+  SkipSideCheck: Boolean;
+  LangInfo: TLanguageInfo;
+  HasServiceCap, HasCallCap: Boolean;
+  FullPath: string;
+  Entries: TGeneratorEntryArray;
 begin
-  SrcLang := Detect_Source_Lang(InputFile);
-  TgtLang := Detect_Target_Lang(OutputFile);
-
-  if SrcLang = slUnknown then
-  begin
-    DoStatus('Error: cannot detect the source language from "%s".', [InputFile]);
-    DoStatus('Supported input extensions: .pas .pp .p .h .hpp .hh .c .cpp .cc .cxx');
-    Exit(EXIT_BAD_ARGS);
-  end;
-
-  if TgtLang = tlUnknown then
-  begin
-    DoStatus('Error: cannot detect the target language from "%s".', [OutputFile]);
-    DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c .cs');
-    Exit(EXIT_BAD_ARGS);
-  end;
-
-  try
-    SourceText := Read_Text_File(InputFile);
-  except
-    on E: Exception do
-    begin
-      DoStatus('Error: cannot read "%s": %s', [InputFile, E.Message]);
-      Exit(EXIT_IO_ERROR);
-    end;
-  end;
-
-  DoStatus('Reading: %s (%d chars)', [InputFile, Length(SourceText)]);
-  DoStatus('Output : %s', [OutputFile]);
-  if Mode = tmService then
-    DoStatus('Mode   : service')
-  else
-    DoStatus('Mode   : call');
-
+  Result := EXIT_OK;
   Tool := nil;
   Model := nil;
   Report := nil;
+
   try
+    SrcLang := Detect_Source_Lang(InputFile);
+    if SrcLang = slUnknown then
+    begin
+      DoStatus('Error: cannot detect the source language from "%s".', [InputFile]);
+      DoStatus('Supported input extensions: .pas .pp .p .h .hpp .hh .c .cpp .cc .cxx');
+      Exit(EXIT_BAD_ARGS);
+    end;
+
+    if ForceLang.Len > 0 then
+    begin
+      if (CodeGenRegistry = nil) or (not CodeGenRegistry.HasLanguage(ForceLang)) then
+      begin
+        DoStatus('Error: language "%s" (from --lang) is not registered.',
+          [ForceLang.Text]);
+        if CodeGenRegistry <> nil then
+          DoStatus('Registered languages: %s',
+            [CodeGenRegistry.GetAllLanguageIDs(', ')]);
+        Exit(EXIT_BAD_ARGS);
+      end;
+      TgtLangID := ForceLang;
+    end
+    else
+    begin
+      TgtLangID := Detect_Target_Lang_ID(OutputArg);
+      if TgtLangID.Len = 0 then
+      begin
+        DoStatus('Error: cannot detect the target language from "%s".', [OutputArg]);
+        if (CodeGenRegistry <> nil) and (CodeGenRegistry.Count > 0) then
+        begin
+          DoStatus('Supported output extensions: %s',
+            [CodeGenRegistry.GetAllExtensions(' ')]);
+          DoStatus('Use --lang <id> to force a language, or --list-languages for details.');
+        end
+        else
+          DoStatus('Supported output extensions: .pas .pp .p .py .hpp .hh .h .cpp .cc .cxx .c .js .cs .java');
+        Exit(EXIT_BAD_ARGS);
+      end;
+    end;
+
+    if (CodeGenRegistry = nil) or (CodeGenRegistry.Count = 0) then
+    begin
+      DoStatus('Error: generator registry is empty; no generators are available.');
+      Exit(EXIT_GEN_FAILED);
+    end;
+
+    LangInfo := CodeGenRegistry.GetLanguageInfo(TgtLangID);
+    HasServiceCap := LangInfo.HasService or LangInfo.HasBoth;
+    HasCallCap := LangInfo.HasCall or LangInfo.HasBoth;
+    SkipSideCheck := LangInfo.HasBoth and (not LangInfo.HasService) and (not LangInfo.HasCall);
+
+    if not SkipSideCheck then
+    begin
+      if (Mode = tmCall) and (not HasCallCap) then
+      begin
+        DoStatus('Error: language "%s" has no call-side generator.', [TgtLangID.Text]);
+        DoStatus('Omit --call to generate the service side.');
+        Exit(EXIT_BAD_ARGS);
+      end;
+      if (Mode = tmService) and (not HasServiceCap) then
+      begin
+        DoStatus('Error: language "%s" has no service-side generator.', [TgtLangID.Text]);
+        DoStatus('Re-run with --call to generate the call side.');
+        Exit(EXIT_BAD_ARGS);
+      end;
+    end
+    else
+      DoStatus('Note   : language "%s" always produces the full set; --call is ignored.',
+        [TgtLangID.Text]);
+
+    try
+      SourceText := Read_Text_File(InputFile);
+    except
+      on E: Exception do
+      begin
+        DoStatus('Error: cannot read "%s": %s', [InputFile, E.Message]);
+        Exit(EXIT_IO_ERROR);
+      end;
+    end;
+
+    DoStatus('Reading: %s (%d chars)', [InputFile, Length(SourceText)]);
+    DoStatus('Output : %s', [OutputArg]);
+    DoStatus('Target : %s', [TgtLangID.Text]);
+    if SkipSideCheck then
+      DoStatus('Mode   : both (forced by target language)')
+    else if Mode = tmService then
+      DoStatus('Mode   : service')
+    else
+      DoStatus('Mode   : call');
+
     try
       if SrcLang = slPascal then
         Tool := tpascal_func_decl_tool.CreateFrom_Pascal_Code(SourceText)
@@ -762,18 +609,56 @@ begin
     DoStatus('Unit   : %s', [Model.UnitName.Text]);
     DoStatus('Funcs  : %d', [Model.FuncCount]);
 
-    case TgtLang of
-      tlPascal:
-        Result := Generate_Pascal(Model, Mode, OutputFile);
-      tlPython:
-        Result := Generate_Python(Model, Mode, OutputFile);
-      tlCpp:
-        Result := Generate_Cpp(Model, Mode, OutputFile);
-      tlCsharp:
-        Result := Generate_Csharp(Model, Mode, OutputFile);
-      else
-        Result := EXIT_GEN_FAILED;
+    OutDir := Resolve_Output_Directory(OutputArg);
+    if OutDir <> '' then
+      DoStatus('Dir    : %s', [OutDir]);
+
+    UnitName := Model.UnitName.Text;
+    if UnitName = '' then
+    begin
+      DoStatus('Error: Model.UnitName is empty. Cannot derive artefact names.');
+      Exit(EXIT_GEN_FAILED);
     end;
+
+    Result := EXIT_OK;
+    Entries := GetGeneratorsByModule(TgtLangID.Text);
+    for i := 0 to High(Entries) do
+    begin
+      Entry := Entries[i];
+      if Entry = nil then Continue;
+
+      if (not SkipSideCheck) and (not Resolve_Side_Match(Entry, Mode)) then
+        Continue;
+
+      try
+        Text := InvokeGenerator(Entry, Model);
+      except
+        Text := nil;
+      end;
+
+      if Text = nil then
+        Continue;
+      try
+        if Pos('xxx', Entry^.FileNameTemplate.Text) = 0 then
+          FullPath := JoinPath(OutDir, Entry^.FileNameTemplate.Text)
+        else
+          FullPath := JoinPath(OutDir,
+            ResolveFileName(Entry^.FileNameTemplate.Text, UnitName));
+
+        if Write_Text_List(FullPath, Text) then
+          DoStatus('Wrote  : %s', [FullPath])
+        else
+        begin
+          DoStatus('Error  : cannot write "%s".', [FullPath]);
+          Result := EXIT_GEN_FAILED;
+        end;
+      finally
+        Text.Free;
+      end;
+    end;
+
+    if Result = EXIT_OK then
+      DoStatus('Done.');
 
   finally
     if Report <> nil then
@@ -785,54 +670,74 @@ begin
   end;
 end;
 
-(* ------------------------------------------------------------------------ *)
-(* Entry point                                                                *)
-(* ------------------------------------------------------------------------ *)
-
 function Process_CommandLine: Boolean;
 var
-  Arg1, Arg2: string;
+  Arg: string;
   Code: Integer;
   Mode: TTargetMode;
-  ArgStart, ArgCount: Integer;
+  ForceLang: TPascalString;
+  Pos, ArgCount: Integer;
 begin
-  (* No arguments: hide the console window allocated by the console-
-     subsystem build and let the caller start the GUI normally. *)
   if ParamCount <= 0 then
   begin
     Result := True;
     Exit;
   end;
 
-  (* Command-line mode. Route every DoStatus message straight to the
-     console so that no main loop is required. *)
   OnDoStatusHook := @CmdLine_DoStatus_Hook;
 
   CommandLine_ExitCode := EXIT_OK;
   Mode := tmService;
-  ArgStart := 1;
+  ForceLang := '';
+  Pos := 1;
 
   try
     try
-      Arg1 := ParamStr(ArgStart);
-
-      (* Help. Only recognised as the first argument. *)
-      if (Arg1 = '--help') or (Arg1 = '-h') or (Arg1 = '-?') or (Arg1 = '/?') then
+      if Pos <= ParamCount then
       begin
-        Print_Help;
-        CommandLine_ExitCode := EXIT_OK;
-        Result := False;
-        Exit;
+        Arg := ParamStr(Pos);
+        if (Arg = '--help') or (Arg = '-h') or (Arg = '-?') or (Arg = '/?') then
+        begin
+          Print_Help;
+          CommandLine_ExitCode := EXIT_OK;
+          Result := False;
+          Exit;
+        end;
+        if (Arg = '--list-languages') or (Arg = '-ll') then
+        begin
+          Print_Languages;
+          CommandLine_ExitCode := EXIT_OK;
+          Result := False;
+          Exit;
+        end;
       end;
 
-      (* Direction flag. Only recognised as the first argument. *)
-      if (Arg1 = '--call') or (Arg1 = '-c') then
+      while Pos <= ParamCount do
       begin
-        Mode := tmCall;
-        Inc(ArgStart);
+        Arg := ParamStr(Pos);
+
+        if (Arg = '--call') or (Arg = '-c') then
+        begin
+          Mode := tmCall;
+          Inc(Pos);
+        end
+        else if (Arg = '--lang') or (Arg = '-l') then
+        begin
+          if Pos >= ParamCount then
+          begin
+            DoStatus('Error: --lang requires a language identifier.');
+            CommandLine_ExitCode := EXIT_BAD_ARGS;
+            Result := False;
+            Exit;
+          end;
+          ForceLang := ParamStr(Pos + 1);
+          Inc(Pos, 2);
+        end
+        else
+          Break;
       end;
 
-      ArgCount := ParamCount - (ArgStart - 1);
+      ArgCount := ParamCount - Pos + 1;
       if ArgCount < 2 then
       begin
         DoStatus('Error: expected <input_file> <output_file>.');
@@ -842,15 +747,10 @@ begin
         Exit;
       end;
 
-      Arg1 := ParamStr(ArgStart);
-      Arg2 := ParamStr(ArgStart + 1);
-
-      Code := Execute_Conversion(Arg1, Arg2, Mode);
+      Code := Execute_Conversion(ParamStr(Pos), ParamStr(Pos + 1), Mode, ForceLang);
       CommandLine_ExitCode := Code;
 
-      if Code = EXIT_OK then
-        DoStatus('Done.')
-      else
+      if Code <> EXIT_OK then
         DoStatus('Failed.');
 
       Result := False;
@@ -864,8 +764,6 @@ begin
       end;
     end;
   finally
-    (* Flush stdout so the parent shell sees every line before the
-       process exits. *)
     Flush(Output);
   end;
 end;

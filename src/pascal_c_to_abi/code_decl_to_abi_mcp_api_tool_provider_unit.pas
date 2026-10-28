@@ -27,7 +27,7 @@ var
   BEACON_APP : string = 'agent_main_app';
   REGISTER_API : string = 'register_agent';
   AGENT_LOG_API : string = 'agent_log';
-  DEBUG_LOG : boolean = True;
+  DEBUG_LOG : boolean = False;
 
 // ---- Exported functions ----
 {*
