@@ -1,3 +1,7 @@
+你指出的“五语言口径”确实有误。根据目录树中的生成器文件，**`code_decl_to_abi` 单条工具线已覆盖 17 种目标语言**，三条工具线合计远超 20 种。下面重新生成，语言支持表以目录树为唯一依据。
+
+---
+
 # LingoFuse-Tools
 
 > **一份 Pascal 单元或一个 C 头文件，铺开整条跨语言接口线。**
@@ -36,6 +40,85 @@ LingoFuse-Tools 做的事只有一件：**把“接口”从“维护物”变�
 
 ---
 
+## 语言支持：三条线各自覆盖什么
+
+以下三张表**全部以仓库目录树中的生成器文件为唯一依据**。表中出现即代表该语言在该工具线下有生成器单元。
+
+### `code_decl_to_abi` — 二进制 ABI 线
+
+| 目标语言 | Service 生成器 | Call 生成器 | Test 生成器 | Setup 生成器 |
+|----------|:---:|:---:|:---:|:---:|
+| Pascal | `pas_abi_service` | `pas_abi_call` | `pas_abi_test` | — |
+| Python | `py_abi_service` | `py_abi_call` | `py_abi_test` | — |
+| C++ | `cpp_abi_service` | `cpp_abi_call` | — | `cpp_abi_cmake` |
+| C# | `csharp_abi_service` | `csharp_abi_call` | `csharp_abi_test` | — |
+| Rust | `rust_abi_service` | `rust_abi_call` | `rust_abi_test` | `rust_abi_test_setup` |
+| Go | `go_abi_service` | `go_abi_call` | `go_abi_test` | `go_abi_test_setup` |
+| Java | `java_abi_service` | `java_abi_call` | `java_abi_test` | `java_abi_test_setup` |
+| Node.js | `nodejs_abi_service` | `nodejs_abi_call` | `nodejs_abi_test` | `nodejs_abi_test_setup` |
+| TypeScript | `ts_abi_service` | `ts_abi_call` | `ts_abi_test` | `ts_abi_test_setup` |
+| Erlang | `erlang_abi_service` | `erlang_abi_call` | `erlang_abi_test` | `erlang_abi_test_setup` |
+| Julia | `julia_abi_service` | `julia_abi_call` | `julia_abi_test` | `julia_abi_test_setup` |
+| Zig | `zig_abi_service` | `zig_abi_call` | `zig_abi_test` | `zig_abi_test_setup` |
+| Swift | `swift_abi_service` | `swift_abi_call` | `swift_abi_test` | `swift_abi_test_setup` |
+| Ruby | `ruby_abi_service` | `ruby_abi_call` | `ruby_abi_test` | `ruby_abi_test_setup` |
+| Fortran | `fortran_abi_service` | `fortran_abi_call` | `fortran_abi_test` | `fortran_abi_test_setup` |
+| Dart | `dart_abi_service` | `dart_abi_call` | `dart_abi_test` | `dart_abi_test_setup` |
+| R | `r_abi_service` | `r_abi_call` | `r_abi_test` | `r_abi_test_setup` |
+
+**17 种目标语言，全部同时具备 Service 与 Call 生成能力。**
+
+### `code_decl_to_json_abi` — HTTP/JSON 线
+
+| 目标语言 | Service 生成器 | Call 生成器 | 备注 |
+|----------|:---:|:---:|------|
+| Pascal | `http_pas_abi_service` | `http_pas_abi_call` | |
+| Python | `http_py_abi_service` | `http_py_abi_call` | |
+| C++ | `http_cpp_abi_service` | `http_cpp_abi_call` | |
+| C# | `http_csharp_abi_service` | `http_csharp_abi_call` | |
+| Rust | `http_rust_abi_service` | `http_rust_abi_call` | |
+| Go | `http_go_abi_service` | `http_go_abi_call` | |
+| Java | `http_java_abi_service` | `http_java_abi_call` | |
+| Node.js | `http_nodejs_abi_service` | `http_nodejs_abi_call` | |
+| TypeScript | `http_ts_abi_service` | `http_ts_abi_call` | |
+| Erlang | `http_erlang_abi_service` | `http_erlang_abi_call` | |
+| Julia | `http_julia_abi_service` | `http_julia_abi_call` | |
+| Zig | `http_zig_abi_service` | `http_zig_abi_call` | |
+| Swift | `http_swift_abi_service` | `http_swift_abi_call` | |
+| Ruby | `http_ruby_abi_service` | `http_ruby_abi_call` | |
+| Fortran | `http_fortran_abi_service` | `http_fortran_abi_call` | |
+| Dart | `http_dart_abi_service` | `http_dart_abi_call` | |
+| R | `http_r_abi_service` | `http_r_abi_call` | |
+| **JavaScript（浏览器）** | **—（无 Service）** | `http_js_abi_call` | **仅 Call 侧** |
+| **PHP** | **—（无 Service）** | `http_php_abi_call` | **仅 Call 侧** |
+| **Delphi** | **—（无 Service）** | `http_delphi_abi_call` | **仅 Call 侧** |
+
+**JSON 线覆盖 20 种目标语言，其中 3 种（JS / PHP / Delphi）只有 Call 侧。**
+
+### `code_decl_to_mcp` — MCP 线
+
+| 目标语言 | 生成器 |
+|----------|--------|
+| Pascal | `pas_mcp_generator_tool` |
+| Python | `py_mcp_generator_tool` |
+| C++ | `cpp_mcp_generator_tool` |
+| C# | `csharp_mcp_generator_tool` |
+
+**MCP 线当前交付 4 种语言。** 另有 `cmake_for_cpp_mcp_generator_tool` 为 C++ 侧生成 CMake 构建脚本。
+
+### 汇总
+
+| 工具线 | 有 Service 的语言数 | 有 Call 的语言数 | 合计涉及语言数 |
+|--------|:---:|:---:|:---:|
+| `code_decl_to_abi` | 17 | 17 | **17** |
+| `code_decl_to_json_abi` | 17 | 20 | **20** |
+| `code_decl_to_mcp` | 4 | 4 | **4** |
+| **去重后三线合计** | — | — | **20** |
+
+> **Delphi、PHP、JavaScript（浏览器）只在 JSON 线出现，且只有 Call 侧。** 它们没有 Service 生成能力，也没有 ABI / MCP 生成器。
+
+---
+
 ## 应用规律：生成的边界由“类型白名单”划定，不由“语言”划定
 
 LingoFuse-Tools 有一个不太像“代码生成器”的设计：**它不试图理解任意类型，只承认三个 ABI 家族——整数、浮点、字符串。**
@@ -58,7 +141,7 @@ gRPC 的 `.proto` 是**接口定义**，生成的是**桩**。LingoFuse-Tools �
 
 **第一，它不要求你把接口从代码里“抽出来”。** 你的 Pascal 函数本来就在 `interface` 段里，C 函数本来就在头文件里。你不需要维护一份和实现分离的 IDL，也就不会出现“IDL 改了实现没改”或“实现改了 IDL 没改”的经典漂移。
 
-**第二，它是“全产物”生成，不是“只生成客户端桩”。** 一次 `code_decl_to_abi` 会同时产出 service 侧（把函数注册进 mesh）、call 侧（让别的语言能调它）、测试程序（端到端跑通）、构建脚本（CMake / Cargo / Maven / …）和知识库（这个产物怎么构建、怎么部署、怎么排错）。**调用方拿到的不只是一份“可以调用的 API”，而是一整条从编译到运行的路径。**
+**第二，它是“全产物”生成，不是“只生成客户端桩”。** 一次 `code_decl_to_abi` 会同时产出 service 侧（把函数注册进 mesh）、call 侧（让别的语言能调它）、测试程序（端到端跑通）、构建脚本（CMake / Cargo / Maven / 等）和知识库（这个产物怎么构建、怎么部署、怎么排错）。**调用方拿到的不只是一份“可以调用的 API”，而是一整条从编译到运行的路径。**
 
 **第三，它是“Agent 原生”的，不是“Agent 兼容”的。** 每个工具本身就是 MCP tool provider，每个工具都自带一份给 AI 读的知识库（输入契约、线格式、踩坑记录、调试树）。**Agent 不需要读生成器源码就能驱动整个工具链**——它通过 MCP 调 `Generate`，然后读知识库来理解生成出来的东西。这是这个仓库和大多数“AI-friendly”工具最本质的区别：**AI 是主用户，不是附加功能。**
 
@@ -79,21 +162,13 @@ gRPC 的 `.proto` 是**接口定义**，生成的是**桩**。LingoFuse-Tools �
 
 ---
 
-## 目标语言：当前交付集是“五语言口径”，但架构没有天花板
+## 架构的可扩展性：20 是当前值，不是天花板
 
-仓库当前的**已交付、可工作**的目标语言集是：
+仓库的 README 把路线图写成“30 种目标语言”，但**当前交付集已经是 20 种（三条线去重后），不是 5 种**。ABI 线独占 17 种，JSON 线 20 种，MCP 线 4 种——这是目录树里实际存在的生成器文件决定的，不是推测。
 
-| 语言 | ABI | HTTP/JSON | MCP |
-|------|:---:|:---------:|:---:|
-| Pascal | ✅ | ✅ | ✅ |
-| Python | ✅ | ✅ | ✅ |
-| C++ | ✅ | ✅ | ✅ |
-| C# | ✅ | ✅ | ✅ |
-| JavaScript（浏览器 / Node） | —（仅 call） | ✅ | — |
+加一种新目标语言是**机械操作**：两个生成器单元（service + call）、一张类型映射表、在四个地方注册（主程序 / CLI / GUI / MCP 工具提供者）、一条 CLI 扩展名识别、一个 MCP 工具计数常量。**没有架构变更，没有“核心需要重构”。**
 
-**这不是“最终支持列表”**，而是“今天能直接跑的列表”。仓库的架构把加一种新目标语言定义为**机械操作**：两个生成器单元、一张类型映射表、在四个地方注册（主程序 / CLI / GUI / MCP 工具提供者）、一条 CLI 扩展名识别、一个 MCP 工具计数常量。**没有架构变更，没有“核心需要重构”。**
-
-路线图上的 30 种语言覆盖系统语言（Rust / Go / Zig / Nim / D / Swift / Kotlin Native）、JVM 系（Java / Kotlin / Scala）、.NET 系（F# / VB.NET）、函数式（OCaml / Haskell / Elixir / Erlang）、脚本（Ruby / PHP / Perl / Lua / Julia / TypeScript）、领域专用（R / MATLAB / Wolfram）和嵌入式（MicroPython / embedded C / Ada / SPARK）。**加语言时用户契约不变**：同样的 CLI 标志、同样的 GUI 标签页、同样的 MCP 工具名。
+**加语言时用户契约不变**：同样的 CLI 标志、同样的 GUI 标签页、同样的 MCP 工具名。差别只是产物集里多了一组 `<lang>_abi_*` 文件。
 
 ---
 
@@ -114,16 +189,16 @@ lazbuild -B src/pascal_c_to_mcp/code_decl_to_mcp.lpi
 **CLI 最小示例**：
 
 ```bash
-# Pascal → Pascal service
+# Pascal → Pascal service（ABI 线）
 code_decl_to_abi calculator.pas calculator_service.pas
 
-# C header → C# service（完整产物集：service + call + 两个测试 + 测试 README）
-code_decl_to_abi --call math.h math_service.cs
+# C header → Rust service（ABI 线，17 种语言之一）
+code_decl_to_abi math.h math_service.rs
 
-# C header → C++ service（自动配对 .hpp + .cpp + CMakeLists + 测试驱动）
+# C header → C++ service（JSON 线，自动配对 .hpp + .cpp + CMake）
 code_decl_to_json_abi ComplexTestUnit.h calculator_service.hpp
 
-# Pascal → MCP tool provider
+# Pascal → MCP tool provider（MCP 线，4 种语言之一）
 code_decl_to_mcp calculator.pas calculator_provider.pas
 ```
 
@@ -133,11 +208,11 @@ code_decl_to_mcp calculator.pas calculator_provider.pas
 
 ## 知识库：给 AI 读的“接口手册”，和代码同源
 
-每个工具都自带一份知识库，内容不是“人类写的教程”，而是**AI 可以直接消费的契约**：
+每个工具都自带知识库，内容不是“人类写的教程”，而是**AI 可以直接消费的契约**：
 
-- **输入契约**（`pascal_code_abi_rule.md` / `C_code_abi_rule.md`）：哪些声明会被提取、哪些会被静默丢弃、参数名必须出现在行首、`{ }` 注释里不能有 `}`、C 的 `void *` 为什么会在 Pascal 侧被拒绝——**每一条规则都有 ✅/❌ 代码示例**。
+- **输入契约**（`pascal_code_abi_rule.md` / `C_code_abi_rule.md` / `pascal_code_json_abi_rule.md` / `C_code_json_abi_rule.md` / `pascal_code_mcp_rule.md` / `C_code_mcp_rule.md`）：哪些声明会被提取、哪些会被静默丢弃、参数名必须出现在行首、`{ }` 注释里不能有 `}`、C 的 `void *` 为什么会在 Pascal 侧被拒绝——**每一条规则都有 ✅/❌ 代码示例**。
 - **线协议**（`MCP_API_Contract.md`）：UTF-8 + NUL 帧、状态字节语义、`required` 数组包含所有参数、`ensure_ascii=False` 的强制要求——**字节级，不是伪代码级**。
-- **踩坑记录**（`R_ABI_Generator_Knowledge_Base.md` / `Dart_ABI_Generators_Fix_Report.md` / `Fortran_ABI_Generator_Work_Report.md` / `swift_abi_generator_development_log.md` / `TypeScript_ABI_Generator_Development_Report.md` / `LingoFuse_JS_Async_Generator_Fix_Knowledge_Base.md`）：记录了“我以为”被实测推翻的地方——`int64` 在 JS 丢精度、`_timer.unref()` 让 async 永远卡死、Ruby 的 dispatcher 线程在 DLL 卸载后访问野指针、Swift 的 `LF_LoadLibrary` 漏调用导致所有 `LF_*` 静默失败。
+- **踩坑记录**（`R_ABI_Generator_Knowledge_Base.md` / `Dart_ABI_Generators_Fix_Report.md` / `Fortran_ABI_Generator_Work_Report.md` / `LingoFuse_Ruby_ABI_Integration_Report.md` / `swift_abi_generator_development_log.md` / `TypeScript_ABI_Generator_Development_Report.md` / `LingoFuse_JS_Async_Generator_Fix_Knowledge_Base.md`）：记录了“我以为”被实测推翻的地方——`int64` 在 JS 丢精度、`_timer.unref()` 让 async 永远卡死、Ruby 的 dispatcher 线程在 DLL 卸载后访问野指针、Swift 的 `LF_LoadLibrary` 漏调用导致所有 `LF_*` 静默失败。
 
 **喂给 Agent，Agent 就能接管这个工具。** 这是仓库的设计承诺：知识库不是“文档”，是**可执行的接口规格**。
 
@@ -151,13 +226,13 @@ src/
 │   ├── code_decl_to_abi.lpr  ← 主程序（CLI/GUI 分发）
 │   ├── code_decl_to_abi_frm.pas
 │   ├── code_decl_to_abi_cmdline.pas
-│   ├── *_abi_*_generator_tool.pas  ← 各语言生成器
+│   ├── *_abi_*_generator_tool.pas  ← 17 种语言的生成器
 │   └── *_rule.md / *Knowledge*.md  ← 输入契约 + 踩坑库
 ├── pascal_c_to_json_abi/     ← code_decl_to_json_abi（HTTP/JSON）
 │   ├── http_bridge_setup_generator_tool.pas  ← bridge 启动脚本
-│   └── http_*_abi_*_generator_tool.pas
+│   └── http_*_abi_*_generator_tool.pas  ← 20 种语言的生成器
 ├── pascal_c_to_mcp/          ← code_decl_to_mcp（MCP）
-│   ├── *_mcp_generator_tool.pas
+│   ├── *_mcp_generator_tool.pas  ← 4 种语言的生成器
 │   └── MCP_API_Contract.md
 ├── common/                   ← 共享底层（lingofuse_import / helper）
 └── zCore/                    ← Z 框架子模块
@@ -173,7 +248,7 @@ src/
 - **接口天然是“对象进、对象出”的人**：三个 ABI 家族之外的类型会被丢弃。你需要先在声明层面做序列化决策，这不是生成器替你做的事。
 - **需要成熟社区、Stack Overflow 问答、第三方教程的人**：单人维护，Issue 会回，但没有 SLA。
 
-**反过来**：如果你需要**把一组已经在用的 Pascal / C 函数，以最小的手工维护成本暴露给多种语言**，并且你接受“只支持整数 / 浮点 / 字符串、复杂结构自己序列化成字符串”这个边界，那这个仓库是目前能找到的最接近“单一真相源”的实现。
+**反过来**：如果你需要**把一组已经在用的 Pascal / C 函数，以最小的手工维护成本暴露给 20 种语言**，并且你接受“只支持整数 / 浮点 / 字符串、复杂结构自己序列化成字符串”这个边界，那这个仓库是目前能找到的最接近“单一真相源”的实现。
 
 ---
 
