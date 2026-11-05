@@ -26,7 +26,7 @@ zig_abi_service_generator_tool, zig_abi_call_generator_tool, zig_abi_test_genera
 swift_abi_call_generator_tool, swift_abi_test_generator_tool, swift_abi_test_setup_generator_tool, ruby_abi_service_generator_tool, ruby_abi_test_setup_generator_tool, 
 ruby_abi_call_generator_tool, ruby_abi_test_generator_tool, fortran_abi_service_generator_tool, fortran_abi_call_generator_tool, fortran_abi_test_generator_tool, 
 fortran_abi_test_setup_generator_tool, dart_abi_service_generator_tool, dart_abi_call_generator_tool, dart_abi_test_generator_tool, dart_abi_test_setup_generator_tool, 
-R_abi_service_generator_tool, R_abi_call_generator_tool, R_abi_test_generator_tool, R_abi_test_setup_generator_tool;
+R_abi_service_generator_tool, R_abi_call_generator_tool, R_abi_test_generator_tool, R_abi_test_setup_generator_tool, pas_abi_wire_generator_tool;
 
   {$R *.res}
 
@@ -38,7 +38,7 @@ begin
       exit;
     end;
     RequireDerivedFormResource := True;
-    Application.Scaled := True;
+  Application.Scaled:=True;
     {$PUSH}
     {$WARN 5044 OFF}
     Application.MainFormOnTaskbar := True;
