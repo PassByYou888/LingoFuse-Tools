@@ -44,6 +44,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsInt64ABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('int64') or T.Same('uint64');
@@ -61,6 +66,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'writeDouble'
   else if T.Same('single') then Result := 'writeSingle'
   else if IsStringABIType(T) then Result := 'writeString'
+  else if IsBytesABIType(T) then Result := '_writeBytes'
   else Result := '';
 end;
 
@@ -140,7 +146,9 @@ begin
   begin
     if i > 0 then
       Result := Result + ', ';
-    if IsStringABIType(Params[i].PascalType) then
+    if IsBytesABIType(Params[i].PascalType) then
+      Result := Result + 'new Uint8Array([0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A])'
+    else if IsStringABIType(Params[i].PascalType) then
       Result := Result + TsStrLit('test')
     else if IsInt64ABIType(Params[i].PascalType) then
       Result := Result + '0n'
@@ -434,6 +442,8 @@ begin
   Lines.Add('    let line: string;');
   Lines.Add('    if (value === undefined || value === "") {');
   Lines.Add('        line = "[PASS] " + label;');
+  Lines.Add('    } else if (value instanceof Uint8Array) {');
+  Lines.Add('        line = "[PASS] " + label + " = Uint8Array(" + value.length + ")";');
   Lines.Add('    } else {');
   Lines.Add('        line = "[PASS] " + label + " = " + String(value);');
   Lines.Add('    }');
