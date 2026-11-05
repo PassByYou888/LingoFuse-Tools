@@ -44,6 +44,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsInt64Type(const T: TP_String): boolean;
 begin
   Result := T.Same('int64') or T.Same('uint64');
@@ -61,6 +66,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'writeDouble'
   else if T.Same('single') then Result := 'writeSingle'
   else if IsStringABIType(T) then Result := 'writeString'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := '_writeBytes'
   else Result := '';
 end;
 
@@ -72,14 +78,6 @@ end;
 function MakeApiName(const FuncName: TP_String): TP_String;
 begin
   Result := FuncName.ReplaceChar(#32#9'./\@', '_');
-end;
-
-function MakeJsParamName(const Name: TP_String; Index: integer): TP_String;
-begin
-  if Name.Len = 0 then
-    Result := '_arg' + umlIntToStr(Index).Text
-  else
-    Result := '_arg_' + Name.Text;
 end;
 
 function JsStrLit(const S: TP_String): TP_String;
@@ -150,6 +148,8 @@ begin
       Result := Result + ', ';
     if IsStringABIType(Params[i].PascalType) then
       Result := Result + #39 + 'test' + #39
+    else if ABI_Type_Is_LF_Binary_Data(Params[i].PascalType) then
+      Result := Result + 'new Uint8Array([0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A])'
     else if IsInt64Type(Params[i].PascalType) then
       Result := Result + '0n'
     else if Params[i].PascalType.Same('double') or
@@ -409,10 +409,10 @@ begin
   Lines.Add('function _reportPass(label, value) {');
   Lines.Add('    _g.pass++;');
   Lines.Add('    let line;');
-  Lines.Add('    if (value === undefined) {');
+  Lines.Add('    if (value === undefined || value === ' + #39 + #39 + ') {');
   Lines.Add('        line = ' + JsStrLit('[PASS] ') + ' + label;');
-  Lines.Add('    } else if (value === ' + #39 + #39 + ') {');
-  Lines.Add('        line = ' + JsStrLit('[PASS] ') + ' + label;');
+  Lines.Add('    } else if (value instanceof Uint8Array) {');
+  Lines.Add('        line = ' + JsStrLit('[PASS] ') + ' + label + ' + JsStrLit(' = Uint8Array(') + ' + value.length + ' + JsStrLit(')') + ';');
   Lines.Add('    } else {');
   Lines.Add('        line = ' + JsStrLit('[PASS] ') + ' + label + ' + JsStrLit(' = ') + ' + String(value);');
   Lines.Add('    }');
