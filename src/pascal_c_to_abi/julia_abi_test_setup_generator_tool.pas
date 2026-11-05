@@ -334,7 +334,7 @@ begin
   Lines.Add('if (-not $UnitName) {');
   Lines.Add('    $cand = Get-ChildItem -LiteralPath $GenDir -File -Filter "*_abi_service.jl" -ErrorAction SilentlyContinue | Select-Object -First 1');
   Lines.Add('    if ($null -ne $cand) {');
-  Lines.Add('        $UnitName = $cand.Name -replace ' + #39 + '_abi_service\.jl$' + #39 + ', ' + #39 + #39);
+  Lines.Add('        $UnitName = $cand.Name -replace ' + #39 + '_abi_service\.jl$' + #39 + ', ' + #39 + #39 + ';');
   Lines.Add('    }');
   Lines.Add('}');
   Lines.Add('if (-not $UnitName) {');
@@ -472,7 +472,7 @@ begin
   Lines.Add('$projText = Get-Content -LiteralPath $dstProj -Raw');
   Lines.Add('if ($projText -match ' + #39 + 'uuid\s*=\s*"([^"]+)"' + #39 + ') {');
   Lines.Add('    $existingUuid = $matches[1]');
-  Lines.Add('    $uuidPattern = ' + #39 + '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' + #39);
+  Lines.Add('    $uuidPattern = ' + #39 + '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' + #39 + ';');
   Lines.Add('    if ($existingUuid -notmatch $uuidPattern) {');
   Lines.Add('        $newUuid = Get-LingoFuseUUID -UnitName $UnitName');
   Lines.Add('        $projText = $projText -replace ' + #39 + 'uuid\s*=\s*"[^"]+"' + #39 + ', "uuid = `"$newUuid`""');
@@ -502,7 +502,7 @@ begin
   Lines.Add('Push-Location $cleanDir');
   Lines.Add('try {');
   Lines.Add('    Write-Info "Installing LingoFuse dependency (Pkg.develop)..."');
-  Lines.Add('    $juliaPathFwd = $LingoFuseJulia -replace ' + #39 + '\\' + #39 + ', ' + #39 + '/' + #39);
+  Lines.Add('    $juliaPathFwd = $LingoFuseJulia -replace ' + #39 + '\\' + #39 + ', ' + #39 + '/' + #39 + ';');
   Lines.Add('    $developExpr = "using Pkg; Pkg.develop(path=" + [char]34 + $juliaPathFwd + [char]34 + ")"');
   Lines.Add('    & $juliaExe "--project=." "-e" $developExpr');
   Lines.Add('    $rc = $LASTEXITCODE');
