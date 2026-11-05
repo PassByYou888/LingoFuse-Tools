@@ -42,6 +42,11 @@ begin
     T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Java_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -64,6 +69,8 @@ begin
     Result := 'float'
   else if IsStringABIType(T) then
     Result := 'String'
+  else if IsBytesABIType(T) then
+    Result := 'byte[]'
   else
     Result := '';
 end;
@@ -72,6 +79,8 @@ function ABI_Type_To_Java_Default(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then
     Result := '""'
+  else if IsBytesABIType(T) then
+    Result := 'new byte[0]'
   else if T.Same('double') or T.Same('extended') or T.Same('real') then
     Result := '0.0'
   else if T.Same('single') then
@@ -136,6 +145,8 @@ begin
     Result := 'writeCallResult_Single'
   else if IsStringABIType(T) then
     Result := 'writeCallResult_String'
+  else if IsBytesABIType(T) then
+    Result := 'writeCallResult_Bytes'
   else
     Result := '';
 end;
@@ -208,11 +219,11 @@ begin
       Result.Append(TP_Char('_'));
   end;
   if (Result.Len > 0) and (Result[1] >= '0') and (Result[1] <= '9') then
-    Result := TP_String('_') + Result;
+    Result := '_' + Result;
   if IsJavaKeyword(Result) then
-    Result := Result + TP_String('_');
+    Result := Result + '_';
   if IsReservedLocalName(Result) then
-    Result := Result + TP_String('_');
+    Result := Result + '_';
 end;
 
 function JavaStrLit(const S: TP_String): TP_String;
@@ -226,25 +237,24 @@ begin
   begin
     c := S[i];
     if c = '"' then
-      Result := Result + TP_String('\') + TP_String('"')
+      Result := Result + '\' + '"'
     else if c = '\' then
-      Result := Result + TP_String('\') + TP_String('\')
+      Result := Result + '\' + '\'
     else if c = #10 then
-      Result := Result + TP_String('\') + TP_String('n')
+      Result := Result + '\' + 'n'
     else if c = #13 then
-      Result := Result + TP_String('\') + TP_String('r')
+      Result := Result + '\' + 'r'
     else if c = #9 then
-      Result := Result + TP_String('\') + TP_String('t')
+      Result := Result + '\' + 't'
     else if (Ord(c) < 32) or (Ord(c) > 126) then
     begin
       Code := Ord(c);
-      Result := Result + TP_String('\') + TP_String('u') +
-        TP_String(IntToHex(Code, 4));
+      Result := Result + '\' + 'u' + TP_String(IntToHex(Code, 4));
     end
     else
       Result.Append(c);
   end;
-  Result := Result + TP_String('"');
+  Result := Result + '"';
 end;
 
 function JavaPackageName(const UnitName: TP_String): TP_String;
@@ -252,7 +262,7 @@ var
   i: integer;
   c: TP_Char;
 begin
-  Result := TP_String('lingofuse.abi.');
+  Result := 'lingofuse.abi.';
   for i := 1 to UnitName.Len do
   begin
     c := UnitName[i];
@@ -295,9 +305,8 @@ var
   i, j: integer;
   Line: TP_String;
 begin
-  Result := TP_String('');
-  if Comment.Len = 0 then
-    Exit;
+  Result := '';
+  if Comment.Len = 0 then Exit;
   i := 1;
   while i <= Comment.Len do
   begin
@@ -385,14 +394,14 @@ var
   i: integer;
   PName, PTyp: TP_String;
 begin
-  Result := TP_String('');
+  Result := '';
   for i := 0 to High(Params) do
   begin
     PName := MakeSafeJavaParamName(Params[i].Name, i);
     PTyp := ABI_Type_To_Java_Decl(Params[i].PascalType);
     if i > 0 then
-      Result := Result + TP_String(', ');
-    Result := Result + PTyp + TP_String(' ') + PName;
+      Result := Result + ', ';
+    Result := Result + PTyp + ' ' + PName;
   end;
 end;
 
@@ -401,12 +410,12 @@ var
   i: integer;
   PName: TP_String;
 begin
-  Result := TP_String('');
+  Result := '';
   for i := 0 to High(Params) do
   begin
     PName := MakeSafeJavaParamName(Params[i].Name, i);
     if i > 0 then
-      Result := Result + TP_String(', ');
+      Result := Result + ', ';
     Result := Result + PName;
   end;
 end;
@@ -472,8 +481,28 @@ begin
   Lines.Add('        out.writeString(value);');
   Lines.Add('    }');
   Lines.Add('');
+  Lines.Add('    private static void writeCallResult_Bytes(DataHandle out, byte[] value) {');
+  Lines.Add('        if (value == null) value = new byte[0];');
+  Lines.Add('        out.writeInt8(STATUS_OK);');
+  Lines.Add('        out.writeInt32(value.length);');
+  Lines.Add('        if (value.length > 0) {');
+  Lines.Add('            out.writeBytes(value);');
+  Lines.Add('        }');
+  Lines.Add('    }');
+  Lines.Add('');
   Lines.Add('    private static void writeCallResult_Void(DataHandle out) {');
   Lines.Add('        out.writeInt8(STATUS_OK);');
+  Lines.Add('    }');
+  Lines.Add('');
+  Lines.Add('    private static byte[] readBytesWithLength(DataHandle in) {');
+  Lines.Add('        int n = in.readInt32();');
+  Lines.Add('        if (n < 0) {');
+  Lines.Add('            throw new RuntimeException("invalid byte array length: " + n);');
+  Lines.Add('        }');
+  Lines.Add('        if (n == 0) {');
+  Lines.Add('            return new byte[0];');
+  Lines.Add('        }');
+  Lines.Add('        return in.readBytesExact(n);');
   Lines.Add('    }');
   Lines.Add('');
 end;
@@ -488,14 +517,14 @@ begin
   DefExpr := ABI_Type_To_Java_Default(F.ReturnType);
 
   if F.IsFunction then
-    Lines.Add('    public static ' + RetDecl.Text + ' internal_call_' +
-      ApiName.Text + '(' + ParamDecl.Text + ') {')
+    Lines.Add('    public static ' + RetDecl + ' internal_call_' +
+      ApiName + '(' + ParamDecl + ') {')
   else
     Lines.Add('    public static void internal_call_' +
-      ApiName.Text + '(' + ParamDecl.Text + ') {');
+      ApiName + '(' + ParamDecl + ') {');
 
   if F.IsFunction then
-    Lines.Add('        return ' + DefExpr.Text + ';');
+    Lines.Add('        return ' + DefExpr + ';');
   Lines.Add('    }');
   Lines.Add('');
 end;
@@ -506,7 +535,7 @@ var
   i: integer;
   PName, PTyp, ReadExpr, Writer, ArgList, RetDecl: TP_String;
 begin
-  Lines.Add('    private static void handle_' + ApiName.Text +
+  Lines.Add('    private static void handle_' + ApiName +
     '(DataHandle in, DataHandle out) {');
   Lines.Add('        try {');
   for i := 0 to High(F.Params) do
@@ -514,22 +543,23 @@ begin
     PName := MakeSafeJavaParamName(F.Params[i].Name, i);
     PTyp := ABI_Type_To_Java_Decl(F.Params[i].PascalType);
     ReadExpr := ABI_Type_To_Java_Read_Expr(F.Params[i].PascalType);
-    Lines.Add('            ' + PTyp.Text + ' ' + PName.Text + ' = ' +
-      ReadExpr.Text + ';');
+    if IsBytesABIType(F.Params[i].PascalType) then
+      Lines.Add('            byte[] ' + PName + ' = readBytesWithLength(in);')
+    else
+      Lines.Add('            ' + PTyp + ' ' + PName + ' = ' + ReadExpr + ';');
   end;
   ArgList := BuildJavaArgList(F.Params);
   if F.IsFunction then
   begin
     RetDecl := ABI_Type_To_Java_Decl(F.ReturnType);
     Writer := ABI_Type_To_Java_ResultWriter(F.ReturnType);
-    Lines.Add('            ' + RetDecl.Text + ' ret = internal_call_' +
-      ApiName.Text + '(' + ArgList.Text + ');');
-    Lines.Add('            ' + Writer.Text + '(out, ret);');
+    Lines.Add('            ' + RetDecl + ' ret = internal_call_' +
+      ApiName + '(' + ArgList + ');');
+    Lines.Add('            ' + Writer + '(out, ret);');
   end
   else
   begin
-    Lines.Add('            internal_call_' + ApiName.Text + '(' +
-      ArgList.Text + ');');
+    Lines.Add('            internal_call_' + ApiName + '(' + ArgList + ');');
     Lines.Add('            writeCallResult_Void(out);');
   end;
   Lines.Add('        } catch (Throwable t) {');
@@ -545,7 +575,7 @@ var
   i: integer;
   PName, PTyp, ReadExpr, ArgList: TP_String;
 begin
-  Lines.Add('    private static void handle_' + ApiName.Text +
+  Lines.Add('    private static void handle_' + ApiName +
     '(DataHandle in) {');
   Lines.Add('        try {');
   for i := 0 to High(F.Params) do
@@ -553,15 +583,16 @@ begin
     PName := MakeSafeJavaParamName(F.Params[i].Name, i);
     PTyp := ABI_Type_To_Java_Decl(F.Params[i].PascalType);
     ReadExpr := ABI_Type_To_Java_Read_Expr(F.Params[i].PascalType);
-    Lines.Add('            ' + PTyp.Text + ' ' + PName.Text + ' = ' +
-      ReadExpr.Text + ';');
+    if IsBytesABIType(F.Params[i].PascalType) then
+      Lines.Add('            byte[] ' + PName + ' = readBytesWithLength(in);')
+    else
+      Lines.Add('            ' + PTyp + ' ' + PName + ' = ' + ReadExpr + ';');
   end;
   ArgList := BuildJavaArgList(F.Params);
-  Lines.Add('            internal_call_' + ApiName.Text + '(' +
-    ArgList.Text + ');');
+  Lines.Add('            internal_call_' + ApiName + '(' + ArgList + ');');
   Lines.Add('        } catch (Throwable t) {');
   Lines.Add('            Framework.reportCallbackError(' +
-    JavaStrLit(TP_String('handle_') + ApiName).Text + ', t);');
+    JavaStrLit('handle_' + ApiName) + ', t);');
   Lines.Add('        }');
   Lines.Add('    }');
   Lines.Add('');
@@ -581,50 +612,50 @@ begin
   Result := nil;
   if Model = nil then
   begin
-    Log(TP_String('GenerateABIServiceJavaCode: Model is nil'));
+    Log('GenerateABIServiceJavaCode: Model is nil');
     Exit;
   end;
 
   UnitName := Model.UnitName;
   if UnitName.Len = 0 then
   begin
-    Log(TP_String('GenerateABIServiceJavaCode: UnitName is empty'));
+    Log('GenerateABIServiceJavaCode: UnitName is empty');
     Exit;
   end;
 
   PackageName := JavaPackageName(UnitName);
-  ClassName := UnitName + TP_String('AbiService');
-  AppName := MakeApiName(UnitName) + TP_String('_abi');
-  AppDesc := TP_String('ABI service for ') + UnitName;
+  ClassName := UnitName + 'AbiService';
+  AppName := MakeApiName(UnitName) + '_abi';
+  AppDesc := 'ABI service for ' + UnitName;
 
-  Log(TP_String(PFormat('Generating Java ABI service for unit "%s"',
-    [UnitName.Text])));
+  Log(PFormat('Generating Java ABI service for unit "%s"',
+    [UnitName.Text]));
 
   SupportedFuncs := CollectSupportedFunctions(Model);
   if Length(SupportedFuncs) = 0 then
-    Log(TP_String('No supported routines; generating an empty skeleton.'));
+    Log('No supported routines; generating an empty skeleton.');
 
   UsedApiNames := TPascalStringList.Create;
   Lines := TPascalStringList.Create;
   try
-    Lines.Add('package ' + PackageName.Text + ';');
+    Lines.Add('package ' + PackageName + ';');
     Lines.Add('');
     Lines.Add('import lingofuse.AppHandle;');
     Lines.Add('import lingofuse.DataHandle;');
     Lines.Add('import lingofuse.Framework;');
     Lines.Add('import lingofuse.P2PRegistry;');
     Lines.Add('');
-    Lines.Add('public final class ' + ClassName.Text + ' {');
+    Lines.Add('public final class ' + ClassName + ' {');
     Lines.Add('');
     Lines.Add('    public static final String DEFAULT_APP_NAME = ' +
-      JavaStrLit(AppName).Text + ';');
+      JavaStrLit(AppName) + ';');
     Lines.Add('    public static final String DEFAULT_APP_DESC = ' +
-      JavaStrLit(AppDesc).Text + ';');
+      JavaStrLit(AppDesc) + ';');
     Lines.Add('');
     Lines.Add('    public static final byte STATUS_OK    = 0x00;');
     Lines.Add('    public static final byte STATUS_ERROR = (byte) 0xFF;');
     Lines.Add('');
-    Lines.Add('    private ' + ClassName.Text + '() {');
+    Lines.Add('    private ' + ClassName + '() {');
     Lines.Add('    }');
     Lines.Add('');
 
@@ -637,9 +668,9 @@ begin
       begin
         j := 1;
         while UsedApiNames.IndexOf(
-          ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text)) >= 0 do
+          ApiName + '_' + umlIntToStr(j).Text) >= 0 do
           Inc(j);
-        ApiName := ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text);
+        ApiName := ApiName + '_' + umlIntToStr(j).Text;
       end;
       UsedApiNames.Add(ApiName);
       EmitBusinessHook(Lines, ApiName, F);
@@ -656,9 +687,9 @@ begin
       begin
         j := 1;
         while UsedApiNames.IndexOf(
-          ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text)) >= 0 do
+          ApiName + '_' + umlIntToStr(j).Text) >= 0 do
           Inc(j);
-        ApiName := ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text);
+        ApiName := ApiName + '_' + umlIntToStr(j).Text;
       end;
       UsedApiNames.Add(ApiName);
       if F.IsFunction then
@@ -681,22 +712,22 @@ begin
       begin
         j := 1;
         while UsedApiNames.IndexOf(
-          ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text)) >= 0 do
+          ApiName + '_' + umlIntToStr(j).Text) >= 0 do
           Inc(j);
-        ApiName := ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text);
+        ApiName := ApiName + '_' + umlIntToStr(j).Text;
       end;
       UsedApiNames.Add(ApiName);
       Description := GetFullDescription(F.Comment);
       if Description.Len = 0 then
-        Description := TP_String('ABI api for ') + F.Name;
+        Description := 'ABI api for ' + F.Name;
       if F.IsFunction then
-        Lines.Add('        if (!app.registerCall(' + JavaStrLit(ApiName).Text +
-          ', ' + JavaStrLit(Description).Text + ', ' + ClassName.Text +
-          '::handle_' + ApiName.Text + ')) {')
+        Lines.Add('        if (!app.registerCall(' + JavaStrLit(ApiName) +
+          ', ' + JavaStrLit(Description) + ', ' + ClassName +
+          '::handle_' + ApiName + ')) {')
       else
-        Lines.Add('        if (!app.registerNotify(' + JavaStrLit(ApiName).Text +
-          ', ' + JavaStrLit(Description).Text + ', ' + ClassName.Text +
-          '::handle_' + ApiName.Text + ')) {');
+        Lines.Add('        if (!app.registerNotify(' + JavaStrLit(ApiName) +
+          ', ' + JavaStrLit(Description) + ', ' + ClassName +
+          '::handle_' + ApiName + ')) {');
       Lines.Add('            failed++;');
       Lines.Add('        }');
     end;
@@ -714,23 +745,23 @@ begin
       begin
         j := 1;
         while UsedApiNames.IndexOf(
-          ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text)) >= 0 do
+          ApiName + '_' + umlIntToStr(j).Text) >= 0 do
           Inc(j);
-        ApiName := ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text);
+        ApiName := ApiName + '_' + umlIntToStr(j).Text;
       end;
       UsedApiNames.Add(ApiName);
       Description := GetFullDescription(F.Comment);
       if Description.Len = 0 then
-        Description := TP_String('ABI api for ') + F.Name;
+        Description := 'ABI api for ' + F.Name;
       Lines.Add('        try {');
       if F.IsFunction then
         Lines.Add('            P2PRegistry.registerCall(' +
-          JavaStrLit(ApiName).Text + ', ' + JavaStrLit(Description).Text +
-          ', ' + ClassName.Text + '::handle_' + ApiName.Text + ');')
+          JavaStrLit(ApiName) + ', ' + JavaStrLit(Description) + ', ' +
+          ClassName + '::handle_' + ApiName + ');')
       else
         Lines.Add('            P2PRegistry.registerNotify(' +
-          JavaStrLit(ApiName).Text + ', ' + JavaStrLit(Description).Text +
-          ', ' + ClassName.Text + '::handle_' + ApiName.Text + ');');
+          JavaStrLit(ApiName) + ', ' + JavaStrLit(Description) + ', ' +
+          ClassName + '::handle_' + ApiName + ');');
       Lines.Add('        } catch (Throwable t) {');
       Lines.Add('            failed++;');
       Lines.Add('        }');
@@ -739,8 +770,7 @@ begin
     Lines.Add('    }');
     Lines.Add('');
     Lines.Add('    public static AppHandle createAndRegisterAbiApp() {');
-    Lines.Add('        AppHandle app = new AppHandle(' +
-      'DEFAULT_APP_NAME, DEFAULT_APP_DESC);');
+    Lines.Add('        AppHandle app = new AppHandle(DEFAULT_APP_NAME, DEFAULT_APP_DESC);');
     Lines.Add('        registerAllAbiApis(app);');
     Lines.Add('        return app;');
     Lines.Add('    }');
@@ -748,8 +778,8 @@ begin
     Lines.Add('');
 
     Result := Lines;
-    Log(TP_String(PFormat('Generated %d lines, %d routines.',
-      [Lines.Count, Length(SupportedFuncs)])));
+    Log(PFormat('Generated %d lines, %d routines.',
+      [Lines.Count, Length(SupportedFuncs)]));
   finally
     UsedApiNames.Free;
   end;
