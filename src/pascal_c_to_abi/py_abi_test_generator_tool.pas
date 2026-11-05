@@ -39,6 +39,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsFloatABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('double') or T.Same('extended') or T.Same('real');
@@ -46,7 +51,8 @@ end;
 
 function IsSupportedABIType(const T: TP_String): boolean;
 begin
-  Result := IsStringABIType(T) or IsFloatABIType(T) or T.Same('single') or
+  Result := IsStringABIType(T) or IsBytesABIType(T) or IsFloatABIType(T) or
+    T.Same('single') or
     T.Same('integer') or T.Same('longint') or T.Same('cardinal') or
     T.Same('dword') or T.Same('longword') or T.Same('word') or
     T.Same('smallint') or T.Same('byte') or T.Same('int64') or T.Same('uint64');
@@ -86,6 +92,8 @@ function PlaceholderArg(const ABIType: TP_String): TP_String;
 begin
   if IsStringABIType(ABIType) then
     Result := '"test"'
+  else if IsBytesABIType(ABIType) then
+    Result := 'b"\xA5\x5A\xA5\x5A\xA5\x5A\xA5\x5A"'
   else if ABIType.Same('single') or IsFloatABIType(ABIType) then
     Result := '0.0'
   else
@@ -682,6 +690,10 @@ begin
     Lines.Add('        time.sleep(0.01)');
     Lines.Add('');
     Lines.Add('    return _G_SERVICE_CALLED_ME and _G_HAS_SERVICE_UID');
+    Lines.Add('');
+    Lines.Add('');
+    Lines.Add('def _make_test_bytes():');
+    Lines.Add('    return b"\\xA5\\x5A\\xA5\\x5A\\xA5\\x5A\\xA5\\x5A"');
     Lines.Add('');
     Lines.Add('');
 
