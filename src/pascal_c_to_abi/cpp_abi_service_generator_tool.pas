@@ -32,6 +32,11 @@ begin
     DoStatus('[cpp_abi_service_generator] %s', [PFormat(Fmt, Args)]);
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsStringABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('string') or T.Same('ansistring') or T.Same('unicodestring') or
@@ -61,6 +66,8 @@ begin
     Result := 'float'
   else if IsStringABIType(T) then
     Result := 'std::string'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'std::vector<std::uint8_t>'
   else
     Result := '';
 end;
@@ -69,6 +76,8 @@ function ABI_Type_To_Cpp_Param_Decl(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then
     Result := 'const std::string&'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'const std::vector<std::uint8_t>&'
   else
     Result := ABI_Type_To_Cpp_Decl(T);
 end;
@@ -77,6 +86,8 @@ function ABI_Type_To_Cpp_Default(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then
     Result := 'std::string{}'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'std::vector<std::uint8_t>{}'
   else if T.Same('double') or T.Same('extended') or T.Same('real') or T.Same('single') then
     Result := '0.0'
   else
@@ -397,6 +408,14 @@ begin
   Lines.Add('    }');
   Lines.Add('}');
   Lines.Add('');
+  Lines.Add('inline void Safe_Write_Bytes(TDataHnd hnd, const std::vector<std::uint8_t>& value) noexcept {');
+  Lines.Add('    try {');
+  Lines.Add('        LF_WriteUInt8(hnd, STATUS_OK);');
+  Lines.Add('        lf_abi_write_blob_raw(hnd, value);');
+  Lines.Add('    } catch (...) {');
+  Lines.Add('    }');
+  Lines.Add('}');
+  Lines.Add('');
   Lines.Add('inline void Safe_Write_Void(TDataHnd hnd) noexcept {');
   Lines.Add('    try {');
   Lines.Add('        std::uint8_t buf[1] = { STATUS_OK };');
@@ -520,6 +539,30 @@ begin
         Lines.Add('    }');
       end;
     end
+    else if ABI_Type_Is_LF_Binary_Data(F.Params[i].PascalType) then
+    begin
+      Lines.Add('    std::vector<std::uint8_t> ' + PName + ';');
+      if IsCall then
+      begin
+        Lines.Add('    try {');
+        Lines.Add('        if (!lf_abi_read_blob_raw(in_h.get(), ' + PName + ')) {');
+        Lines.Add('            Safe_Write_Error(out_h.get(), "input truncated: ' + PName + '");');
+        Lines.Add('            return;');
+        Lines.Add('        }');
+        Lines.Add('    } catch (const std::exception& _e) {');
+        Lines.Add('        Safe_Write_Error(out_h.get(), std::string("read ' + PName + ' failed: ") + _e.what());');
+        Lines.Add('        return;');
+        Lines.Add('    }');
+      end
+      else
+      begin
+        Lines.Add('    try {');
+        Lines.Add('        if (!lf_abi_read_blob_raw(in_h.get(), ' + PName + ')) return;');
+        Lines.Add('    } catch (...) {');
+        Lines.Add('        return;');
+        Lines.Add('    }');
+      end;
+    end
     else
     begin
       Lines.Add('    ' + PTyp + ' ' + PName + ' = 0;');
@@ -557,6 +600,20 @@ begin
       Lines.Add('    }');
       Lines.Add('    Safe_Write_String(out_h.get(), _ret);');
     end
+    else if ABI_Type_Is_LF_Binary_Data(F.ReturnType) then
+    begin
+      Lines.Add('    std::vector<std::uint8_t> _ret;');
+      Lines.Add('    try {');
+      Lines.Add('        _ret = internal_call_' + ApiName + '(' + ArgList + ');');
+      Lines.Add('    } catch (const std::exception& _e) {');
+      Lines.Add('        Safe_Write_Error(out_h.get(), _e.what());');
+      Lines.Add('        return;');
+      Lines.Add('    } catch (...) {');
+      Lines.Add('        Safe_Write_Error(out_h.get(), "unknown exception");');
+      Lines.Add('        return;');
+      Lines.Add('    }');
+      Lines.Add('    Safe_Write_Bytes(out_h.get(), _ret);');
+    end
     else
     begin
       Lines.Add('    ' + RetType + ' _ret = 0;');
@@ -581,6 +638,38 @@ begin
   end;
 
   Lines.Add('}');
+  Lines.Add('');
+end;
+
+procedure EmitWireGuardHelpers(Lines: TPascalStringList; const ProtocolGuard: TP_String);
+begin
+  Lines.Add('#ifndef ' + ProtocolGuard);
+  Lines.Add('#define ' + ProtocolGuard);
+  Lines.Add('constexpr std::uint8_t STATUS_OK    = 0x00;');
+  Lines.Add('constexpr std::uint8_t STATUS_ERROR = 0xFF;');
+  Lines.Add('');
+  Lines.Add('inline void lf_abi_write_blob_raw(TDataHnd hnd, const std::vector<std::uint8_t>& value) {');
+  Lines.Add('    const std::int32_t n = static_cast<std::int32_t>(value.size());');
+  Lines.Add('    LF_WriteInt32(hnd, n);');
+  Lines.Add('    if (n > 0) {');
+  Lines.Add('        LF_WriteBuffer(hnd, value.data(), static_cast<std::int64_t>(n));');
+  Lines.Add('    }');
+  Lines.Add('}');
+  Lines.Add('');
+  Lines.Add('inline bool lf_abi_read_blob_raw(TDataHnd hnd, std::vector<std::uint8_t>& value) {');
+  Lines.Add('    value.clear();');
+  Lines.Add('    std::int32_t n = 0;');
+  Lines.Add('    if (!LF_ReadInt32(hnd, &n)) return false;');
+  Lines.Add('    if (n < 0) return false;');
+  Lines.Add('    if (n == 0) return true;');
+  Lines.Add('    value.resize(static_cast<std::size_t>(n));');
+  Lines.Add('    if (LF_ReadBuffer(hnd, value.data(), static_cast<std::int64_t>(n)) != static_cast<std::int64_t>(n)) {');
+  Lines.Add('        value.clear();');
+  Lines.Add('        return false;');
+  Lines.Add('    }');
+  Lines.Add('    return true;');
+  Lines.Add('}');
+  Lines.Add('#endif');
   Lines.Add('');
 end;
 
@@ -642,13 +731,7 @@ begin
     Lines.Add('extern const char* DEFAULT_APP_DESC;');
     Lines.Add('');
 
-    Lines.Add('#ifndef ' + ProtocolGuard);
-    Lines.Add('#define ' + ProtocolGuard);
-    Lines.Add('constexpr std::uint8_t STATUS_OK    = 0x00;');
-    Lines.Add('constexpr std::uint8_t STATUS_ERROR = 0xFF;');
-    Lines.Add('#endif');
-    Lines.Add('');
-
+    EmitWireGuardHelpers(Lines, ProtocolGuard);
     EmitSafetyHelpers(Lines);
 
     UsedApiNames.Clear;
