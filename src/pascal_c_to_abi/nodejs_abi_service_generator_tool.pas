@@ -42,6 +42,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Js_Write_Fn(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'writeInt32'
@@ -54,6 +59,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'writeDouble'
   else if T.Same('single') then Result := 'writeSingle'
   else if IsStringABIType(T) then Result := 'writeString'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := '_writeBytes'
   else Result := '';
 end;
 
@@ -69,12 +75,14 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'readDouble'
   else if T.Same('single') then Result := 'readSingle'
   else if IsStringABIType(T) then Result := 'readString'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := '_readBytes'
   else Result := '';
 end;
 
 function ABI_Type_To_Js_Default(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then Result := #39 + #39
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := 'new Uint8Array(0)'
   else if T.Same('int64') or T.Same('uint64') then Result := '0n'
   else if T.Same('double') or T.Same('single') or T.Same('extended') or T.Same('real') then Result := '0.0'
   else Result := '0';
@@ -282,6 +290,26 @@ begin
     Result := Result + ', ' + MakeJsParamName(Params[i].Name, i);
 end;
 
+procedure EmitReadParamLine(
+  Lines: TPascalStringList;
+  const PName, ReadFn: TP_String);
+begin
+  if (ReadFn.Len > 0) and (ReadFn[1] = '_') then
+    Lines.Add('        ' + PName + ' = ' + ReadFn + '(_inH);')
+  else
+    Lines.Add('        ' + PName + ' = _inH.' + ReadFn + '();');
+end;
+
+procedure EmitWriteResultLine(
+  Lines: TPascalStringList;
+  const WriteFn: TP_String);
+begin
+  if (WriteFn.Len > 0) and (WriteFn[1] = '_') then
+    Lines.Add('        ' + WriteFn + '(_outH, _ret);')
+  else
+    Lines.Add('        _outH.' + WriteFn + '(_ret);');
+end;
+
 procedure EmitCallbackFunction(
   Lines: TPascalStringList;
   const ApiName: TP_String;
@@ -308,7 +336,7 @@ begin
     begin
       PName := MakeJsParamName(F.Params[i].Name, i);
       ReadFn := ABI_Type_To_Js_Read_Fn(F.Params[i].PascalType);
-      Lines.Add('        ' + PName + ' = _inH.' + ReadFn + '();');
+      EmitReadParamLine(Lines, PName, ReadFn);
     end;
     Lines.Add('    } catch (_e) {');
     Lines.Add('        _safeWriteError(_outH, ' + JsStrLit('input truncated: ' + ApiName) + ');');
@@ -328,7 +356,7 @@ begin
   WriteFn := ABI_Type_To_Js_Write_Fn(F.ReturnType);
   Lines.Add('    try {');
   Lines.Add('        _outH.writeUInt8(STATUS_OK);');
-  Lines.Add('        _outH.' + WriteFn + '(_ret);');
+  EmitWriteResultLine(Lines, WriteFn);
   Lines.Add('    } catch (_e) {');
   Lines.Add('        _safeWriteError(_outH, (_e && _e.message) ? _e.message : String(_e));');
   Lines.Add('    }');
@@ -361,7 +389,7 @@ begin
     begin
       PName := MakeJsParamName(F.Params[i].Name, i);
       ReadFn := ABI_Type_To_Js_Read_Fn(F.Params[i].PascalType);
-      Lines.Add('        ' + PName + ' = _inH.' + ReadFn + '();');
+      EmitReadParamLine(Lines, PName, ReadFn);
     end;
     Lines.Add('    } catch (_e) {');
     Lines.Add('        return;');
@@ -418,6 +446,37 @@ begin
     Lines.Add('');
     Lines.Add('const STATUS_OK = 0x00;');
     Lines.Add('const STATUS_ERROR = 0xFF;');
+    Lines.Add('');
+    Lines.Add('function _writeBytes(hnd, value) {');
+    Lines.Add('    if (value === null || value === undefined) {');
+    Lines.Add('        value = new Uint8Array(0);');
+    Lines.Add('    }');
+    Lines.Add('    let u8;');
+    Lines.Add('    if (value instanceof Uint8Array) {');
+    Lines.Add('        u8 = value;');
+    Lines.Add('    } else if (value instanceof ArrayBuffer) {');
+    Lines.Add('        u8 = new Uint8Array(value);');
+    Lines.Add('    } else if (Array.isArray(value)) {');
+    Lines.Add('        u8 = Uint8Array.from(value);');
+    Lines.Add('    } else {');
+    Lines.Add('        throw new TypeError(' + JsStrLit('expected Uint8Array / ArrayBuffer / number[], got ') + ' + typeof value);');
+    Lines.Add('    }');
+    Lines.Add('    hnd.writeInt32(u8.length);');
+    Lines.Add('    if (u8.length > 0) {');
+    Lines.Add('        hnd.writeBytes(u8);');
+    Lines.Add('    }');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('function _readBytes(hnd) {');
+    Lines.Add('    const n = hnd.readInt32();');
+    Lines.Add('    if (n < 0) {');
+    Lines.Add('        throw new Error(' + JsStrLit('invalid byte array length: ') + ' + n);');
+    Lines.Add('    }');
+    Lines.Add('    if (n === 0) {');
+    Lines.Add('        return new Uint8Array(0);');
+    Lines.Add('    }');
+    Lines.Add('    return hnd.readBytesExact(n);');
+    Lines.Add('}');
     Lines.Add('');
     Lines.Add('function _safeWriteError(outH, msg) {');
     Lines.Add('    try {');
