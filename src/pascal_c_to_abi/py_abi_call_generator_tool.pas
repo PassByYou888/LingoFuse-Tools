@@ -38,6 +38,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsInt32ABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('integer') or T.Same('longint');
@@ -55,7 +60,8 @@ end;
 
 function IsSupportedABIType(const T: TP_String): boolean;
 begin
-  Result := IsStringABIType(T) or IsInt32ABIType(T) or IsUInt32ABIType(T) or IsFloatABIType(T) or
+  Result := IsStringABIType(T) or IsBytesABIType(T) or IsInt32ABIType(T) or
+    IsUInt32ABIType(T) or IsFloatABIType(T) or
     T.Same('int64') or T.Same('word') or T.Same('smallint') or T.Same('byte') or
     T.Same('uint64') or T.Same('single');
 end;
@@ -64,6 +70,8 @@ function ABI_Type_To_Py_Annotation(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then
     Result := 'str'
+  else if IsBytesABIType(T) then
+    Result := 'bytes'
   else if IsFloatABIType(T) or T.Same('single') then
     Result := 'float'
   else if IsInt32ABIType(T) or T.Same('int64') or IsUInt32ABIType(T) or
@@ -85,6 +93,7 @@ begin
   else if IsFloatABIType(T) then Result := '_read_double'
   else if T.Same('single') then Result := '_read_single'
   else if IsStringABIType(T) then Result := '_read_string'
+  else if IsBytesABIType(T) then Result := '_read_bytes'
   else
     Result := '';
 end;
@@ -101,6 +110,7 @@ begin
   else if IsFloatABIType(T) then Result := '_write_double'
   else if T.Same('single') then Result := '_write_single'
   else if IsStringABIType(T) then Result := '_write_string'
+  else if IsBytesABIType(T) then Result := '_write_bytes'
   else
     Result := '';
 end;
@@ -130,19 +140,6 @@ end;
 function IsPyIdentChar(c: TP_Char): boolean;
 begin
   Result := IsPyIdentStart(c) or ((c >= '0') and (c <= '9'));
-end;
-
-function IsValidPyIdentifier(const S: TP_String): boolean;
-var
-  i: integer;
-begin
-  Result := False;
-  if S.Len = 0 then Exit;
-  if IsPythonKeyword(S) then Exit;
-  if not IsPyIdentStart(S[1]) then Exit;
-  for i := 2 to S.Len do
-    if not IsPyIdentChar(S[i]) then Exit;
-  Result := True;
 end;
 
 function IsReservedInternalName(const S: TP_String): boolean;
@@ -211,58 +208,6 @@ begin
       Result.Append(c);
   end;
   Result.Append(#39);
-end;
-
-function StripCommentMarkers(const Line: TP_String): TP_String;
-var
-  T: TP_String;
-begin
-  T := Line.TrimChar(#32#9);
-  if (T.Len >= 2) and (T[1] = '/') and (T[2] = '/') then
-    T := T.GetString(3, T.Len + 1).TrimChar(#32#9);
-  if T.Len > 0 then
-  begin
-    if T[1] = '{' then
-      T := T.GetString(2, T.Len + 1).TrimChar(#32#9)
-    else if (T.Len >= 2) and (T[1] = '(') and (T[2] = '*') then
-      T := T.GetString(3, T.Len + 1).TrimChar(#32#9);
-  end;
-  if T.Len > 0 then
-  begin
-    if T[T.Len] = '}' then
-      T := T.GetString(1, T.Len).TrimChar(#32#9)
-    else if (T.Len >= 2) and (T[T.Len - 1] = '*') and (T[T.Len] = ')') then
-      T := T.GetString(1, T.Len - 1).TrimChar(#32#9);
-  end;
-  Result := T;
-end;
-
-procedure EmitCommentBlock(Lines: TPascalStringList;
-  const Indent, Comment: TP_String);
-var
-  StartPos, EndPos: Integer;
-  Line: TP_String;
-begin
-  if Comment.Len = 0 then Exit;
-  StartPos := 1;
-  while StartPos <= Comment.Len do
-  begin
-    EndPos := StartPos;
-    while (EndPos <= Comment.Len) and (Comment[EndPos] <> #10)
-      and (Comment[EndPos] <> #13) do
-      Inc(EndPos);
-    if EndPos > StartPos then
-    begin
-      Line := Comment.GetString(StartPos, EndPos);
-      Line := StripCommentMarkers(Line);
-      if Line.Len > 0 then
-        Lines.Add(Indent + '# ' + Line.Text);
-    end;
-    StartPos := EndPos;
-    while (StartPos <= Comment.Len) and ((Comment[StartPos] = #10)
-      or (Comment[StartPos] = #13)) do
-      Inc(StartPos);
-  end;
 end;
 
 type
@@ -476,6 +421,15 @@ begin
   Lines.Add('    return _lf_read_string(hnd)');
   Lines.Add('');
   Lines.Add('');
+  Lines.Add('def _read_bytes(hnd):');
+  Lines.Add('    n = _read_int32(hnd)');
+  Lines.Add('    if n < 0:');
+  Lines.Add('        raise IOError("invalid byte array length: %d" % n)');
+  Lines.Add('    if n == 0:');
+  Lines.Add('        return b""');
+  Lines.Add('    return _read_exact(hnd, n)');
+  Lines.Add('');
+  Lines.Add('');
   Lines.Add('def _write_uint8(hnd, v):');
   Lines.Add('    _write_exact(hnd, struct.pack("<B", v))');
   Lines.Add('');
@@ -518,6 +472,17 @@ begin
   Lines.Add('');
   Lines.Add('def _write_string(hnd, v):');
   Lines.Add('    _lf_write_string(hnd, v)');
+  Lines.Add('');
+  Lines.Add('');
+  Lines.Add('def _write_bytes(hnd, v):');
+  Lines.Add('    if v is None:');
+  Lines.Add('        v = b""');
+  Lines.Add('    if not isinstance(v, (bytes, bytearray, memoryview)):');
+  Lines.Add('        raise TypeError("expected bytes-like, got %r" % type(v).__name__)');
+  Lines.Add('    b = bytes(v)');
+  Lines.Add('    _write_int32(hnd, len(b))');
+  Lines.Add('    if len(b) > 0:');
+  Lines.Add('        _write_exact(hnd, b)');
   Lines.Add('');
   Lines.Add('');
 end;
@@ -996,7 +961,6 @@ begin
     for i := 0 to High(SupportedFuncs) do
     begin
       ApiName := UsedApiNames[i];
-      EmitCommentBlock(Lines, '', SupportedFuncs[i].Comment);
       if SupportedFuncs[i].IsFunction then
         EmitFunctionVariants(Lines, ApiName, SupportedFuncs[i])
       else
