@@ -31,6 +31,19 @@ begin
     DoStatus('[pas_abi_call_generator] %s', [PFormat(Fmt, Args)]);
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
+function IsStringABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('string') or T.Same('ansistring') or T.Same('unicodestring')
+    or T.Same('tpascalstring') or T.Same('tupascalstring')
+    or T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar')
+    or T.Same('pwidechar');
+end;
+
 function ABI_Type_To_Pascal_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') then Result := 'Integer'
@@ -47,21 +60,9 @@ begin
   else if T.Same('single') then Result := 'Single'
   else if T.Same('extended') then Result := 'Extended'
   else if T.Same('real') then Result := 'Real'
-  else if T.Same('string') or T.Same('ansistring') or T.Same('unicodestring')
-    or T.Same('tpascalstring') or T.Same('tupascalstring')
-    or T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar')
-    or T.Same('pwidechar') then
-    Result := 'string'
-  else
-    Result := '';
-end;
-
-function IsStringABIType(const T: TP_String): boolean;
-begin
-  Result := T.Same('string') or T.Same('ansistring') or T.Same('unicodestring')
-    or T.Same('tpascalstring') or T.Same('tupascalstring')
-    or T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar')
-    or T.Same('pwidechar');
+  else if IsStringABIType(T) then Result := 'string'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := 'PLF_Binary_Data'
+  else Result := '';
 end;
 
 function ABI_Type_To_Write_Func(const T: TP_String): TP_String;
@@ -78,6 +79,7 @@ begin
     Result := 'LF_WriteDouble'
   else if T.Same('single') then Result := 'LF_WriteSingle'
   else if IsStringABIType(T) then Result := 'LF_WriteString'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := 'LF_Write_LF_Binary_Data'
   else Result := '';
 end;
 
@@ -95,13 +97,16 @@ begin
     Result := 'LF_ReadDouble'
   else if T.Same('single') then Result := 'LF_ReadSingle'
   else if IsStringABIType(T) then Result := 'LF_ReadString'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := 'LF_Read_LF_Binary_Data'
   else Result := '';
 end;
 
 function ABI_Type_Default_Expr(const T: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then
-    Result := #39 + #39
+  if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'nil'
+  else if IsStringABIType(T) then
+    Result := #39#39
   else if T.Same('double') or T.Same('single') or T.Same('extended')
     or T.Same('real') then
     Result := '0.0'
@@ -131,8 +136,7 @@ begin
       n := 'p' + umlIntToStr(i)
     else
       n := Params[i].Name;
-    if i > 0 then
-      Result := Result + '; ';
+    if i > 0 then Result := Result + '; ';
     Result := Result + n + ': ' + ABI_Type_To_Pascal_Decl(Params[i].PascalType);
   end;
 end;
@@ -143,8 +147,7 @@ begin
   Result := Leading_;
   if Length(Params) > 0 then
   begin
-    if Result <> '' then
-      Result := Result + '; ';
+    if Result <> '' then Result := Result + '; ';
     Result := Result + BuildTypedParamDecl(Params);
   end;
 end;
@@ -179,61 +182,6 @@ begin
   end;
 end;
 
-function StripAllCommentMarkers(const S: TP_String): TP_String;
-var
-  T: TP_String;
-begin
-  T := S.TrimChar(#32#9);
-  if (T.Len >= 2) and (T[1] = '/') and (T[2] = '/') then
-    T := T.GetString(3, T.Len + 1).TrimChar(#32#9);
-  if T.Len > 0 then
-  begin
-    if T[1] = '{' then
-      T := T.GetString(2, T.Len + 1).TrimChar(#32#9)
-    else if (T.Len >= 2) and (T[1] = '(') and (T[2] = '*') then
-      T := T.GetString(3, T.Len + 1).TrimChar(#32#9);
-  end;
-  if T.Len > 0 then
-  begin
-    if T[T.Len] = '}' then
-      T := T.GetString(1, T.Len).TrimChar(#32#9)
-    else if (T.Len >= 2) and (T[T.Len - 1] = '*') and (T[T.Len] = ')') then
-      T := T.GetString(1, T.Len - 1).TrimChar(#32#9);
-  end;
-  Result := T;
-end;
-
-procedure EmitCommentBlock(Lines: TPascalStringList;
-  const Indent, Comment: TP_String);
-var
-  StartPos, EndPos: Integer;
-  Line: TP_String;
-begin
-  if Comment.Len = 0 then Exit;
-
-  StartPos := 1;
-  while StartPos <= Comment.Len do
-  begin
-    EndPos := StartPos;
-    while (EndPos <= Comment.Len) and (Comment[EndPos] <> #10)
-      and (Comment[EndPos] <> #13) do
-      Inc(EndPos);
-
-    if EndPos > StartPos then
-    begin
-      Line := Comment.GetString(StartPos, EndPos);
-      Line := StripAllCommentMarkers(Line);
-      if Line.Len > 0 then
-        Lines.Add(Indent + '// ' + Line.Text);
-    end;
-
-    StartPos := EndPos;
-    while (StartPos <= Comment.Len) and ((Comment[StartPos] = #10)
-      or (Comment[StartPos] = #13)) do
-      Inc(StartPos);
-  end;
-end;
-
 type
   TArryFunctionStructure = array of TFunctionStructure;
 
@@ -248,7 +196,6 @@ begin
   begin
     f := Model.Funcs[i];
     Supported := True;
-
     for j := 0 to High(f.Params) do
       if not IsSupportedABIType(f.Params[j].PascalType) then
       begin
@@ -257,20 +204,17 @@ begin
           [f.Name.Text, f.Params[j].Name.Text, f.Params[j].PascalType.Text]));
         Break;
       end;
-
     if Supported and f.IsFunction and (not IsSupportedABIType(f.ReturnType)) then
     begin
       Supported := False;
       Log(PFormat('Skipped "%s": return type "%s" is not a supported ABI type',
         [f.Name.Text, f.ReturnType.Text]));
     end;
-
     if Supported and (f.Name.Len = 0) then
     begin
       Supported := False;
       Log('Skipped: routine with empty Name');
     end;
-
     if Supported then
     begin
       SetLength(Result, Length(Result) + 1);
@@ -287,6 +231,7 @@ procedure EmitAsyncDispatch(
 var
   RetDecl, DefaultExpr, ReadFn: TP_String;
   HolderType, SuccessType, ErrorType: TP_String;
+  RetIsLF_Binary_Data: Boolean;
 begin
   RetDecl := ABI_Type_To_Pascal_Decl(F.ReturnType);
   DefaultExpr := ABI_Type_Default_Expr(F.ReturnType);
@@ -294,11 +239,11 @@ begin
   HolderType := 'T' + ApiName + '_AsyncHolder' + Suffix;
   SuccessType := 'T' + ApiName + '_Success' + Suffix;
   ErrorType := 'TCallError' + Suffix;
+  RetIsLF_Binary_Data := ABI_Type_Is_LF_Binary_Data(F.ReturnType);
 
   Lines.Add('type');
   Lines.Add('  P' + HolderType + ' = ^' + HolderType + ';');
   Lines.Add('  ' + HolderType + ' = record');
-  Lines.Add('    Request: TDataHnd___;');
   Lines.Add('    OnSuccess: ' + SuccessType + ';');
   Lines.Add('    OnError: ' + ErrorType + ';');
   Lines.Add('  end;');
@@ -316,7 +261,7 @@ begin
   Lines.Add('  _H := P' + HolderType + '(Data);');
   Lines.Add('  if _H = nil then Exit;');
   Lines.Add('  _Value := ' + DefaultExpr + ';');
-  Lines.Add('  _ErrMsg := ' + #39 + #39 + ';');
+  Lines.Add('  _ErrMsg := ' + #39#39 + ';');
   Lines.Add('  _ErrCode := 0;');
   Lines.Add('  _OK := False;');
   Lines.Add('  try');
@@ -372,11 +317,11 @@ begin
   Lines.Add('        try _H^.OnError(_ErrMsg, _ErrCode) except end;');
   Lines.Add('    end;');
   Lines.Add('  finally');
-  Lines.Add('    if _H^.Request <> nil then');
-  Lines.Add('    begin');
-  Lines.Add('      LF_FreeData(_H^.Request);');
-  Lines.Add('      _H^.Request := nil;');
-  Lines.Add('    end;');
+  if RetIsLF_Binary_Data then
+  begin
+    Lines.Add('    if _Value <> nil then FreeLF_Binary_Data(_Value);');
+    Lines.Add('    _Value := nil;');
+  end;
   Lines.Add('    Dispose(_H);');
   Lines.Add('  end;');
   Lines.Add('end;');
@@ -392,9 +337,11 @@ procedure EmitSyncCallFunction(
   const CallExFunc: TP_String;
   const FirstArgExpr: TP_String);
 var
-  ParamDecl: TP_String;
+  ParamDecl, ReadFunc, DefaultExpr: TP_String;
 begin
   ParamDecl := BuildLeadingParamList(ExtraParamPrefix, F.Params);
+  ReadFunc := ABI_Type_To_Read_Func(F.ReturnType);
+  DefaultExpr := ABI_Type_Default_Expr(F.ReturnType);
 
   Lines.Add('function ' + FuncName + '(' + ParamDecl + '): ' +
     ABI_Type_To_Pascal_Decl(F.ReturnType) + ';');
@@ -403,6 +350,7 @@ begin
   Lines.Add('  _Status: uint8;');
   Lines.Add('  _ErrMsg: string;');
   Lines.Add('begin');
+  Lines.Add('  Result := ' + DefaultExpr + ';');
   Lines.Add('  _Res := nil;');
   Lines.Add('  _Data := LF_CreateDataEx(' + #39 + ApiName + #39 + ');');
   Lines.Add('  if _Data = nil then');
@@ -434,8 +382,7 @@ begin
   Lines.Add('        raise EABI_RemoteError.Create(' + #39 + 'call "' + ApiName +
     '" failed: ' + #39 + ' + _ErrMsg);');
   Lines.Add('      end;');
-  Lines.Add('      if not ' + ABI_Type_To_Read_Func(F.ReturnType) +
-    '(_Res, Result) then');
+  Lines.Add('      if not ' + ReadFunc + '(_Res, Result) then');
   Lines.Add('        raise EABI_RemoteError.Create(' + #39 + 'call "' + ApiName +
     '": response truncated (result)' + #39 + ');');
   Lines.Add('    finally');
@@ -488,7 +435,6 @@ begin
   EmitWriteParamStatements(Lines, F.Params, '    ');
 
   Lines.Add('    New(_H);');
-  Lines.Add('    _H^.Request := _Data;');
   Lines.Add('    _H^.OnSuccess := OnSuccess;');
   Lines.Add('    _H^.OnError := OnError;');
   Lines.Add('    try');
@@ -498,7 +444,6 @@ begin
   Lines.Add('      on E: Exception do');
   Lines.Add('      begin');
   Lines.Add('        Result := False;');
-  Lines.Add('        _H^.Request := nil;');
   Lines.Add('        Dispose(_H);');
   Lines.Add('        _H := nil;');
   Lines.Add('        if Assigned(OnError) then');
@@ -507,11 +452,8 @@ begin
   Lines.Add('        Exit;');
   Lines.Add('      end;');
   Lines.Add('    end;');
-  Lines.Add('    if Result then');
-  Lines.Add('      _Data := nil');
-  Lines.Add('    else');
+  Lines.Add('    if not Result then');
   Lines.Add('    begin');
-  Lines.Add('      _H^.Request := nil;');
   Lines.Add('      Dispose(_H);');
   Lines.Add('      _H := nil;');
   Lines.Add('      if Assigned(OnError) then');
@@ -519,8 +461,7 @@ begin
     ', ABI_ERR_ASYNC_SUBMIT_FAILED) except end;');
   Lines.Add('    end;');
   Lines.Add('  finally');
-  Lines.Add('    if _Data <> nil then');
-  Lines.Add('      LF_FreeData(_Data);');
+  Lines.Add('    LF_FreeData(_Data);');
   Lines.Add('  end;');
   Lines.Add('end;');
   Lines.Add('');
@@ -617,7 +558,8 @@ begin
     HeaderLines.Add('');
     HeaderLines.Add('uses');
     HeaderLines.Add('  SysUtils, Classes,');
-    HeaderLines.Add('  lingofuse_import;');
+    HeaderLines.Add('  lingofuse_import,');
+    HeaderLines.Add('  abi_wire_unit;');
     HeaderLines.Add('');
     HeaderLines.Add('const');
     HeaderLines.Add('  ABI_ERR_CREATE_FAILED = 1;');
@@ -633,10 +575,7 @@ begin
     HeaderLines.Add('  EABI_RemoteError = class(Exception);');
     HeaderLines.Add('  TCallError_M = procedure(const ErrorMsg: string; ' +
       'Code: Integer) of object;');
-    HeaderLines.Add('{$IFDEF FPC}');
-    HeaderLines.Add('  TCallError_P = procedure(const ErrorMsg: string; ' +
-      'Code: Integer) is nested;');
-    HeaderLines.Add('{$ELSE}');
+    HeaderLines.Add('{$IFNDEF FPC}');
     HeaderLines.Add('  TCallError_P = reference to procedure(' +
       'const ErrorMsg: string; Code: Integer);');
     HeaderLines.Add('{$ENDIF}');
@@ -664,45 +603,26 @@ begin
       begin
         TypeDeclLines.Add('  T' + ApiName + '_Success_M = procedure(' +
           'const Value: ' + RetDecl + ') of object;');
-        TypeDeclLines.Add('{$IFDEF FPC}');
-        TypeDeclLines.Add('  T' + ApiName + '_Success_P = procedure(' +
-          'const Value: ' + RetDecl + ') is nested;');
-        TypeDeclLines.Add('{$ELSE}');
+        TypeDeclLines.Add('{$IFNDEF FPC}');
         TypeDeclLines.Add('  T' + ApiName + '_Success_P = reference to ' +
           'procedure(const Value: ' + RetDecl + ');');
         TypeDeclLines.Add('{$ENDIF}');
         HaveAsyncTypes := True;
 
-        EmitCommentBlock(InterfaceDeclLines, '', F.Comment);
         LeadParamDecl := BuildLeadingParamList('const appName___: string',
           F.Params);
         InterfaceDeclLines.Add('function ' + ApiName +
           '(' + LeadParamDecl + '): ' + RetDecl + ';');
 
-        LeadParamDecl := BuildLeadingParamList('const appName___: string',
-          F.Params);
         InterfaceDeclLines.Add('function ' + ApiName +
           '_Async(' + BuildAsyncParamList('const appName___: string',
           F.Params, 'OnSuccess: T' + ApiName + '_Success_M',
           'OnError: TCallError_M') + '): Boolean;');
 
-        LeadParamDecl := BuildLeadingParamList('const appName___: string',
-          F.Params);
-        InterfaceDeclLines.Add('function ' + ApiName +
-          '_Async_P(' + BuildAsyncParamList('const appName___: string',
-          F.Params, 'OnSuccess: T' + ApiName + '_Success_P',
-          'OnError: TCallError_P') + '): Boolean;');
-
         InterfaceDeclLines.Add('function ' + ApiName +
           '_AsyncSequenced(' + BuildAsyncParamList('const appName___: string',
           F.Params, 'OnSuccess: T' + ApiName + '_Success_M',
           'OnError: TCallError_M') + '): Boolean;');
-
-        InterfaceDeclLines.Add('function ' + ApiName +
-          '_AsyncSequenced_P(' + BuildAsyncParamList(
-          'const appName___: string', F.Params,
-          'OnSuccess: T' + ApiName + '_Success_P',
-          'OnError: TCallError_P') + '): Boolean;');
 
         LeadParamDecl := BuildLeadingParamList('const UID___: TP2P_UID___',
           F.Params);
@@ -715,22 +635,10 @@ begin
           'OnError: TCallError_M') + '): Boolean;');
 
         InterfaceDeclLines.Add('function ' + ApiName +
-          '_UID_Async_P(' + BuildAsyncParamList(
-          'const UID___: TP2P_UID___', F.Params,
-          'OnSuccess: T' + ApiName + '_Success_P',
-          'OnError: TCallError_P') + '): Boolean;');
-
-        InterfaceDeclLines.Add('function ' + ApiName +
           '_UID_AsyncSequenced(' + BuildAsyncParamList(
           'const UID___: TP2P_UID___', F.Params,
           'OnSuccess: T' + ApiName + '_Success_M',
           'OnError: TCallError_M') + '): Boolean;');
-
-        InterfaceDeclLines.Add('function ' + ApiName +
-          '_UID_AsyncSequenced_P(' + BuildAsyncParamList(
-          'const UID___: TP2P_UID___', F.Params,
-          'OnSuccess: T' + ApiName + '_Success_P',
-          'OnError: TCallError_P') + '): Boolean;');
 
         LeadParamDecl := BuildLeadingParamList('const p2pName___: string',
           F.Params);
@@ -744,16 +652,41 @@ begin
           'OnError: TCallError_M') + '): Boolean;');
 
         InterfaceDeclLines.Add('function ' + ApiName +
-          '_P2PName_Async_P(' + BuildAsyncParamList(
-          'const p2pName___: string', F.Params,
-          'OnSuccess: T' + ApiName + '_Success_P',
-          'OnError: TCallError_P') + '): Boolean;');
-
-        InterfaceDeclLines.Add('function ' + ApiName +
           '_P2PName_AsyncSequenced(' + BuildAsyncParamList(
           'const p2pName___: string', F.Params,
           'OnSuccess: T' + ApiName + '_Success_M',
           'OnError: TCallError_M') + '): Boolean;');
+
+        InterfaceDeclLines.Add('{$IFNDEF FPC}');
+
+        InterfaceDeclLines.Add('function ' + ApiName +
+          '_Async_P(' + BuildAsyncParamList('const appName___: string',
+          F.Params, 'OnSuccess: T' + ApiName + '_Success_P',
+          'OnError: TCallError_P') + '): Boolean;');
+
+        InterfaceDeclLines.Add('function ' + ApiName +
+          '_AsyncSequenced_P(' + BuildAsyncParamList(
+          'const appName___: string', F.Params,
+          'OnSuccess: T' + ApiName + '_Success_P',
+          'OnError: TCallError_P') + '): Boolean;');
+
+        InterfaceDeclLines.Add('function ' + ApiName +
+          '_UID_Async_P(' + BuildAsyncParamList(
+          'const UID___: TP2P_UID___', F.Params,
+          'OnSuccess: T' + ApiName + '_Success_P',
+          'OnError: TCallError_P') + '): Boolean;');
+
+        InterfaceDeclLines.Add('function ' + ApiName +
+          '_UID_AsyncSequenced_P(' + BuildAsyncParamList(
+          'const UID___: TP2P_UID___', F.Params,
+          'OnSuccess: T' + ApiName + '_Success_P',
+          'OnError: TCallError_P') + '): Boolean;');
+
+        InterfaceDeclLines.Add('function ' + ApiName +
+          '_P2PName_Async_P(' + BuildAsyncParamList(
+          'const p2pName___: string', F.Params,
+          'OnSuccess: T' + ApiName + '_Success_P',
+          'OnError: TCallError_P') + '): Boolean;');
 
         InterfaceDeclLines.Add('function ' + ApiName +
           '_P2PName_AsyncSequenced_P(' + BuildAsyncParamList(
@@ -761,39 +694,29 @@ begin
           'OnSuccess: T' + ApiName + '_Success_P',
           'OnError: TCallError_P') + '): Boolean;');
 
+        InterfaceDeclLines.Add('{$ENDIF}');
         InterfaceDeclLines.Add('');
 
         ImplLines.Add('');
         EmitAsyncDispatch(ImplLines, ApiName, F, '_M');
+        ImplLines.Add('{$IFNDEF FPC}');
         EmitAsyncDispatch(ImplLines, ApiName, F, '_P');
+        ImplLines.Add('{$ENDIF}');
 
-        EmitCommentBlock(ImplLines, '', F.Comment);
         EmitSyncCallFunction(ImplLines, ApiName, F, ApiName,
           'const appName___: string', 'LF_CallEx', 'appName___');
         EmitAsyncCallFunction(ImplLines, ApiName, F, ApiName + '_Async',
           '_M', 'const appName___: string', 'LF_Async_CallEx', 'appName___');
-        EmitAsyncCallFunction(ImplLines, ApiName, F, ApiName + '_Async_P',
-          '_P', 'const appName___: string', 'LF_Async_CallEx', 'appName___');
         EmitAsyncCallFunction(ImplLines, ApiName, F,
           ApiName + '_AsyncSequenced', '_M',
-          'const appName___: string', 'LF_Async_Sequenced_CallEx',
-          'appName___');
-        EmitAsyncCallFunction(ImplLines, ApiName, F,
-          ApiName + '_AsyncSequenced_P', '_P',
           'const appName___: string', 'LF_Async_Sequenced_CallEx',
           'appName___');
         EmitSyncCallFunction(ImplLines, ApiName, F, ApiName + '_UID_Call',
           'const UID___: TP2P_UID___', 'LF_UID_CallEx', 'UID___');
         EmitAsyncCallFunction(ImplLines, ApiName, F, ApiName + '_UID_Async',
           '_M', 'const UID___: TP2P_UID___', 'LF_UID_Async_CallEx', 'UID___');
-        EmitAsyncCallFunction(ImplLines, ApiName, F, ApiName + '_UID_Async_P',
-          '_P', 'const UID___: TP2P_UID___', 'LF_UID_Async_CallEx', 'UID___');
         EmitAsyncCallFunction(ImplLines, ApiName, F,
           ApiName + '_UID_AsyncSequenced', '_M',
-          'const UID___: TP2P_UID___', 'LF_UID_Async_Sequenced_CallEx',
-          'UID___');
-        EmitAsyncCallFunction(ImplLines, ApiName, F,
-          ApiName + '_UID_AsyncSequenced_P', '_P',
           'const UID___: TP2P_UID___', 'LF_UID_Async_Sequenced_CallEx',
           'UID___');
         EmitSyncCallFunction(ImplLines, ApiName, F,
@@ -804,21 +727,35 @@ begin
           'const p2pName___: string', 'LF_P2PNAME_Async_CallEx',
           'p2pName___');
         EmitAsyncCallFunction(ImplLines, ApiName, F,
+          ApiName + '_P2PName_AsyncSequenced', '_M',
+          'const p2pName___: string',
+          'LF_P2PNAME_Async_Sequenced_CallEx', 'p2pName___');
+
+        ImplLines.Add('{$IFNDEF FPC}');
+        EmitAsyncCallFunction(ImplLines, ApiName, F, ApiName + '_Async_P',
+          '_P', 'const appName___: string', 'LF_Async_CallEx', 'appName___');
+        EmitAsyncCallFunction(ImplLines, ApiName, F,
+          ApiName + '_AsyncSequenced_P', '_P',
+          'const appName___: string', 'LF_Async_Sequenced_CallEx',
+          'appName___');
+        EmitAsyncCallFunction(ImplLines, ApiName, F, ApiName + '_UID_Async_P',
+          '_P', 'const UID___: TP2P_UID___', 'LF_UID_Async_CallEx', 'UID___');
+        EmitAsyncCallFunction(ImplLines, ApiName, F,
+          ApiName + '_UID_AsyncSequenced_P', '_P',
+          'const UID___: TP2P_UID___', 'LF_UID_Async_Sequenced_CallEx',
+          'UID___');
+        EmitAsyncCallFunction(ImplLines, ApiName, F,
           ApiName + '_P2PName_Async_P', '_P',
           'const p2pName___: string', 'LF_P2PNAME_Async_CallEx',
           'p2pName___');
         EmitAsyncCallFunction(ImplLines, ApiName, F,
-          ApiName + '_P2PName_AsyncSequenced', '_M',
-          'const p2pName___: string',
-          'LF_P2PNAME_Async_Sequenced_CallEx', 'p2pName___');
-        EmitAsyncCallFunction(ImplLines, ApiName, F,
           ApiName + '_P2PName_AsyncSequenced_P', '_P',
           'const p2pName___: string',
           'LF_P2PNAME_Async_Sequenced_CallEx', 'p2pName___');
+        ImplLines.Add('{$ENDIF}');
       end
       else
       begin
-        EmitCommentBlock(InterfaceDeclLines, '', F.Comment);
         LeadParamDecl := BuildLeadingParamList('const appName___: string',
           F.Params);
         InterfaceDeclLines.Add('procedure ' + ApiName +
@@ -851,7 +788,6 @@ begin
         InterfaceDeclLines.Add('');
 
         ImplLines.Add('');
-        EmitCommentBlock(ImplLines, '', F.Comment);
         EmitNotifyProcedure(ImplLines, ApiName, F, ApiName,
           'const appName___: string', 'LF_NotifyEx', 'appName___');
         EmitNotifyProcedure(ImplLines, ApiName, F, ApiName + '_SequencedNotify',
