@@ -41,9 +41,15 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Julia_Decl(const T: TP_String): TP_String;
 begin
-  if T.Same('integer') or T.Same('longint') then Result := 'Int32'
+  if ABI_Type_Is_LF_Binary_Data(T) then Result := 'Vector{UInt8}'
+  else if T.Same('integer') or T.Same('longint') then Result := 'Int32'
   else if T.Same('int64') then Result := 'Int64'
   else if T.Same('cardinal') or T.Same('dword') or T.Same('longword') then Result := 'UInt32'
   else if T.Same('word') then Result := 'UInt16'
@@ -58,8 +64,8 @@ end;
 
 function ABI_Type_To_Julia_Param_Type(const T: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then
-    Result := 'AbstractString'
+  if ABI_Type_Is_LF_Binary_Data(T) then Result := 'AbstractVector{UInt8}'
+  else if IsStringABIType(T) then Result := 'AbstractString'
   else if T.Same('double') or T.Same('extended') or T.Same('real') or T.Same('single') then
     Result := 'Real'
   else if T.Same('integer') or T.Same('longint') or T.Same('int64') or
@@ -73,7 +79,8 @@ end;
 
 function ABI_Type_To_Julia_Convert_Expr(const T: TP_String; const VarExpr: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then Result := 'String(' + VarExpr + ')'
+  if ABI_Type_Is_LF_Binary_Data(T) then Result := 'Vector{UInt8}(' + VarExpr + ')'
+  else if IsStringABIType(T) then Result := 'String(' + VarExpr + ')'
   else if T.Same('integer') or T.Same('longint') then Result := 'Int32(' + VarExpr + ')'
   else if T.Same('int64') then Result := 'Int64(' + VarExpr + ')'
   else if T.Same('cardinal') or T.Same('dword') or T.Same('longword') then Result := 'UInt32(' + VarExpr + ')'
@@ -88,7 +95,8 @@ end;
 
 function ABI_Type_To_Julia_Reader(const T: TP_String): TP_String;
 begin
-  if T.Same('integer') or T.Same('longint') then Result := '_read_int32_le!'
+  if ABI_Type_Is_LF_Binary_Data(T) then Result := '_read_bytes!'
+  else if T.Same('integer') or T.Same('longint') then Result := '_read_int32_le!'
   else if T.Same('int64') then Result := '_read_int64_le!'
   else if T.Same('cardinal') or T.Same('dword') or T.Same('longword') then Result := '_read_uint32_le!'
   else if T.Same('word') then Result := '_read_uint16_le!'
@@ -103,7 +111,8 @@ end;
 
 function ABI_Type_To_Julia_Write_Fn(const T: TP_String): TP_String;
 begin
-  if T.Same('integer') or T.Same('longint') then Result := 'write_int32!'
+  if ABI_Type_Is_LF_Binary_Data(T) then Result := ''
+  else if T.Same('integer') or T.Same('longint') then Result := 'write_int32!'
   else if T.Same('int64') then Result := 'write_int64!'
   else if T.Same('cardinal') or T.Same('dword') or T.Same('longword') then Result := 'write_uint32!'
   else if T.Same('word') then Result := 'write_uint16!'
@@ -315,9 +324,14 @@ begin
   for i := 0 to High(Params) do
   begin
     n := MakeSafeJuliaParamName(Params[i].Name, i);
-    w := ABI_Type_To_Julia_Write_Fn(Params[i].PascalType);
-    conv := ABI_Type_To_Julia_Convert_Expr(Params[i].PascalType, n);
-    Result := Result + ' LF.' + w.Text + '(dh, ' + conv.Text + ');';
+    if ABI_Type_Is_LF_Binary_Data(Params[i].PascalType) then
+      Result := Result + ' _write_lf_bytes_dh!(dh, ' + n + ');'
+    else
+    begin
+      w := ABI_Type_To_Julia_Write_Fn(Params[i].PascalType);
+      conv := ABI_Type_To_Julia_Convert_Expr(Params[i].PascalType, n);
+      Result := Result + ' LF.' + w.Text + '(dh, ' + conv.Text + ');';
+    end;
   end;
   Result := Result + ' end';
 end;
@@ -421,6 +435,39 @@ begin
   Lines.Add('    s = String(r.buf[start:r.pos - 1])');
   Lines.Add('    r.pos += 1');
   Lines.Add('    return s');
+  Lines.Add('end');
+  Lines.Add('');
+  Lines.Add('function _read_bytes!(r::_ParamReader)::Vector{UInt8}');
+  Lines.Add('    saved_pos = r.pos');
+  Lines.Add('    try');
+  Lines.Add('        n = _read_int32_le!(r)');
+  Lines.Add('        if n < 0');
+  Lines.Add('            throw(ArgumentError(string("invalid byte array length: ", n)))');
+  Lines.Add('        end');
+  Lines.Add('        if n == 0');
+  Lines.Add('            return UInt8[]');
+  Lines.Add('        end');
+  Lines.Add('        nn = Int(n)');
+  Lines.Add('        _pr_ensure!(r, nn)');
+  Lines.Add('        v = r.buf[r.pos:r.pos + nn - 1]');
+  Lines.Add('        r.pos += nn');
+  Lines.Add('        return v');
+  Lines.Add('    catch');
+  Lines.Add('        r.pos = saved_pos');
+  Lines.Add('        rethrow()');
+  Lines.Add('    end');
+  Lines.Add('end');
+  Lines.Add('');
+end;
+
+procedure EmitDataHandleWriters(Lines: TPascalStringList);
+begin
+  Lines.Add('function _write_lf_bytes_dh!(dh, v::AbstractVector{UInt8})');
+  Lines.Add('    LF.write_int32!(dh, Int32(length(v)))');
+  Lines.Add('    if length(v) > 0');
+  Lines.Add('        LF.write_buffer!(dh, Vector{UInt8}(v))');
+  Lines.Add('    end');
+  Lines.Add('    return nothing');
   Lines.Add('end');
   Lines.Add('');
 end;
@@ -645,6 +692,7 @@ begin
 
     EmitExceptionType(Lines);
     EmitReaders(Lines);
+    EmitDataHandleWriters(Lines);
     EmitCheckResponse(Lines);
 
     for i := 0 to High(SupportedFuncs) do
