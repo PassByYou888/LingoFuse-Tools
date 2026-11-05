@@ -43,9 +43,9 @@ begin
     or T.Same('pwidechar');
 end;
 
-function IsInt64ABIType(const T: TP_String): boolean;
+function IsBytesABIType(const T: TP_String): boolean;
 begin
-  Result := T.Same('int64') or T.Same('uint64');
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
 end;
 
 function ABI_Type_To_Ts_Decl(const T: TP_String): TP_String;
@@ -60,6 +60,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'number'
   else if T.Same('single') then Result := 'number'
   else if IsStringABIType(T) then Result := 'string'
+  else if IsBytesABIType(T) then Result := 'Uint8Array'
   else Result := '';
 end;
 
@@ -75,6 +76,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'writeDouble'
   else if T.Same('single') then Result := 'writeSingle'
   else if IsStringABIType(T) then Result := 'writeString'
+  else if IsBytesABIType(T) then Result := '_writeBytes'
   else Result := '';
 end;
 
@@ -90,6 +92,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'readDouble'
   else if T.Same('single') then Result := 'readSingle'
   else if IsStringABIType(T) then Result := 'readString'
+  else if IsBytesABIType(T) then Result := '_readBytes'
   else Result := '';
 end;
 
@@ -227,10 +230,24 @@ end;
 procedure EmitWriteParams(Lines: TPascalStringList; const Params: TParamArray; const Indent: string);
 var
   i: integer;
+  WriteFn: TP_String;
 begin
   for i := 0 to High(Params) do
-    Lines.Add(Indent + 'param.' + ABI_Type_To_Ts_Write_Fn(Params[i].PascalType) + '(' +
-      MakeTsParamName(Params[i].Name, i) + ');');
+  begin
+    WriteFn := ABI_Type_To_Ts_Write_Fn(Params[i].PascalType);
+    if (WriteFn.Len > 0) and (WriteFn[1] = '_') then
+      Lines.Add(Indent + WriteFn + '(param, ' + MakeTsParamName(Params[i].Name, i) + ');')
+    else
+      Lines.Add(Indent + 'param.' + WriteFn + '(' + MakeTsParamName(Params[i].Name, i) + ');');
+  end;
+end;
+
+function BuildReadLambda(const ReadFn: TP_String): TP_String;
+begin
+  if (ReadFn.Len > 0) and (ReadFn[1] = '_') then
+    Result := '(r) => ' + ReadFn + '(r)'
+  else
+    Result := '(r) => r.' + ReadFn + '()';
 end;
 
 procedure EmitSyncCallFunction(
@@ -242,7 +259,7 @@ procedure EmitSyncCallFunction(
   const P2PFirst: boolean;
   const CallFnName: TP_String);
 var
-  ParamDecl, RawArgExpr, RetType: TP_String;
+  ParamDecl, RawArgExpr, RetType, ReadLambda: TP_String;
 begin
   if UidFirst then
     ParamDecl := BuildTsParamDecl('Uint8Array | string', 'uid', F.Params)
@@ -252,6 +269,7 @@ begin
     ParamDecl := BuildTsParamDecl('', '', F.Params);
 
   RetType := ABI_Type_To_Ts_Decl(F.ReturnType);
+  ReadLambda := BuildReadLambda(ABI_Type_To_Ts_Read_Fn(F.ReturnType));
 
   Lines.Add('export function ' + FuncName + '(' + ParamDecl + '): ' + RetType + ' {');
   Lines.Add('    const param = new DataHandle(' + TsStrLit(ApiName) + ');');
@@ -275,7 +293,7 @@ begin
   Lines.Add('        const res = DataHandle.fromRaw(raw, true);');
   Lines.Add('        try {');
   Lines.Add('            return _readSyncReply<' + RetType + '>(' + TsStrLit(ApiName) +
-    ', res, (r) => r.' + ABI_Type_To_Ts_Read_Fn(F.ReturnType) + '());');
+    ', res, ' + ReadLambda + ');');
   Lines.Add('        } finally {');
   Lines.Add('            res.dispose();');
   Lines.Add('        }');
@@ -295,7 +313,7 @@ procedure EmitAsyncCallFunction(
   const P2PFirst: boolean;
   const CallFnName: TP_String);
 var
-  ParamDecl, IssueExpr, RetType: TP_String;
+  ParamDecl, IssueExpr, RetType, ReadLambda: TP_String;
 begin
   if UidFirst then
     ParamDecl := BuildTsParamDecl('Uint8Array | string', 'uid', F.Params)
@@ -305,6 +323,7 @@ begin
     ParamDecl := BuildTsParamDecl('', '', F.Params);
 
   RetType := ABI_Type_To_Ts_Decl(F.ReturnType);
+  ReadLambda := BuildReadLambda(ABI_Type_To_Ts_Read_Fn(F.ReturnType));
 
   Lines.Add('export function ' + FuncName + '(' + ParamDecl + '): CallPromise<' + RetType + '> {');
   Lines.Add('    const param = new DataHandle(' + TsStrLit(ApiName) + ');');
@@ -325,8 +344,7 @@ begin
   Lines.Add('        promise = runAsyncWithPromise<' + RetType + '>(');
   Lines.Add('            (cb, op) => ' + IssueExpr + ',');
   Lines.Add('            (rawResult) => _readAsyncReply<' + RetType + '>(' +
-    TsStrLit(ApiName) + ', rawResult, (r) => r.' +
-    ABI_Type_To_Ts_Read_Fn(F.ReturnType) + '()),');
+    TsStrLit(ApiName) + ', rawResult, ' + ReadLambda + '),');
   Lines.Add('            _abiTimeout');
   Lines.Add('        );');
   Lines.Add('    } catch (err) {');
@@ -433,7 +451,7 @@ begin
     Lines.Add('    get TargetApp(): string { return _abiTargetApp; },');
     Lines.Add('    set TargetApp(v: string) { _abiTargetApp = v; },');
     Lines.Add('    get Timeout(): number { return _abiTimeout; },');
-    Lines.Add('    set Timeout(v: number) { _abiTimeout = v; },');
+    Lines.Add('    set Timeout(v: number) { _abiTimeout = v; }');
     Lines.Add('};');
     Lines.Add('');
     Lines.Add('function _wrapUid(uid: Uint8Array | string): { bytes: Uint8Array } {');
@@ -458,6 +476,32 @@ begin
     Lines.Add('        return { bytes };');
     Lines.Add('    }');
     Lines.Add('    throw new TypeError("UID must be a Uint8Array(32) or a 64-char hex string");');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('function _readBytes(hnd: lf.DataHandle): Uint8Array {');
+    Lines.Add('    const n = hnd.readInt32();');
+    Lines.Add('    if (n < 0) {');
+    Lines.Add('        throw new Error("invalid byte array length: " + n);');
+    Lines.Add('    }');
+    Lines.Add('    if (n === 0) {');
+    Lines.Add('        return new Uint8Array(0);');
+    Lines.Add('    }');
+    Lines.Add('    return hnd.readBytesExact(n);');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('function _writeBytes(hnd: lf.DataHandle, value: Uint8Array | null | undefined): void {');
+    Lines.Add('    let v: Uint8Array;');
+    Lines.Add('    if (value === null || value === undefined) {');
+    Lines.Add('        v = new Uint8Array(0);');
+    Lines.Add('    } else if (value instanceof Uint8Array) {');
+    Lines.Add('        v = value;');
+    Lines.Add('    } else {');
+    Lines.Add('        throw new TypeError("expected Uint8Array, got " + typeof value);');
+    Lines.Add('    }');
+    Lines.Add('    hnd.writeInt32(v.length);');
+    Lines.Add('    if (v.length > 0) {');
+    Lines.Add('        hnd.writeBytes(v);');
+    Lines.Add('    }');
     Lines.Add('}');
     Lines.Add('');
     Lines.Add('function _readSyncReply<T>(apiName: string, res: lf.DataHandle, readResultFn: (r: lf.DataHandle) => T): T {');
