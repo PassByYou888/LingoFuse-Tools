@@ -42,6 +42,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Ts_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'number'
@@ -54,12 +59,14 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'number'
   else if T.Same('single') then Result := 'number'
   else if IsStringABIType(T) then Result := 'string'
+  else if IsBytesABIType(T) then Result := 'Uint8Array'
   else Result := '';
 end;
 
 function ABI_Type_To_Ts_Default(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then Result := '""'
+  else if IsBytesABIType(T) then Result := 'new Uint8Array(0)'
   else if T.Same('int64') or T.Same('uint64') then Result := '0n'
   else if T.Same('double') or T.Same('single') or T.Same('extended') or T.Same('real') then Result := '0.0'
   else Result := '0';
@@ -77,6 +84,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'writeDouble'
   else if T.Same('single') then Result := 'writeSingle'
   else if IsStringABIType(T) then Result := 'writeString'
+  else if IsBytesABIType(T) then Result := '_writeBytes'
   else Result := '';
 end;
 
@@ -92,6 +100,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'readDouble'
   else if T.Same('single') then Result := 'readSingle'
   else if IsStringABIType(T) then Result := 'readString'
+  else if IsBytesABIType(T) then Result := '_readBytes'
   else Result := '';
 end;
 
@@ -287,7 +296,8 @@ begin
   for i := 0 to High(Params) do
   begin
     if i > 0 then Result := Result + ', ';
-    Result := Result + MakeTsParamName(Params[i].Name, i) + ': ' + ABI_Type_To_Ts_Decl(Params[i].PascalType);
+    Result := Result + MakeTsParamName(Params[i].Name, i) + ': ' +
+      ABI_Type_To_Ts_Decl(Params[i].PascalType);
   end;
 end;
 
@@ -325,6 +335,22 @@ begin
   Lines.Add('');
 end;
 
+procedure EmitReadParamLine(Lines: TPascalStringList; const PName, ReadFn, Indent: TP_String);
+begin
+  if (ReadFn.Len > 0) and (ReadFn[1] = '_') then
+    Lines.Add(Indent + PName + ' = ' + ReadFn + '(_inH);')
+  else
+    Lines.Add(Indent + PName + ' = _inH.' + ReadFn + '();');
+end;
+
+procedure EmitWriteResultLine(Lines: TPascalStringList; const WriteFn, Indent: TP_String);
+begin
+  if (WriteFn.Len > 0) and (WriteFn[1] = '_') then
+    Lines.Add(Indent + WriteFn + '(_outH, _ret);')
+  else
+    Lines.Add(Indent + '_outH.' + WriteFn + '(_ret);');
+end;
+
 procedure EmitCallbackFunction(
   Lines: TPascalStringList;
   const ApiName: TP_String;
@@ -340,22 +366,25 @@ begin
   for i := 0 to High(F.Params) do
   begin
     PName := MakeTsParamName(F.Params[i].Name, i);
-    Lines.Add('    let ' + PName + ': ' + ABI_Type_To_Ts_Decl(F.Params[i].PascalType) + ';');
+    Lines.Add('    let ' + PName + ': ' + ABI_Type_To_Ts_Decl(F.Params[i].PascalType) +
+      ' = ' + ABI_Type_To_Ts_Default(F.Params[i].PascalType) + ';');
   end;
   Lines.Add('    try {');
   for i := 0 to High(F.Params) do
   begin
     PName := MakeTsParamName(F.Params[i].Name, i);
     ReadFn := ABI_Type_To_Ts_Read_Fn(F.Params[i].PascalType);
-    Lines.Add('        ' + PName + ' = _inH.' + ReadFn + '();');
+    EmitReadParamLine(Lines, PName, ReadFn, '        ');
   end;
   Lines.Add('    } catch (_e) {');
   Lines.Add('        _safeWriteError(_outH, "input truncated: ' + ApiName.Text + '");');
   Lines.Add('        return;');
   Lines.Add('    }');
-  Lines.Add('    let _ret: ' + ABI_Type_To_Ts_Decl(F.ReturnType) + ';');
+  Lines.Add('    let _ret: ' + ABI_Type_To_Ts_Decl(F.ReturnType) + ' = ' +
+    ABI_Type_To_Ts_Default(F.ReturnType) + ';');
   Lines.Add('    try {');
-  Lines.Add('        _ret = internal_call_' + ApiName + '(' + BuildTsInternalCallArgList(F.Params) + ');');
+  Lines.Add('        _ret = internal_call_' + ApiName + '(' +
+    BuildTsInternalCallArgList(F.Params) + ');');
   Lines.Add('    } catch (_e) {');
   Lines.Add('        _safeWriteError(_outH, (_e instanceof Error) ? _e.message : String(_e));');
   Lines.Add('        return;');
@@ -363,7 +392,7 @@ begin
   WriteFn := ABI_Type_To_Ts_Write_Fn(F.ReturnType);
   Lines.Add('    try {');
   Lines.Add('        _outH.writeUInt8(STATUS_OK);');
-  Lines.Add('        _outH.' + WriteFn + '(_ret);');
+  EmitWriteResultLine(Lines, WriteFn, '        ');
   Lines.Add('    } catch (_e) {');
   Lines.Add('        _safeWriteError(_outH, (_e instanceof Error) ? _e.message : String(_e));');
   Lines.Add('    }');
@@ -384,20 +413,22 @@ begin
   for i := 0 to High(F.Params) do
   begin
     PName := MakeTsParamName(F.Params[i].Name, i);
-    Lines.Add('    let ' + PName + ': ' + ABI_Type_To_Ts_Decl(F.Params[i].PascalType) + ';');
+    Lines.Add('    let ' + PName + ': ' + ABI_Type_To_Ts_Decl(F.Params[i].PascalType) +
+      ' = ' + ABI_Type_To_Ts_Default(F.Params[i].PascalType) + ';');
   end;
   Lines.Add('    try {');
   for i := 0 to High(F.Params) do
   begin
     PName := MakeTsParamName(F.Params[i].Name, i);
     ReadFn := ABI_Type_To_Ts_Read_Fn(F.Params[i].PascalType);
-    Lines.Add('        ' + PName + ' = _inH.' + ReadFn + '();');
+    EmitReadParamLine(Lines, PName, ReadFn, '        ');
   end;
   Lines.Add('    } catch (_e) {');
   Lines.Add('        return;');
   Lines.Add('    }');
   Lines.Add('    try {');
-  Lines.Add('        internal_call_' + ApiName + '(' + BuildTsInternalCallArgList(F.Params) + ');');
+  Lines.Add('        internal_call_' + ApiName + '(' +
+    BuildTsInternalCallArgList(F.Params) + ');');
   Lines.Add('    } catch (_e) {');
   Lines.Add('    }');
   Lines.Add('}');
@@ -456,6 +487,32 @@ begin
     Lines.Add('    }');
     Lines.Add('}');
     Lines.Add('');
+    Lines.Add('function _readBytes(hnd: lf.DataHandle): Uint8Array {');
+    Lines.Add('    const n = hnd.readInt32();');
+    Lines.Add('    if (n < 0) {');
+    Lines.Add('        throw new Error("invalid byte array length: " + n);');
+    Lines.Add('    }');
+    Lines.Add('    if (n === 0) {');
+    Lines.Add('        return new Uint8Array(0);');
+    Lines.Add('    }');
+    Lines.Add('    return hnd.readBytesExact(n);');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('function _writeBytes(hnd: lf.DataHandle, value: Uint8Array | null | undefined): void {');
+    Lines.Add('    let v: Uint8Array;');
+    Lines.Add('    if (value === null || value === undefined) {');
+    Lines.Add('        v = new Uint8Array(0);');
+    Lines.Add('    } else if (value instanceof Uint8Array) {');
+    Lines.Add('        v = value;');
+    Lines.Add('    } else {');
+    Lines.Add('        throw new TypeError("expected Uint8Array, got " + typeof value);');
+    Lines.Add('    }');
+    Lines.Add('    hnd.writeInt32(v.length);');
+    Lines.Add('    if (v.length > 0) {');
+    Lines.Add('        hnd.writeBytes(v);');
+    Lines.Add('    }');
+    Lines.Add('}');
+    Lines.Add('');
 
     UsedApiNames.Clear;
     for i := 0 to High(SupportedFuncs) do
@@ -508,9 +565,11 @@ begin
       UsedApiNames.Add(ApiName);
 
       if F.IsFunction then
-        Lines.Add('export const cb_' + ApiName + ' = koffi.register(Cb_' + ApiName + ', LfCallFuncPtr);')
+        Lines.Add('export const cb_' + ApiName +
+          ' = koffi.register(Cb_' + ApiName + ', LfCallFuncPtr);')
       else
-        Lines.Add('export const cb_' + ApiName + ' = koffi.register(Cb_' + ApiName + ', LfNotifyFuncPtr);');
+        Lines.Add('export const cb_' + ApiName +
+          ' = koffi.register(Cb_' + ApiName + ', LfNotifyFuncPtr);');
     end;
     Lines.Add('');
 
