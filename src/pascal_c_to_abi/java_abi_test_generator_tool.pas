@@ -43,6 +43,11 @@ begin
     T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Java_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -65,6 +70,8 @@ begin
     Result := 'float'
   else if IsStringABIType(T) then
     Result := 'String'
+  else if IsBytesABIType(T) then
+    Result := 'byte[]'
   else
     Result := '';
 end;
@@ -91,6 +98,8 @@ begin
     Result := 'Float'
   else if IsStringABIType(T) then
     Result := 'String'
+  else if IsBytesABIType(T) then
+    Result := 'byte[]'
   else
     Result := '';
 end;
@@ -116,25 +125,24 @@ begin
   begin
     c := S[i];
     if c = '"' then
-      Result := Result + TP_String('\') + TP_String('"')
+      Result := Result + '\' + '"'
     else if c = '\' then
-      Result := Result + TP_String('\') + TP_String('\')
+      Result := Result + '\' + '\'
     else if c = #10 then
-      Result := Result + TP_String('\') + TP_String('n')
+      Result := Result + '\' + 'n'
     else if c = #13 then
-      Result := Result + TP_String('\') + TP_String('r')
+      Result := Result + '\' + 'r'
     else if c = #9 then
-      Result := Result + TP_String('\') + TP_String('t')
+      Result := Result + '\' + 't'
     else if (Ord(c) < 32) or (Ord(c) > 126) then
     begin
       Code := Ord(c);
-      Result := Result + TP_String('\') + TP_String('u') +
-        TP_String(IntToHex(Code, 4));
+      Result := Result + '\' + 'u' + TP_String(IntToHex(Code, 4));
     end
     else
       Result.Append(c);
   end;
-  Result := Result + TP_String('"');
+  Result := Result + '"';
 end;
 
 function JavaPackageName(const UnitName: TP_String): TP_String;
@@ -142,7 +150,7 @@ var
   i: integer;
   c: TP_Char;
 begin
-  Result := TP_String('lingofuse.abi.');
+  Result := 'lingofuse.abi.';
   for i := 1 to UnitName.Len do
   begin
     c := UnitName[i];
@@ -158,24 +166,26 @@ end;
 
 function PlaceholderValue(const ABIType: TP_String): TP_String;
 begin
-  if IsStringABIType(ABIType) then
-    Result := JavaStrLit(TP_String('test'))
+  if IsBytesABIType(ABIType) then
+    Result := 'new byte[] {(byte) 0xA5, (byte) 0x5A, (byte) 0xA5, (byte) 0x5A, (byte) 0xA5, (byte) 0x5A, (byte) 0xA5, (byte) 0x5A}'
+  else if IsStringABIType(ABIType) then
+    Result := JavaStrLit('test')
   else if ABIType.Same('double') or ABIType.Same('extended') or
           ABIType.Same('real') then
-    Result := TP_String('0.0')
+    Result := '0.0'
   else if ABIType.Same('single') then
-    Result := TP_String('0.0f')
+    Result := '0.0f'
   else if ABIType.Same('int64') or ABIType.Same('uint64') then
-    Result := TP_String('0L')
+    Result := '0L'
   else if ABIType.Same('cardinal') or ABIType.Same('dword') or
           ABIType.Same('longword') then
-    Result := TP_String('0L')
+    Result := '0L'
   else if ABIType.Same('byte') then
-    Result := TP_String('(byte) 0')
+    Result := '(byte) 0'
   else if ABIType.Same('smallint') then
-    Result := TP_String('(short) 0')
+    Result := '(short) 0'
   else
-    Result := TP_String('0');
+    Result := '0';
 end;
 
 type
@@ -224,7 +234,7 @@ end;
 
 function TestParamName(Index: integer): TP_String;
 begin
-  Result := TP_String('_p') + TP_String(umlIntToStr(Index).Text);
+  Result := '_p' + TP_String(umlIntToStr(Index).Text);
 end;
 
 procedure EmitTestParamDecl(Lines: TPascalStringList; const Params: TParamArray);
@@ -254,10 +264,10 @@ function BuildTestArgListSuffix(const Params: TParamArray): TP_String;
 var
   i: integer;
 begin
-  Result := TP_String('');
+  Result := '';
   for i := 0 to High(Params) do
   begin
-    Result := Result + TP_String(', ') + TestParamName(i);
+    Result := Result + ', ' + TestParamName(i);
   end;
 end;
 
@@ -320,6 +330,17 @@ begin
   Lines.Add('        return false;');
   Lines.Add('    }');
   Lines.Add('');
+  Lines.Add('    static String bytesToDisplay(byte[] b) {');
+  Lines.Add('        if (b == null) {');
+  Lines.Add('            return "null";');
+  Lines.Add('        }');
+  Lines.Add('        if (b.length <= 16) {');
+  Lines.Add('            return java.util.Arrays.toString(b);');
+  Lines.Add('        }');
+  Lines.Add('        return "byte[" + b.length + "] " +');
+  Lines.Add('            java.util.Arrays.toString(java.util.Arrays.copyOf(b, 16)) + "...";');
+  Lines.Add('    }');
+  Lines.Add('');
 end;
 
 procedure EmitSyncBlock(
@@ -327,15 +348,20 @@ procedure EmitSyncBlock(
   const Indent: string;
   const LabelText: TP_String;
   const CallExpr: TP_String;
-  const RetDecl: TP_String);
+  const RetDecl: TP_String;
+  const RetIsBytes: boolean);
 var
   L: TP_String;
 begin
   L := TP_String(Indent);
   Lines.Add(L.Text + 'try {');
   Lines.Add(L.Text + '    ' + RetDecl.Text + ' _r = ' + CallExpr.Text + ';');
-  Lines.Add(L.Text + '    reportPass(' + JavaStrLit(LabelText).Text +
-    ', String.valueOf(_r));');
+  if RetIsBytes then
+    Lines.Add(L.Text + '    reportPass(' + JavaStrLit(LabelText).Text +
+      ', bytesToDisplay(_r));')
+  else
+    Lines.Add(L.Text + '    reportPass(' + JavaStrLit(LabelText).Text +
+      ', String.valueOf(_r));');
   Lines.Add(L.Text + '} catch (Throwable t) {');
   Lines.Add(L.Text + '    reportFail(' + JavaStrLit(LabelText).Text +
     ', t.getMessage());');
@@ -349,7 +375,8 @@ procedure EmitAsyncBlock(
   const CallPrefix: TP_String;
   const TargetExpr: TP_String;
   const ArgsSuffix: TP_String;
-  const BoxedType: TP_String);
+  const BoxedType: TP_String;
+  const RetIsBytes: boolean);
 var
   L: TP_String;
 begin
@@ -383,8 +410,12 @@ begin
   Lines.Add(L.Text + '        reportFail(' + JavaStrLit(LabelText).Text +
     ', _e.get().getMessage());');
   Lines.Add(L.Text + '    } else {');
-  Lines.Add(L.Text + '        reportPass(' + JavaStrLit(LabelText).Text +
-    ', String.valueOf(_v.get()));');
+  if RetIsBytes then
+    Lines.Add(L.Text + '        reportPass(' + JavaStrLit(LabelText).Text +
+      ', bytesToDisplay(_v.get()));')
+  else
+    Lines.Add(L.Text + '        reportPass(' + JavaStrLit(LabelText).Text +
+      ', String.valueOf(_v.get()));');
   Lines.Add(L.Text + '    }');
   Lines.Add(L.Text + '} catch (Throwable t) {');
   Lines.Add(L.Text + '    reportFail(' + JavaStrLit(LabelText).Text +
@@ -417,10 +448,12 @@ procedure EmitFunctionTestMethod(
   const F: TFunctionStructure);
 var
   ArgsSuffix, RetDecl, BoxedType: TP_String;
+  RetIsBytes: boolean;
 begin
   ArgsSuffix := BuildTestArgListSuffix(F.Params);
   RetDecl := ABI_Type_To_Java_Decl(F.ReturnType);
   BoxedType := ABI_Type_To_Java_Boxed(F.ReturnType);
+  RetIsBytes := IsBytesABIType(F.ReturnType);
 
   Lines.Add('    private static void test_' + ApiName.Text + '() {');
   EmitTestParamDecl(Lines, F.Params);
@@ -430,74 +463,77 @@ begin
   Lines.Add('        try {');
   Lines.Add('            ' + RetDecl.Text + ' _r = ' + ClassName.Text +
     '.call' + ApiName.Text + '(kTargetApp' + ArgsSuffix.Text + ');');
-  Lines.Add('            reportPass(' +
-    JavaStrLit(ApiName + TP_String('(app call)')).Text +
-    ', String.valueOf(_r));');
+  if RetIsBytes then
+    Lines.Add('            reportPass(' +
+      JavaStrLit(ApiName + '(app call)').Text +
+      ', bytesToDisplay(_r));')
+  else
+    Lines.Add('            reportPass(' +
+      JavaStrLit(ApiName + '(app call)').Text +
+      ', String.valueOf(_r));');
   Lines.Add('        } catch (Throwable t) {');
   Lines.Add('            reportFail(' +
-    JavaStrLit(ApiName + TP_String('(app call)')).Text +
+    JavaStrLit(ApiName + '(app call)').Text +
     ', t.getMessage());');
   Lines.Add('        }');
   Lines.Add('');
 
   EmitAsyncBlock(Lines, '        ',
-    ApiName + TP_String('(app async)'),
-    ClassName + TP_String('.call') + ApiName + TP_String('Async'),
-    TP_String('kTargetApp'), ArgsSuffix, BoxedType);
+    ApiName + '(app async)',
+    ClassName + '.call' + ApiName + 'Async',
+    'kTargetApp', ArgsSuffix, BoxedType, RetIsBytes);
   Lines.Add('');
 
   EmitAsyncBlock(Lines, '        ',
-    ApiName + TP_String('(app asyncSeq)'),
-    ClassName + TP_String('.call') + ApiName + TP_String('SequencedAsync'),
-    TP_String('kTargetApp'), ArgsSuffix, BoxedType);
+    ApiName + '(app asyncSeq)',
+    ClassName + '.call' + ApiName + 'SequencedAsync',
+    'kTargetApp', ArgsSuffix, BoxedType, RetIsBytes);
   Lines.Add('');
 
   Lines.Add('        if (gHasServiceUid) {');
   EmitSyncBlock(Lines, '            ',
-    ApiName + TP_String('(uid call)'),
-    ClassName + TP_String('.call') + ApiName + TP_String('ByUid') +
-    TP_String('(gServiceUid') + ArgsSuffix + TP_String(')'),
-    RetDecl);
+    ApiName + '(uid call)',
+    ClassName + '.call' + ApiName + 'ByUid' +
+    '(gServiceUid' + ArgsSuffix + ')',
+    RetDecl, RetIsBytes);
   Lines.Add('');
   EmitAsyncBlock(Lines, '            ',
-    ApiName + TP_String('(uid async)'),
-    ClassName + TP_String('.call') + ApiName + TP_String('AsyncByUid'),
-    TP_String('gServiceUid'), ArgsSuffix, BoxedType);
+    ApiName + '(uid async)',
+    ClassName + '.call' + ApiName + 'AsyncByUid',
+    'gServiceUid', ArgsSuffix, BoxedType, RetIsBytes);
   Lines.Add('');
   EmitAsyncBlock(Lines, '            ',
-    ApiName + TP_String('(uid asyncSeq)'),
-    ClassName + TP_String('.call') + ApiName +
-    TP_String('SequencedAsyncByUid'),
-    TP_String('gServiceUid'), ArgsSuffix, BoxedType);
+    ApiName + '(uid asyncSeq)',
+    ClassName + '.call' + ApiName + 'SequencedAsyncByUid',
+    'gServiceUid', ArgsSuffix, BoxedType, RetIsBytes);
   Lines.Add('        } else {');
   Lines.Add('            reportSkip(' +
-    JavaStrLit(ApiName + TP_String('(uid call)')).Text +
+    JavaStrLit(ApiName + '(uid call)').Text +
     ', "no service UID");');
   Lines.Add('            reportSkip(' +
-    JavaStrLit(ApiName + TP_String('(uid async)')).Text +
+    JavaStrLit(ApiName + '(uid async)').Text +
     ', "no service UID");');
   Lines.Add('            reportSkip(' +
-    JavaStrLit(ApiName + TP_String('(uid asyncSeq)')).Text +
+    JavaStrLit(ApiName + '(uid asyncSeq)').Text +
     ', "no service UID");');
   Lines.Add('        }');
   Lines.Add('');
 
   EmitSyncBlock(Lines, '        ',
-    ApiName + TP_String('(p2pname call)'),
-    ClassName + TP_String('.call') + ApiName + TP_String('ByP2PName') +
-    TP_String('(kTargetP2P') + ArgsSuffix + TP_String(')'),
-    RetDecl);
+    ApiName + '(p2pname call)',
+    ClassName + '.call' + ApiName + 'ByP2PName' +
+    '(kTargetP2P' + ArgsSuffix + ')',
+    RetDecl, RetIsBytes);
   Lines.Add('');
   EmitAsyncBlock(Lines, '        ',
-    ApiName + TP_String('(p2pname async)'),
-    ClassName + TP_String('.call') + ApiName + TP_String('AsyncByP2PName'),
-    TP_String('kTargetP2P'), ArgsSuffix, BoxedType);
+    ApiName + '(p2pname async)',
+    ClassName + '.call' + ApiName + 'AsyncByP2PName',
+    'kTargetP2P', ArgsSuffix, BoxedType, RetIsBytes);
   Lines.Add('');
   EmitAsyncBlock(Lines, '        ',
-    ApiName + TP_String('(p2pname asyncSeq)'),
-    ClassName + TP_String('.call') + ApiName +
-    TP_String('SequencedAsyncByP2PName'),
-    TP_String('kTargetP2P'), ArgsSuffix, BoxedType);
+    ApiName + '(p2pname asyncSeq)',
+    ClassName + '.call' + ApiName + 'SequencedAsyncByP2PName',
+    'kTargetP2P', ArgsSuffix, BoxedType, RetIsBytes);
   Lines.Add('');
   Lines.Add('    }');
   Lines.Add('');
@@ -519,49 +555,47 @@ begin
   Lines.Add('');
 
   EmitNotifyBlock(Lines, '        ',
-    ApiName + TP_String('(app notify)'),
-    ClassName + TP_String('.notify') + ApiName +
-    TP_String('(kTargetApp') + ArgsSuffix + TP_String(')'));
+    ApiName + '(app notify)',
+    ClassName + '.notify' + ApiName +
+    '(kTargetApp' + ArgsSuffix + ')');
   Lines.Add('');
 
   EmitNotifyBlock(Lines, '        ',
-    ApiName + TP_String('(app seq notify)'),
-    ClassName + TP_String('.notify') + ApiName + TP_String('Sequenced') +
-    TP_String('(kTargetApp') + ArgsSuffix + TP_String(')'));
+    ApiName + '(app seq notify)',
+    ClassName + '.notify' + ApiName + 'Sequenced' +
+    '(kTargetApp' + ArgsSuffix + ')');
   Lines.Add('');
 
   Lines.Add('        if (gHasServiceUid) {');
   EmitNotifyBlock(Lines, '            ',
-    ApiName + TP_String('(uid notify)'),
-    ClassName + TP_String('.notify') + ApiName + TP_String('ByUid') +
-    TP_String('(gServiceUid') + ArgsSuffix + TP_String(')'));
+    ApiName + '(uid notify)',
+    ClassName + '.notify' + ApiName + 'ByUid' +
+    '(gServiceUid' + ArgsSuffix + ')');
   Lines.Add('');
   EmitNotifyBlock(Lines, '            ',
-    ApiName + TP_String('(uid seq notify)'),
-    ClassName + TP_String('.notify') + ApiName +
-    TP_String('SequencedByUid') +
-    TP_String('(gServiceUid') + ArgsSuffix + TP_String(')'));
+    ApiName + '(uid seq notify)',
+    ClassName + '.notify' + ApiName + 'SequencedByUid' +
+    '(gServiceUid' + ArgsSuffix + ')');
   Lines.Add('        } else {');
   Lines.Add('            reportSkip(' +
-    JavaStrLit(ApiName + TP_String('(uid notify)')).Text +
+    JavaStrLit(ApiName + '(uid notify)').Text +
     ', "no service UID");');
   Lines.Add('            reportSkip(' +
-    JavaStrLit(ApiName + TP_String('(uid seq notify)')).Text +
+    JavaStrLit(ApiName + '(uid seq notify)').Text +
     ', "no service UID");');
   Lines.Add('        }');
   Lines.Add('');
 
   EmitNotifyBlock(Lines, '        ',
-    ApiName + TP_String('(p2pname notify)'),
-    ClassName + TP_String('.notify') + ApiName + TP_String('ByP2PName') +
-    TP_String('(kTargetP2P') + ArgsSuffix + TP_String(')'));
+    ApiName + '(p2pname notify)',
+    ClassName + '.notify' + ApiName + 'ByP2PName' +
+    '(kTargetP2P' + ArgsSuffix + ')');
   Lines.Add('');
 
   EmitNotifyBlock(Lines, '        ',
-    ApiName + TP_String('(p2pname seq notify)'),
-    ClassName + TP_String('.notify') + ApiName +
-    TP_String('SequencedByP2PName') +
-    TP_String('(kTargetP2P') + ArgsSuffix + TP_String(')'));
+    ApiName + '(p2pname seq notify)',
+    ClassName + '.notify' + ApiName + 'SequencedByP2PName' +
+    '(kTargetP2P' + ArgsSuffix + ')');
   Lines.Add('');
 
   Lines.Add('    }');
@@ -577,23 +611,23 @@ begin
   Result := nil;
   if Model = nil then
   begin
-    Log(TP_String('GenerateABIServiceTestJavaCode: Model is nil'));
+    Log('GenerateABIServiceTestJavaCode: Model is nil');
     Exit;
   end;
   UnitName := Model.UnitName;
   if UnitName.Len = 0 then
   begin
-    Log(TP_String('GenerateABIServiceTestJavaCode: UnitName is empty'));
+    Log('GenerateABIServiceTestJavaCode: UnitName is empty');
     Exit;
   end;
 
   PackageName := JavaPackageName(UnitName);
-  ClassName := UnitName + TP_String('AbiServiceMain');
-  AppName := MakeApiName(UnitName) + TP_String('_abi');
-  P2PName := MakeApiName(UnitName) + TP_String('_service_test_p2p');
+  ClassName := UnitName + 'AbiServiceMain';
+  AppName := MakeApiName(UnitName) + '_abi';
+  P2PName := MakeApiName(UnitName) + '_service_test_p2p';
 
-  Log(TP_String(PFormat('Generating Java ABI service test for unit "%s"',
-    [UnitName.Text])));
+  Log(PFormat('Generating Java ABI service test for unit "%s"',
+    [UnitName.Text]));
 
   Lines := TPascalStringList.Create;
   try
@@ -614,7 +648,7 @@ begin
     Lines.Add('    static final String kTargetP2P = ' +
       JavaStrLit(P2PName).Text + ';');
     Lines.Add('    static final String kEndpoint  = ' +
-      JavaStrLit(TP_String('ipc:') + AppName).Text + ';');
+      JavaStrLit('ipc:' + AppName).Text + ';');
     Lines.Add('    static final String kWhoAmI         = "LF_TEST_WHOAMI";');
     Lines.Add('    static final String kAskCallMe      = "LF_TEST_ASK_SERVICE_CALL_ME";');
     Lines.Add('    static final String kReportIdentity = "LF_TEST_REPORT_SERVICE_IDENTITY";');
@@ -744,7 +778,7 @@ begin
     Lines.Add('');
 
     Result := Lines;
-    Log(TP_String(PFormat('Generated service main: %d lines', [Lines.Count])));
+    Log(PFormat('Generated service main: %d lines', [Lines.Count]));
   finally
   end;
 end;
@@ -763,24 +797,24 @@ begin
   Result := nil;
   if Model = nil then
   begin
-    Log(TP_String('GenerateABICallTestJavaCode: Model is nil'));
+    Log('GenerateABICallTestJavaCode: Model is nil');
     Exit;
   end;
   UnitName := Model.UnitName;
   if UnitName.Len = 0 then
   begin
-    Log(TP_String('GenerateABICallTestJavaCode: UnitName is empty'));
+    Log('GenerateABICallTestJavaCode: UnitName is empty');
     Exit;
   end;
 
   PackageName := JavaPackageName(UnitName);
-  ClassName := UnitName + TP_String('AbiCallTestMain');
-  CallClassName := UnitName + TP_String('AbiCall');
-  AppName := MakeApiName(UnitName) + TP_String('_abi');
-  P2PName := MakeApiName(UnitName) + TP_String('_service_test_p2p');
+  ClassName := UnitName + 'AbiCallTestMain';
+  CallClassName := UnitName + 'AbiCall';
+  AppName := MakeApiName(UnitName) + '_abi';
+  P2PName := MakeApiName(UnitName) + '_service_test_p2p';
 
-  Log(TP_String(PFormat('Generating Java ABI call test for unit "%s"',
-    [UnitName.Text])));
+  Log(PFormat('Generating Java ABI call test for unit "%s"',
+    [UnitName.Text]));
 
   SupportedFuncs := CollectSupportedFunctions(Model);
 
@@ -804,7 +838,7 @@ begin
     Lines.Add('    static final String kTargetP2P      = ' +
       JavaStrLit(P2PName).Text + ';');
     Lines.Add('    static final String kEndpoint       = ' +
-      JavaStrLit(TP_String('ipc:') + AppName).Text + ';');
+      JavaStrLit('ipc:' + AppName).Text + ';');
     Lines.Add('    static final String kClientAppName  = "LF_TEST_CLIENT_SELF";');
     Lines.Add('    static final String kReportIdentity = "LF_TEST_REPORT_SERVICE_IDENTITY";');
     Lines.Add('    static final String kWhoAmI         = "LF_TEST_WHOAMI";');
@@ -832,9 +866,9 @@ begin
       begin
         j := 1;
         while UsedApiNames.IndexOf(
-          ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text)) >= 0 do
+          ApiName + '_' + umlIntToStr(j).Text) >= 0 do
           Inc(j);
-        ApiName := ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text);
+        ApiName := ApiName + '_' + umlIntToStr(j).Text;
       end;
       UsedApiNames.Add(ApiName);
 
@@ -1024,9 +1058,9 @@ begin
       begin
         j := 1;
         while UsedApiNames.IndexOf(
-          ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text)) >= 0 do
+          ApiName + '_' + umlIntToStr(j).Text) >= 0 do
           Inc(j);
-        ApiName := ApiName + TP_String('_') + TP_String(umlIntToStr(j).Text);
+        ApiName := ApiName + '_' + umlIntToStr(j).Text;
       end;
       UsedApiNames.Add(ApiName);
       Lines.Add('        test_' + ApiName.Text + '();');
@@ -1050,7 +1084,7 @@ begin
     Lines.Add('');
 
     Result := Lines;
-    Log(TP_String(PFormat('Generated call test: %d lines', [Lines.Count])));
+    Log(PFormat('Generated call test: %d lines', [Lines.Count]));
   finally
     UsedApiNames.Free;
   end;
