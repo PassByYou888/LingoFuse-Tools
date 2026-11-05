@@ -42,9 +42,16 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_Julia_TestValue(const T: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then Result := '"test"'
+  if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'UInt8[0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A]'
+  else if IsStringABIType(T) then Result := '"test"'
   else if T.Same('single') then Result := 'Float32(3.14)'
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'Float64(3.14)'
   else if T.Same('byte') then Result := 'UInt8(42)'
@@ -59,7 +66,8 @@ end;
 
 function IsSupportedABIType(const T: TP_String): boolean;
 begin
-  Result := T.Same('integer') or T.Same('longint') or T.Same('int64') or
+  Result := ABI_Type_Is_LF_Binary_Data(T) or
+    T.Same('integer') or T.Same('longint') or T.Same('int64') or
     T.Same('cardinal') or T.Same('dword') or T.Same('longword') or
     T.Same('word') or T.Same('smallint') or T.Same('byte') or
     T.Same('uint64') or T.Same('double') or T.Same('extended') or
