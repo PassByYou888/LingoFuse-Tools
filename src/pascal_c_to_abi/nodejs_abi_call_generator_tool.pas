@@ -42,6 +42,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Js_Write_Fn(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'writeInt32'
@@ -54,6 +59,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'writeDouble'
   else if T.Same('single') then Result := 'writeSingle'
   else if IsStringABIType(T) then Result := 'writeString'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := '_writeBytes'
   else Result := '';
 end;
 
@@ -69,6 +75,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'readDouble'
   else if T.Same('single') then Result := 'readSingle'
   else if IsStringABIType(T) then Result := 'readString'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := '_readBytes'
   else Result := '';
 end;
 
@@ -209,8 +216,19 @@ begin
   begin
     PName := MakeJsParamName(Params[i].Name, i);
     WriteFn := ABI_Type_To_Js_Write_Fn(Params[i].PascalType);
-    Lines.Add('        param.' + WriteFn + '(' + PName + ');');
+    if (WriteFn.Len > 0) and (WriteFn[1] = '_') then
+      Lines.Add('        ' + WriteFn + '(param, ' + PName + ');')
+    else
+      Lines.Add('        param.' + WriteFn + '(' + PName + ');');
   end;
+end;
+
+function BuildReadLambda(const ReadFn: TP_String): TP_String;
+begin
+  if (ReadFn.Len > 0) and (ReadFn[1] = '_') then
+    Result := '(r) => ' + ReadFn + '(r)'
+  else
+    Result := '(r) => r.' + ReadFn + '()';
 end;
 
 procedure EmitSyncCallFunction(
@@ -222,7 +240,7 @@ procedure EmitSyncCallFunction(
   const P2PFirst: boolean;
   const CallFnName: TP_String);
 var
-  ParamDecl, ArgLine, ReadFn: TP_String;
+  ParamDecl, ArgLine, ReadFn, Lambda: TP_String;
 begin
   if UidFirst then
     ParamDecl := BuildCallParamList('uid', F.Params)
@@ -253,7 +271,8 @@ begin
   Lines.Add('        const res = DataHandle.fromRaw(raw, true);');
   Lines.Add('        try {');
   ReadFn := ABI_Type_To_Js_Read_Fn(F.ReturnType);
-  Lines.Add('            return _readSyncReply(' + JsStrLit(ApiName) + ', res, (r) => r.' + ReadFn + '());');
+  Lambda := BuildReadLambda(ReadFn);
+  Lines.Add('            return _readSyncReply(' + JsStrLit(ApiName) + ', res, ' + Lambda + ');');
   Lines.Add('        } finally {');
   Lines.Add('            res.dispose();');
   Lines.Add('        }');
@@ -273,7 +292,7 @@ procedure EmitAsyncCallFunction(
   const P2PFirst: boolean;
   const CallFnName: TP_String);
 var
-  ParamDecl, ReadFn, CallArg: TP_String;
+  ParamDecl, ReadFn, CallArg, Lambda: TP_String;
 begin
   if UidFirst then
     ParamDecl := BuildCallParamList('uid', F.Params)
@@ -303,7 +322,8 @@ begin
   Lines.Add('            (cb, op) => funcs.' + CallFnName + '(' + CallArg + '),');
 
   ReadFn := ABI_Type_To_Js_Read_Fn(F.ReturnType);
-  Lines.Add('            (rawResult) => _readAsyncReply(' + JsStrLit(ApiName) + ', rawResult, (r) => r.' + ReadFn + '()),');
+  Lambda := BuildReadLambda(ReadFn);
+  Lines.Add('            (rawResult) => _readAsyncReply(' + JsStrLit(ApiName) + ', rawResult, ' + Lambda + '),');
   Lines.Add('            ABI_Timeout');
   Lines.Add('        );');
   Lines.Add('    } catch (err) {');
@@ -405,6 +425,37 @@ begin
     Lines.Add('');
     Lines.Add('let ABI_TargetApp = ' + JsStrLit(MakeApiName(UnitName) + '_abi') + ';');
     Lines.Add('let ABI_Timeout = 5000;');
+    Lines.Add('');
+    Lines.Add('function _writeBytes(hnd, value) {');
+    Lines.Add('    if (value === null || value === undefined) {');
+    Lines.Add('        value = new Uint8Array(0);');
+    Lines.Add('    }');
+    Lines.Add('    let u8;');
+    Lines.Add('    if (value instanceof Uint8Array) {');
+    Lines.Add('        u8 = value;');
+    Lines.Add('    } else if (value instanceof ArrayBuffer) {');
+    Lines.Add('        u8 = new Uint8Array(value);');
+    Lines.Add('    } else if (Array.isArray(value)) {');
+    Lines.Add('        u8 = Uint8Array.from(value);');
+    Lines.Add('    } else {');
+    Lines.Add('        throw new TypeError(' + JsStrLit('expected Uint8Array / ArrayBuffer / number[], got ') + ' + typeof value);');
+    Lines.Add('    }');
+    Lines.Add('    hnd.writeInt32(u8.length);');
+    Lines.Add('    if (u8.length > 0) {');
+    Lines.Add('        hnd.writeBytes(u8);');
+    Lines.Add('    }');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('function _readBytes(hnd) {');
+    Lines.Add('    const n = hnd.readInt32();');
+    Lines.Add('    if (n < 0) {');
+    Lines.Add('        throw new Error(' + JsStrLit('invalid byte array length: ') + ' + n);');
+    Lines.Add('    }');
+    Lines.Add('    if (n === 0) {');
+    Lines.Add('        return new Uint8Array(0);');
+    Lines.Add('    }');
+    Lines.Add('    return hnd.readBytesExact(n);');
+    Lines.Add('}');
     Lines.Add('');
     Lines.Add('function _wrapUid(uid) {');
     Lines.Add('    if (uid !== null && typeof uid === ' + JsStrLit('object') + ' && uid.bytes instanceof Uint8Array) {');
