@@ -9,6 +9,7 @@ uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls, LazHelpHTML, ComCtrls, Menus,
   AsyncProcess, ActnList, LCLIntf, PairSplitter, SynHighlighterCpp, SynHighlighterAny,
   SynEdit, SynHighlighterPas, SynEditMiscClasses, SynHighlighterJScript,
+
   lingofuse_helper, Z.Core, Z.PascalStrings, Z.UPascalStrings, Z.Parsing, Z.Expression,
   Z.ListEngine, Z.Notify, Z.UnicodeMixedLib, Z.Status, Z.MemoryStream,
   Z.Json, Z.HashList.Templet, lingofuse_import, code_decl_to_abi_registry, code_decl_to_abi_mcp_api_tool_provider_unit,
@@ -296,7 +297,8 @@ begin
         'function SuperComplex('#13#10 + '  const Name: string = '#39'default'#39';    // first parameter group, const'#13#10 +
         '  var Value: Integer = 42;           // second parameter group, var + default'#13#10 + '  out Flag: Boolean;                 // third parameter group, out'#13#10 +
         '  const Data: array of Byte          // fourth parameter group, array type'#13#10 +
-        '): Integer; cdecl; external '#39'lib'#39' name '#39'SuperComplex'#39';'#13#10 + #13#10 + '{ Another declaration that takes a procedural type }'#13#10 +
+        '): Integer; cdecl; external '#39'lib'#39' name '#39'SuperComplex'#39';'#13#10 + #13#10 +
+        '{ Another declaration that takes a procedural type }'#13#10 +
         '{'#13#10 + '  This function accepts a binary operation as a parameter and'#13#10 + '  returns its application result.'#13#10 +
         '}'#13#10 + 'function ApplyBinaryOp('#13#10 + '  const Op: TBinaryOp;        // procedural type parameter'#13#10 +
         '  const a, b: Double = 0.0    // default-value parameter group'#13#10 + '): Double; overload;'#13#10 + #13#10 +
@@ -306,7 +308,18 @@ begin
         #13#10 + 'type'#13#10 + '  IMyInterface = interface'#13#10 + '    procedure DoIt;'#13#10 + '  end;'#13#10 + #13#10 +
         '  TMyClass = class(TInterfacedObject, IMyInterface)'#13#10 + '  private'#13#10 + '    FData: TGenericList<TPoint>;'#13#10 +
         '  public'#13#10 + '    constructor Create;'#13#10 + '    procedure DoIt;'#13#10 + '    function GetItem(Index: Integer): TPoint;'#13#10 +
-        '    property Items[Index: Integer]: TPoint read GetItem; default;'#13#10 + '  end;'#13#10 + #13#10 + 'implementation'#13#10 + #13#10 + 'end.'#13#10;
+        '    property Items[Index: Integer]: TPoint read GetItem; default;'#13#10 + '  end;'#13#10 + #13#10 +
+        '{ ==========================================================================='#13#10 +
+        '  Raw bytes family (TBytes)'#13#10 +
+        '  =========================================================================== }'#13#10 +
+        #13#10 +
+        'procedure ProcessBytes(const Data: TBytes);'#13#10 + #13#10 +
+        'procedure ProcessBytesMutable(var Data: TBytes);'#13#10 + #13#10 +
+        'function GetBytes: TBytes;'#13#10 + #13#10 +
+        'function CombineBytes(const Prefix: TBytes; Suffix: Byte): TBytes;'#13#10 + #13#10 +
+        'function HashBytes(const Data: TBytes): string;'#13#10 + #13#10 +
+        'procedure SendBytes(const Channel: string; const Data: TBytes; Flags: Integer);'#13#10 + #13#10 +
+        'implementation'#13#10 + #13#10 + 'end.'#13#10;
 
     TSourceLanguage.slC: Edit_Source.Text :=
         '/* ComplexTestUnit.h */'#13#10 + #13#10 + '#ifndef ComplexTestUnit_H'#13#10 + '#define ComplexTestUnit_H'#13#10 +
@@ -326,7 +339,14 @@ begin
         'int RegisterFunc(int a, int b);'#13#10 + #13#10 + '/* external + name alias */'#13#10 + 'void ExternalAlias(void);'#13#10 +
         #13#10 + '/* external + index */'#13#10 + 'void ExternalIndex(void);'#13#10 + #13#10 + '/* overload */'#13#10 +
         'int OverloadTest(int a);'#13#10 + #13#10 + 'int OverloadTest(int a, int b);'#13#10 + 'double OverloadTest(double a);'#13#10 +
-        #13#10 + '/* String default containing a quote */'#13#10 + 'char * StringWithQuotes(char * s);'#13#10 + #13#10 + '#endif /* ComplexTestUnit_H */'#13#10;
+        #13#10 + '/* String default containing a quote */'#13#10 + 'char * StringWithQuotes(char * s);'#13#10 + #13#10 +
+        '/* Raw bytes family (CBytes) */'#13#10 + #13#10 +
+        'void ProcessBytes(const CBytes Data);'#13#10 + #13#10 +
+        'CBytes GetBytes(void);'#13#10 + #13#10 +
+        'CBytes CombineBytes(const CBytes Prefix, unsigned char Suffix);'#13#10 + #13#10 +
+        'char * HashBytes(const CBytes Data);'#13#10 + #13#10 +
+        'void SendBytes(const char * Channel, const CBytes Data, int Flags);'#13#10 + #13#10 +
+        '#endif /* ComplexTestUnit_H */'#13#10;
 
     else Edit_Source.Text := '';
   end;
