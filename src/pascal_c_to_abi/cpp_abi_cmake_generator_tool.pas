@@ -33,6 +33,11 @@ begin
     DoStatus('[cpp_abi_cmake_generator] %s', [PFormat(Fmt, Args)]);
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsStringABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('string') or T.Same('ansistring') or T.Same('unicodestring') or
@@ -62,6 +67,8 @@ begin
     Result := 'float'
   else if IsStringABIType(T) then
     Result := 'std::string'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'std::vector<std::uint8_t>'
   else
     Result := '';
 end;
@@ -173,6 +180,8 @@ begin
 
     if IsStringABIType(Params[i].PascalType) then
       Result := Result + '"test"'
+    else if ABI_Type_Is_LF_Binary_Data(Params[i].PascalType) then
+      Result := Result.Text + 'make_test_bytes(' + umlIntToStr(i).Text + ')'
     else if Params[i].PascalType.Same('double') or
             Params[i].PascalType.Same('extended') or
             Params[i].PascalType.Same('real') then
@@ -358,6 +367,7 @@ begin
     Lines.Add('#include <cstdlib>');
     Lines.Add('#include <cstring>');
     Lines.Add('#include <string>');
+    Lines.Add('#include <vector>');
     Lines.Add('');
     Lines.Add('namespace {');
     Lines.Add('');
@@ -378,7 +388,7 @@ begin
     Lines.Add('        out_h.write(status);');
     Lines.Add('        out_h.writeRaw(uid.data(), 32);');
     Lines.Add('        out_h.write(p2p);');
-    Lines.Add('        std::printf("[SERVICE] whoami: p2p=%s\\n", p2p.c_str());');
+    Lines.Add('        std::printf("[SERVICE] whoami: p2p=%s\n", p2p.c_str());');
     Lines.Add('    } catch (...) {}');
     Lines.Add('}');
     Lines.Add('');
@@ -476,9 +486,10 @@ begin
   end;
 end;
 
-procedure EmitCallTestPrelude(Lines: TPascalStringList);
+procedure EmitCallTestPrelude(Lines: TPascalStringList; const NsName: TP_String);
 begin
   Lines.Add('#include <array>');
+  Lines.Add('#include <atomic>');
   Lines.Add('#include <chrono>');
   Lines.Add('#include <condition_variable>');
   Lines.Add('#include <cstdint>');
@@ -492,8 +503,16 @@ begin
   Lines.Add('#include <string>');
   Lines.Add('#include <thread>');
   Lines.Add('#include <type_traits>');
+  Lines.Add('#include <vector>');
   Lines.Add('');
   Lines.Add('namespace {');
+  Lines.Add('');
+  Lines.Add('inline std::vector<std::uint8_t> make_test_bytes(std::size_t n) {');
+  Lines.Add('    std::vector<std::uint8_t> v(n);');
+  Lines.Add('    for (std::size_t i = 0; i < n; ++i)');
+  Lines.Add('        v[i] = static_cast<std::uint8_t>((0xA5u + i * 7u) & 0xFFu);');
+  Lines.Add('    return v;');
+  Lines.Add('}');
   Lines.Add('');
   Lines.Add('template <typename T>');
   Lines.Add('bool try_read_abi_scalar(lingofuse::DataHandle& h, T& out, std::string& err) {');
@@ -512,10 +531,11 @@ begin
   Lines.Add('    return true;');
   Lines.Add('}');
   Lines.Add('');
-  Lines.Add('inline bool try_read_abi_void(lingofuse::DataHandle& h, std::string& err) {');
+  Lines.Add('inline bool try_read_abi_bytes(lingofuse::DataHandle& h, std::vector<std::uint8_t>& out, std::string& err) {');
   Lines.Add('    std::uint8_t status = 0;');
   Lines.Add('    if (!h.read(status)) { err = "truncated status"; return false; }');
   Lines.Add('    if (status != 0) { try { h.read(err); } catch (...) {} return false; }');
+  Lines.Add('    if (!' + NsName + '::lf_abi_read_blob_raw(h.get(), out)) { err = "truncated bytes"; return false; }');
   Lines.Add('    return true;');
   Lines.Add('}');
   Lines.Add('');
@@ -562,42 +582,13 @@ begin
   Lines.Add('        if (try_read_abi_string(h, v, err)) set(std::move(v));');
   Lines.Add('        else set_error(err);');
   Lines.Add('    }');
-  Lines.Add('private:');
-  Lines.Add('    std::mutex m_;');
-  Lines.Add('    std::condition_variable cv_;');
-  Lines.Add('    bool done_ = false;');
-  Lines.Add('    bool ok_ = false;');
-  Lines.Add('    T value_{};');
-  Lines.Add('    std::string error_;');
-  Lines.Add('};');
-  Lines.Add('');
-  Lines.Add('struct VoidBox {');
-  Lines.Add('    void set() {');
-  Lines.Add('        std::lock_guard<std::mutex> lk(m_);');
-  Lines.Add('        ok_ = true;');
-  Lines.Add('        done_ = true;');
-  Lines.Add('        cv_.notify_all();');
-  Lines.Add('    }');
-  Lines.Add('    void set_error(std::string msg) {');
-  Lines.Add('        std::lock_guard<std::mutex> lk(m_);');
-  Lines.Add('        error_ = std::move(msg);');
-  Lines.Add('        ok_ = false;');
-  Lines.Add('        done_ = true;');
-  Lines.Add('        cv_.notify_all();');
-  Lines.Add('    }');
-  Lines.Add('    bool wait(int timeout_ms) {');
-  Lines.Add('        std::unique_lock<std::mutex> lk(m_);');
-  Lines.Add('        return cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),');
-  Lines.Add('                             [this] { return done_; });');
-  Lines.Add('    }');
-  Lines.Add('    bool ok() const { return ok_; }');
-  Lines.Add('    const std::string& error() const { return error_; }');
-  Lines.Add('    void on_void_result(lingofuse::AsyncResult& r) {');
+  Lines.Add('    void on_bytes_result(lingofuse::AsyncResult& r) {');
   Lines.Add('        if (!r.ok()) { set_error(r.error()); return; }');
   Lines.Add('        auto& h = r.handle();');
   Lines.Add('        h.seek(0);');
+  Lines.Add('        std::vector<std::uint8_t> v;');
   Lines.Add('        std::string err;');
-  Lines.Add('        if (try_read_abi_void(h, err)) set();');
+  Lines.Add('        if (try_read_abi_bytes(h, v, err)) set(std::move(v));');
   Lines.Add('        else set_error(err);');
   Lines.Add('    }');
   Lines.Add('private:');
@@ -605,6 +596,7 @@ begin
   Lines.Add('    std::condition_variable cv_;');
   Lines.Add('    bool done_ = false;');
   Lines.Add('    bool ok_ = false;');
+  Lines.Add('    T value_{};');
   Lines.Add('    std::string error_;');
   Lines.Add('};');
   Lines.Add('');
@@ -640,12 +632,11 @@ begin
   Lines.Add('    ++pass;');
   Lines.Add('}');
   Lines.Add('');
-  Lines.Add('inline void async_test_void(const std::string& label,');
-  Lines.Add('                            std::function<void(std::function<void(lingofuse::AsyncResult)>)> invoker,');
-  Lines.Add('                            int& pass, int& fail) {');
-  Lines.Add('    auto box = std::make_shared<VoidBox>();');
+  Lines.Add('template <typename Invoker>');
+  Lines.Add('void async_test_bytes(const std::string& label, Invoker&& invoker, int& pass, int& fail) {');
+  Lines.Add('    auto box = std::make_shared<SyncBox<std::vector<std::uint8_t>>>();');
   Lines.Add('    try {');
-  Lines.Add('        invoker([box](lingofuse::AsyncResult r) { box->on_void_result(r); });');
+  Lines.Add('        invoker([box](lingofuse::AsyncResult r) { box->on_bytes_result(r); });');
   Lines.Add('    } catch (const std::exception& e) {');
   Lines.Add('        std::cerr << "[FAIL] " << label << " -- dispatch: " << e.what() << "\n";');
   Lines.Add('        ++fail;');
@@ -653,14 +644,18 @@ begin
   Lines.Add('    }');
   Lines.Add('    if (!box->wait(5000)) { std::cerr << "[FAIL] " << label << " -- timeout\n"; ++fail; return; }');
   Lines.Add('    if (!box->ok()) { std::cerr << "[FAIL] " << label << " -- " << box->error() << "\n"; ++fail; return; }');
-  Lines.Add('    std::cout << "[PASS] " << label << "\n";');
+  Lines.Add('    std::cout << "[PASS] " << label << " size=" << box->value().size() << "\n";');
   Lines.Add('    ++pass;');
   Lines.Add('}');
   Lines.Add('');
+  Lines.Add('std::mutex g_service_identity_mutex;');
   Lines.Add('std::array<std::uint8_t, 32> g_service_uid{};');
   Lines.Add('bool g_has_service_uid = false;');
   Lines.Add('std::string g_service_p2p;');
   Lines.Add('bool g_service_called_me = false;');
+  Lines.Add('');
+  Lines.Add('bool g_snapshot_uid_ok = false;');
+  Lines.Add('std::array<std::uint8_t, 32> g_snapshot_uid{};');
   Lines.Add('');
   Lines.Add('} // namespace');
   Lines.Add('');
@@ -678,13 +673,18 @@ begin
   Lines.Add('    lingofuse::DataHandle in_h(static_cast<TDataHnd>(_In), false);');
   Lines.Add('    lingofuse::DataHandle out_h(static_cast<TDataHnd>(_Out), false);');
   Lines.Add('    try {');
-  Lines.Add('        g_service_uid = in_h.getP2PUid();');
-  Lines.Add('        g_service_p2p = in_h.getP2PName();');
-  Lines.Add('        g_has_service_uid = true;');
-  Lines.Add('        g_service_called_me = true;');
+  Lines.Add('        std::array<std::uint8_t, 32> _uid = in_h.getP2PUid();');
+  Lines.Add('        std::string _p2p = in_h.getP2PName();');
+  Lines.Add('        {');
+  Lines.Add('            std::lock_guard<std::mutex> _lk(g_service_identity_mutex);');
+  Lines.Add('            g_service_uid = _uid;');
+  Lines.Add('            g_service_p2p = _p2p;');
+  Lines.Add('            g_has_service_uid = true;');
+  Lines.Add('            g_service_called_me = true;');
+  Lines.Add('        }');
   Lines.Add('        std::string msg;');
   Lines.Add('        try { in_h.read(msg); } catch (...) {}');
-  Lines.Add('        std::printf("[CLIENT] service called me: msg=%s\\n", msg.c_str());');
+  Lines.Add('        std::printf("[CLIENT] service called me: msg=%s\n", msg.c_str());');
   Lines.Add('        lingofuse::io::write_string(out_h.get(), std::string("identity received"));');
   Lines.Add('    } catch (...) {}');
   Lines.Add('}');
@@ -711,25 +711,36 @@ begin
   Lines.Add('}');
   Lines.Add('');
   Lines.Add('bool Test_ServiceInitiatesCall() {');
-  Lines.Add('    g_service_called_me = false;');
-  Lines.Add('    g_has_service_uid = false;');
-  Lines.Add('    g_service_uid.fill(0);');
-  Lines.Add('    g_service_p2p.clear();');
+  Lines.Add('    {');
+  Lines.Add('        std::lock_guard<std::mutex> _lk(g_service_identity_mutex);');
+  Lines.Add('        g_service_called_me = false;');
+  Lines.Add('        g_has_service_uid = false;');
+  Lines.Add('        g_service_uid.fill(0);');
+  Lines.Add('        g_service_p2p.clear();');
+  Lines.Add('    }');
   Lines.Add('');
   Lines.Add('    lingofuse::DataHandle param("LF_TEST_ASK_SERVICE_CALL_ME");');
   Lines.Add('    lingofuse::notify(kTargetApp, param);');
   Lines.Add('');
   Lines.Add('    for (int i = 0; i < 1000; ++i) {');
-  Lines.Add('        if (g_service_called_me) break;');
+  Lines.Add('        {');
+  Lines.Add('            std::lock_guard<std::mutex> _lk(g_service_identity_mutex);');
+  Lines.Add('            if (g_service_called_me) break;');
+  Lines.Add('        }');
   Lines.Add('        std::this_thread::sleep_for(std::chrono::milliseconds(10));');
   Lines.Add('    }');
   Lines.Add('');
-  Lines.Add('    if (!g_service_called_me) return false;');
-  Lines.Add('    if (!g_has_service_uid) return false;');
-  Lines.Add('    std::printf("[INFO] service UID = ");');
-  Lines.Add('    for (auto b : g_service_uid) std::printf("%02X", b);');
-  Lines.Add('    std::printf("\n");');
-  Lines.Add('    std::printf("[INFO] service P2P = %s\n", g_service_p2p.c_str());');
+  Lines.Add('    {');
+  Lines.Add('        std::lock_guard<std::mutex> _lk(g_service_identity_mutex);');
+  Lines.Add('        if (!g_service_called_me) return false;');
+  Lines.Add('        if (!g_has_service_uid) return false;');
+  Lines.Add('        g_snapshot_uid_ok = true;');
+  Lines.Add('        g_snapshot_uid = g_service_uid;');
+  Lines.Add('        std::printf("[INFO] service UID = ");');
+  Lines.Add('        for (auto b : g_service_uid) std::printf("%02X", b);');
+  Lines.Add('        std::printf("\n");');
+  Lines.Add('        std::printf("[INFO] service P2P = %s\n", g_service_p2p.c_str());');
+  Lines.Add('    }');
   Lines.Add('    return true;');
   Lines.Add('}');
   Lines.Add('');
@@ -761,10 +772,13 @@ end;
 procedure EmitFunctionTestBlock(Lines: TPascalStringList; const NsName, ApiName: TP_String; const F: TFunctionStructure);
 var
   RetType, Args, CallExpr: TP_String;
+  RetIsString, RetIsBytes: Boolean;
 begin
   RetType := ABI_Type_To_Cpp_Decl(F.ReturnType);
   Args := BuildArgValues(F.Params);
   CallExpr := NsName + '::' + ApiName;
+  RetIsString := IsStringABIType(F.ReturnType);
+  RetIsBytes := ABI_Type_Is_LF_Binary_Data(F.ReturnType);
 
   Lines.Add('void Test_' + ApiName + '(int& _pass, int& _fail) {');
 
@@ -773,7 +787,13 @@ begin
     Lines.Add('        auto _r = ' + CallExpr + '();')
   else
     Lines.Add('        auto _r = ' + CallExpr + '(' + Args + ');');
-  Lines.Add('        std::cout << "[PASS] ' + ApiName + '(app call) = " << _r << "\n";');
+
+  if RetIsBytes then
+    Lines.Add('        std::cout << "[PASS] ' + ApiName + '(app call) size=" << _r.size() << "\n";')
+  else if RetIsString then
+    Lines.Add('        std::cout << "[PASS] ' + ApiName + '(app call) = " << _r << "\n";')
+  else
+    Lines.Add('        std::cout << "[PASS] ' + ApiName + '(app call) = " << _r << "\n";');
   Lines.Add('        ++_pass;');
   Lines.Add('    } catch (const std::exception& e) {');
   Lines.Add('        std::cerr << "[FAIL] ' + ApiName + '(app call) -- " << e.what() << "\n";');
@@ -781,13 +801,16 @@ begin
   Lines.Add('    }');
   Lines.Add('');
 
-  Lines.Add('    if (g_has_service_uid) {');
+  Lines.Add('    if (g_snapshot_uid_ok) {');
   Lines.Add('        try {');
   if Args = '' then
-    Lines.Add('            auto _r = ' + CallExpr + '_UID_Call(g_service_uid);')
+    Lines.Add('            auto _r = ' + CallExpr + '_UID_Call(g_snapshot_uid);')
   else
-    Lines.Add('            auto _r = ' + CallExpr + '_UID_Call(g_service_uid, ' + Args + ');');
-  Lines.Add('            std::cout << "[PASS] ' + ApiName + '(uid call) = " << _r << "\n";');
+    Lines.Add('            auto _r = ' + CallExpr + '_UID_Call(g_snapshot_uid, ' + Args + ');');
+  if RetIsBytes then
+    Lines.Add('            std::cout << "[PASS] ' + ApiName + '(uid call) size=" << _r.size() << "\n";')
+  else
+    Lines.Add('            std::cout << "[PASS] ' + ApiName + '(uid call) = " << _r << "\n";');
   Lines.Add('            ++_pass;');
   Lines.Add('        } catch (const std::exception& e) {');
   Lines.Add('            std::cerr << "[FAIL] ' + ApiName + '(uid call) -- " << e.what() << "\n";');
@@ -803,7 +826,10 @@ begin
     Lines.Add('        auto _r = ' + CallExpr + '_P2PName_Call(kTargetP2P);')
   else
     Lines.Add('        auto _r = ' + CallExpr + '_P2PName_Call(kTargetP2P, ' + Args + ');');
-  Lines.Add('        std::cout << "[PASS] ' + ApiName + '(p2pname call) = " << _r << "\n";');
+  if RetIsBytes then
+    Lines.Add('        std::cout << "[PASS] ' + ApiName + '(p2pname call) size=" << _r.size() << "\n";')
+  else
+    Lines.Add('        std::cout << "[PASS] ' + ApiName + '(p2pname call) = " << _r << "\n";');
   Lines.Add('        ++_pass;');
   Lines.Add('    } catch (const std::exception& e) {');
   Lines.Add('        std::cerr << "[FAIL] ' + ApiName + '(p2pname call) -- " << e.what() << "\n";');
@@ -811,23 +837,42 @@ begin
   Lines.Add('    }');
   Lines.Add('');
 
-  if IsStringABIType(F.ReturnType) then
+  if RetIsString then
   begin
     EmitAsyncTestCall(Lines, '    ', 'async_test_string',
       ApiName + '(app async)', CallExpr + '_Async', Args, '');
     EmitAsyncTestCall(Lines, '    ', 'async_test_string',
       ApiName + '(app asyncSeq)', CallExpr + '_AsyncSequenced', Args, '');
 
-    Lines.Add('    if (g_has_service_uid) {');
+    Lines.Add('    if (g_snapshot_uid_ok) {');
     EmitAsyncTestCall(Lines, '        ', 'async_test_string',
-      ApiName + '(uid async)', CallExpr + '_UID_Async', Args, 'g_service_uid');
+      ApiName + '(uid async)', CallExpr + '_UID_Async', Args, 'g_snapshot_uid');
     EmitAsyncTestCall(Lines, '        ', 'async_test_string',
-      ApiName + '(uid asyncSeq)', CallExpr + '_UID_AsyncSequenced', Args, 'g_service_uid');
+      ApiName + '(uid asyncSeq)', CallExpr + '_UID_AsyncSequenced', Args, 'g_snapshot_uid');
     Lines.Add('    }');
 
     EmitAsyncTestCall(Lines, '    ', 'async_test_string',
       ApiName + '(p2pname async)', CallExpr + '_P2PName_Async', Args, 'kTargetP2P');
     EmitAsyncTestCall(Lines, '    ', 'async_test_string',
+      ApiName + '(p2pname asyncSeq)', CallExpr + '_P2PName_AsyncSequenced', Args, 'kTargetP2P');
+  end
+  else if RetIsBytes then
+  begin
+    EmitAsyncTestCall(Lines, '    ', 'async_test_bytes',
+      ApiName + '(app async)', CallExpr + '_Async', Args, '');
+    EmitAsyncTestCall(Lines, '    ', 'async_test_bytes',
+      ApiName + '(app asyncSeq)', CallExpr + '_AsyncSequenced', Args, '');
+
+    Lines.Add('    if (g_snapshot_uid_ok) {');
+    EmitAsyncTestCall(Lines, '        ', 'async_test_bytes',
+      ApiName + '(uid async)', CallExpr + '_UID_Async', Args, 'g_snapshot_uid');
+    EmitAsyncTestCall(Lines, '        ', 'async_test_bytes',
+      ApiName + '(uid asyncSeq)', CallExpr + '_UID_AsyncSequenced', Args, 'g_snapshot_uid');
+    Lines.Add('    }');
+
+    EmitAsyncTestCall(Lines, '    ', 'async_test_bytes',
+      ApiName + '(p2pname async)', CallExpr + '_P2PName_Async', Args, 'kTargetP2P');
+    EmitAsyncTestCall(Lines, '    ', 'async_test_bytes',
       ApiName + '(p2pname asyncSeq)', CallExpr + '_P2PName_AsyncSequenced', Args, 'kTargetP2P');
   end
   else
@@ -837,11 +882,11 @@ begin
     EmitAsyncTestCall(Lines, '    ', 'async_test_scalar<' + RetType + '>',
       ApiName + '(app asyncSeq)', CallExpr + '_AsyncSequenced', Args, '');
 
-    Lines.Add('    if (g_has_service_uid) {');
+    Lines.Add('    if (g_snapshot_uid_ok) {');
     EmitAsyncTestCall(Lines, '        ', 'async_test_scalar<' + RetType + '>',
-      ApiName + '(uid async)', CallExpr + '_UID_Async', Args, 'g_service_uid');
+      ApiName + '(uid async)', CallExpr + '_UID_Async', Args, 'g_snapshot_uid');
     EmitAsyncTestCall(Lines, '        ', 'async_test_scalar<' + RetType + '>',
-      ApiName + '(uid asyncSeq)', CallExpr + '_UID_AsyncSequenced', Args, 'g_service_uid');
+      ApiName + '(uid asyncSeq)', CallExpr + '_UID_AsyncSequenced', Args, 'g_snapshot_uid');
     Lines.Add('    }');
 
     EmitAsyncTestCall(Lines, '    ', 'async_test_scalar<' + RetType + '>',
@@ -896,11 +941,11 @@ begin
     CallExpr + '_SequencedNotify', Args, '');
   Lines.Add('');
 
-  Lines.Add('    if (g_has_service_uid) {');
+  Lines.Add('    if (g_snapshot_uid_ok) {');
   EmitNotifyTestCall(Lines, '        ', ApiName + '(uid notify)',
-    CallExpr + '_UID_Notify', Args, 'g_service_uid');
+    CallExpr + '_UID_Notify', Args, 'g_snapshot_uid');
   EmitNotifyTestCall(Lines, '        ', ApiName + '(uid seq notify)',
-    CallExpr + '_UID_SequencedNotify', Args, 'g_service_uid');
+    CallExpr + '_UID_SequencedNotify', Args, 'g_snapshot_uid');
   Lines.Add('    }');
   Lines.Add('');
 
@@ -959,7 +1004,7 @@ begin
     Lines.Add('#include "lf_io.hpp"');
     Lines.Add('');
 
-    EmitCallTestPrelude(Lines);
+    EmitCallTestPrelude(Lines, NsName);
     EmitCallTestCallbacksAndProbes(Lines, NsName, AppName, P2PName);
 
     UsedApiNames.Clear;
