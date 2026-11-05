@@ -32,6 +32,11 @@ begin
     DoStatus('[cpp_abi_call_generator] %s', [PFormat(Fmt, Args)]);
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsStringABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('string') or T.Same('ansistring') or T.Same('unicodestring') or
@@ -61,6 +66,8 @@ begin
     Result := 'float'
   else if IsStringABIType(T) then
     Result := 'std::string'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'std::vector<std::uint8_t>'
   else
     Result := '';
 end;
@@ -69,6 +76,8 @@ function ABI_Type_To_Cpp_Param_Decl(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then
     Result := 'const std::string&'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'const std::vector<std::uint8_t>&'
   else
     Result := ABI_Type_To_Cpp_Decl(T);
 end;
@@ -336,7 +345,10 @@ begin
   for i := 0 to High(Params) do
   begin
     PName := MakeSafeCppParamName(Params[i].Name, i);
-    Lines.Add(Indent + 'param.write(' + PName + ');');
+    if ABI_Type_Is_LF_Binary_Data(Params[i].PascalType) then
+      Lines.Add(Indent + 'lf_abi_write_blob_raw(param.get(), ' + PName + ');')
+    else
+      Lines.Add(Indent + 'param.write(' + PName + ');');
   end;
 end;
 
@@ -348,6 +360,15 @@ begin
   begin
     Lines.Add(Indent + 'std::string _ret;');
     Lines.Add(Indent + 'if (!_res.read(_ret)) {');
+    Lines.Add(Indent + '    throw EABI_RemoteError(std::string("ABI call \"' + F.Name.Text +
+      '\": response truncated (result)"));');
+    Lines.Add(Indent + '}');
+    Lines.Add(Indent + 'return _ret;');
+  end
+  else if ABI_Type_Is_LF_Binary_Data(F.ReturnType) then
+  begin
+    Lines.Add(Indent + 'std::vector<std::uint8_t> _ret;');
+    Lines.Add(Indent + 'if (!lf_abi_read_blob_raw(_res.get(), _ret)) {');
     Lines.Add(Indent + '    throw EABI_RemoteError(std::string("ABI call \"' + F.Name.Text +
       '\": response truncated (result)"));');
     Lines.Add(Indent + '}');
@@ -782,6 +803,38 @@ begin
   Lines.Add('');
 end;
 
+procedure EmitWireGuardHelpers(Lines: TPascalStringList; const ProtocolGuard: TP_String);
+begin
+  Lines.Add('#ifndef ' + ProtocolGuard);
+  Lines.Add('#define ' + ProtocolGuard);
+  Lines.Add('constexpr std::uint8_t STATUS_OK    = 0x00;');
+  Lines.Add('constexpr std::uint8_t STATUS_ERROR = 0xFF;');
+  Lines.Add('');
+  Lines.Add('inline void lf_abi_write_blob_raw(TDataHnd hnd, const std::vector<std::uint8_t>& value) {');
+  Lines.Add('    const std::int32_t n = static_cast<std::int32_t>(value.size());');
+  Lines.Add('    LF_WriteInt32(hnd, n);');
+  Lines.Add('    if (n > 0) {');
+  Lines.Add('        LF_WriteBuffer(hnd, value.data(), static_cast<std::int64_t>(n));');
+  Lines.Add('    }');
+  Lines.Add('}');
+  Lines.Add('');
+  Lines.Add('inline bool lf_abi_read_blob_raw(TDataHnd hnd, std::vector<std::uint8_t>& value) {');
+  Lines.Add('    value.clear();');
+  Lines.Add('    std::int32_t n = 0;');
+  Lines.Add('    if (!LF_ReadInt32(hnd, &n)) return false;');
+  Lines.Add('    if (n < 0) return false;');
+  Lines.Add('    if (n == 0) return true;');
+  Lines.Add('    value.resize(static_cast<std::size_t>(n));');
+  Lines.Add('    if (LF_ReadBuffer(hnd, value.data(), static_cast<std::int64_t>(n)) != static_cast<std::int64_t>(n)) {');
+  Lines.Add('        value.clear();');
+  Lines.Add('        return false;');
+  Lines.Add('    }');
+  Lines.Add('    return true;');
+  Lines.Add('}');
+  Lines.Add('#endif');
+  Lines.Add('');
+end;
+
 function GenerateABICallHppCode(Model: TPascal_Func_Model): TPascalStringList;
 var
   i, j: integer;
@@ -828,22 +881,21 @@ begin
     Lines.Add('');
     Lines.Add('#include <array>');
     Lines.Add('#include <cstdint>');
+    Lines.Add('#include <cstring>');
     Lines.Add('#include <functional>');
     Lines.Add('#include <optional>');
     Lines.Add('#include <stdexcept>');
     Lines.Add('#include <string>');
+    Lines.Add('#include <vector>');
     Lines.Add('');
     Lines.Add('namespace ' + NsName + ' {');
     Lines.Add('');
     Lines.Add('extern std::string ABI_TargetApp;');
     Lines.Add('extern std::uint64_t ABI_Timeout;');
     Lines.Add('');
-    Lines.Add('#ifndef ' + ProtocolGuard);
-    Lines.Add('#define ' + ProtocolGuard);
-    Lines.Add('constexpr std::uint8_t STATUS_OK    = 0x00;');
-    Lines.Add('constexpr std::uint8_t STATUS_ERROR = 0xFF;');
-    Lines.Add('#endif');
-    Lines.Add('');
+
+    EmitWireGuardHelpers(Lines, ProtocolGuard);
+
     Lines.Add('class EABI_RemoteError : public std::runtime_error {');
     Lines.Add('public:');
     Lines.Add('    explicit EABI_RemoteError(const std::string& msg)');
@@ -951,6 +1003,7 @@ begin
     Lines.Add('#include <optional>');
     Lines.Add('#include <stdexcept>');
     Lines.Add('#include <string>');
+    Lines.Add('#include <vector>');
     Lines.Add('');
     Lines.Add('namespace ' + NsName + ' {');
     Lines.Add('');
