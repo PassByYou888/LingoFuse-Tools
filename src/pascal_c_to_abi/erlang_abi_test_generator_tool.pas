@@ -44,6 +44,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsFloatABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('double') or T.Same('single') or T.Same('extended') or T.Same('real');
@@ -51,10 +56,11 @@ end;
 
 function IsSupportedABIType(const T: TP_String): boolean;
 begin
-  Result := T.Same('integer') or T.Same('int64') or T.Same('cardinal')
-    or T.Same('longint') or T.Same('dword') or T.Same('word')
-    or T.Same('smallint') or T.Same('byte') or T.Same('uint64')
-    or T.Same('longword') or IsFloatABIType(T) or IsStringABIType(T);
+  Result := IsStringABIType(T) or IsBytesABIType(T) or IsFloatABIType(T) or
+    T.Same('single') or
+    T.Same('integer') or T.Same('longint') or T.Same('cardinal') or
+    T.Same('dword') or T.Same('longword') or T.Same('word') or
+    T.Same('smallint') or T.Same('byte') or T.Same('int64') or T.Same('uint64');
 end;
 
 function MakeApiName(const FuncName: TP_String): SystemString;
@@ -118,7 +124,9 @@ end;
 
 function DefaultArgValueErlang(const T: TP_String): SystemString;
 begin
-  if IsStringABIType(T) then
+  if IsBytesABIType(T) then
+    Result := '<<16#A5, 16#5A, 16#A5, 16#5A, 16#A5, 16#5A, 16#A5, 16#5A>>'
+  else if IsStringABIType(T) then
     Result := '<<"test">>'
   else if IsFloatABIType(T) then
     Result := '3.14'
