@@ -39,6 +39,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Swift_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -61,6 +66,8 @@ begin
     Result := 'Float'
   else if IsStringABIType(T) then
     Result := 'String'
+  else if IsBytesABIType(T) then
+    Result := '[UInt8]'
   else
     Result := '';
 end;
@@ -149,6 +156,8 @@ function SwiftPlaceholderValue(const ABIType: TP_String): TP_String;
 begin
   if IsStringABIType(ABIType) then
     Result := '"test"'
+  else if IsBytesABIType(ABIType) then
+    Result := '[0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A]'
   else if ABIType.Same('single') then
     Result := 'Float(3.14)'
   else if ABIType.Same('double') or ABIType.Same('extended') or ABIType.Same('real') then
@@ -329,9 +338,9 @@ begin
     Lines.Add('func serviceTestRun() -> Int32 {');
     Lines.Add('    var app: AppHandle? = nil');
     Lines.Add('    do {');
-    Lines.Add('        Framework.setOption("Wait_Connection_ReadyOk", "False")');
-    Lines.Add('        Framework.setOption("Overlap_Connection", "True")');
-    Lines.Add('        Framework.setOption("ConsoleOutput", "True")');
+    Lines.Add('        Options.setWaitConnectionReadyOk(false)');
+    Lines.Add('        Options.setOverlapConnection(true)');
+    Lines.Add('        Options.setConsoleOutput(true)');
     Lines.Add('        Options.setQuiet(true)');
     Lines.Add('        Framework.resetPrepare()');
     Lines.Add('        try Framework.prepareService(listeningAddr: SERVICE_TEST_ENDPOINT, physicsAddr: SERVICE_TEST_ENDPOINT)');
@@ -397,7 +406,8 @@ begin
 end;
 
 procedure EmitSyncCallTest(Lines: TPascalStringList;
-  const EnumName, ApiName, CallExpr, Label_, Args, ExtraPrefix: TP_String);
+  const CallExpr, Label_, Args, ExtraPrefix: TP_String;
+  IsBytesReturn: Boolean);
 var
   FullArgs: TP_String;
 begin
@@ -407,14 +417,18 @@ begin
     Lines.Add('        let r = try ' + CallExpr + '()')
   else
     Lines.Add('        let r = try ' + CallExpr + '(' + FullArgs + ')');
-  Lines.Add('        reportPass(' + SwiftStrLit(Label_) + ', "\(r)")');
+  if IsBytesReturn then
+    Lines.Add('        reportPass(' + SwiftStrLit(Label_) + ', bytesSummary(r))')
+  else
+    Lines.Add('        reportPass(' + SwiftStrLit(Label_) + ', "\(r)")');
   Lines.Add('    } catch {');
   Lines.Add('        reportFail(' + SwiftStrLit(Label_) + ', "\(error)")');
   Lines.Add('    }');
 end;
 
 procedure EmitAsyncCallTest(Lines: TPascalStringList;
-  const EnumName, ApiName, CallExpr, Label_, Args, ExtraPrefix: TP_String);
+  const CallExpr, Label_, Args, ExtraPrefix: TP_String;
+  IsBytesReturn: Boolean);
 var
   FullArgs: TP_String;
 begin
@@ -425,7 +439,10 @@ begin
   else
     Lines.Add('        try await ' + CallExpr + '(' + FullArgs + ')');
   Lines.Add('    }) {');
-  Lines.Add('    case .success(let v): reportPass(' + SwiftStrLit(Label_) + ', "\(v)")');
+  if IsBytesReturn then
+    Lines.Add('    case .success(let v): reportPass(' + SwiftStrLit(Label_) + ', bytesSummary(v))')
+  else
+    Lines.Add('    case .success(let v): reportPass(' + SwiftStrLit(Label_) + ', "\(v)")');
   Lines.Add('    case .failure(let e): reportFail(' + SwiftStrLit(Label_) + ', "\(e)")');
   Lines.Add('    }');
 end;
@@ -451,20 +468,22 @@ procedure EmitFunctionTestBody(Lines: TPascalStringList;
   const EnumName, ApiName: TP_String; const F: TFunctionStructure);
 var
   Args, CallBase: TP_String;
+  IsBytes: Boolean;
 begin
   Args := BuildPlaceholderArgs(F.Params);
   CallBase := EnumName + '.' + ApiName;
+  IsBytes := IsBytesABIType(F.ReturnType);
 
-  EmitSyncCallTest(Lines, EnumName, ApiName,
-    CallBase, ApiName + '(app call)', Args, '');
+  EmitSyncCallTest(Lines,
+    CallBase, ApiName + '(app call)', Args, '', IsBytes);
   Lines.Add('');
 
-  EmitAsyncCallTest(Lines, EnumName, ApiName,
-    CallBase + '_Async', ApiName + '(app async)', Args, '');
+  EmitAsyncCallTest(Lines,
+    CallBase + '_Async', ApiName + '(app async)', Args, '', IsBytes);
   Lines.Add('');
 
-  EmitAsyncCallTest(Lines, EnumName, ApiName,
-    CallBase + '_AsyncSequenced', ApiName + '(app asyncSeq)', Args, '');
+  EmitAsyncCallTest(Lines,
+    CallBase + '_AsyncSequenced', ApiName + '(app asyncSeq)', Args, '', IsBytes);
   Lines.Add('');
 
   Lines.Add('    let hasUID: Bool = {');
@@ -480,14 +499,14 @@ begin
   Lines.Add('');
 
   Lines.Add('    if hasUID {');
-  EmitSyncCallTest(Lines, EnumName, ApiName,
-    CallBase + '_UID_Call', ApiName + '(uid call)', Args, 'currentUID');
+  EmitSyncCallTest(Lines,
+    CallBase + '_UID_Call', ApiName + '(uid call)', Args, 'currentUID', IsBytes);
   Lines.Add('');
-  EmitAsyncCallTest(Lines, EnumName, ApiName,
-    CallBase + '_UID_Async', ApiName + '(uid async)', Args, 'currentUID');
+  EmitAsyncCallTest(Lines,
+    CallBase + '_UID_Async', ApiName + '(uid async)', Args, 'currentUID', IsBytes);
   Lines.Add('');
-  EmitAsyncCallTest(Lines, EnumName, ApiName,
-    CallBase + '_UID_AsyncSequenced', ApiName + '(uid asyncSeq)', Args, 'currentUID');
+  EmitAsyncCallTest(Lines,
+    CallBase + '_UID_AsyncSequenced', ApiName + '(uid asyncSeq)', Args, 'currentUID', IsBytes);
   Lines.Add('    } else {');
   Lines.Add('        reportSkip(' + SwiftStrLit(ApiName + '(uid call)') + ', "no service UID")');
   Lines.Add('        reportSkip(' + SwiftStrLit(ApiName + '(uid async)') + ', "no service UID")');
@@ -495,16 +514,16 @@ begin
   Lines.Add('    }');
   Lines.Add('');
 
-  EmitSyncCallTest(Lines, EnumName, ApiName,
-    CallBase + '_P2PName_Call', ApiName + '(p2pname call)', Args, 'targetP2PName');
+  EmitSyncCallTest(Lines,
+    CallBase + '_P2PName_Call', ApiName + '(p2pname call)', Args, 'targetP2PName', IsBytes);
   Lines.Add('');
 
-  EmitAsyncCallTest(Lines, EnumName, ApiName,
-    CallBase + '_P2PName_Async', ApiName + '(p2pname async)', Args, 'targetP2PName');
+  EmitAsyncCallTest(Lines,
+    CallBase + '_P2PName_Async', ApiName + '(p2pname async)', Args, 'targetP2PName', IsBytes);
   Lines.Add('');
 
-  EmitAsyncCallTest(Lines, EnumName, ApiName,
-    CallBase + '_P2PName_AsyncSequenced', ApiName + '(p2pname asyncSeq)', Args, 'targetP2PName');
+  EmitAsyncCallTest(Lines,
+    CallBase + '_P2PName_AsyncSequenced', ApiName + '(p2pname asyncSeq)', Args, 'targetP2PName', IsBytes);
 end;
 
 procedure EmitProcedureTestBody(Lines: TPascalStringList;
@@ -604,6 +623,7 @@ begin
     Lines.Add('let CALL_TEST_WHOAMI_API: String = "LF_TEST_WHOAMI"');
     Lines.Add('let CALL_TEST_ASK_CALL_ME_API: String = "LF_TEST_ASK_SERVICE_CALL_ME"');
     Lines.Add('');
+    Lines.Add('let targetP2PName: String = CALL_TEST_TARGET_P2P');
     Lines.Add('var passCount: Int = 0');
     Lines.Add('var failCount: Int = 0');
     Lines.Add('var skipCount: Int = 0');
@@ -611,7 +631,6 @@ begin
     Lines.Add('var hasServiceUID: Bool = false');
     Lines.Add('var serviceCalledMe: Bool = false');
     Lines.Add('let stateLock: NSLock = NSLock()');
-    Lines.Add('var targetP2PName: String = CALL_TEST_TARGET_P2P');
     Lines.Add('');
     Lines.Add('final class ResultBox<T>: @unchecked Sendable {');
     Lines.Add('    private let lock: NSLock = NSLock()');
@@ -649,6 +668,10 @@ begin
     Lines.Add('        return .failure(LingoFuseError.generic(message: "no result for " + label))');
     Lines.Add('    }');
     Lines.Add('    return r');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('func bytesSummary(_ v: [UInt8]) -> String {');
+    Lines.Add('    return "<\(v.count) bytes>"');
     Lines.Add('}');
     Lines.Add('');
     Lines.Add('func reportPass(_ label: String, _ value: String = "") {');
@@ -770,9 +793,9 @@ begin
     Lines.Add('');
     Lines.Add('    var clientApp: AppHandle? = nil');
     Lines.Add('    do {');
-    Lines.Add('        Framework.setOption("Wait_Connection_ReadyOk", "False")');
-    Lines.Add('        Framework.setOption("Overlap_Connection", "True")');
-    Lines.Add('        Framework.setOption("ConsoleOutput", "True")');
+    Lines.Add('        Options.setWaitConnectionReadyOk(false)');
+    Lines.Add('        Options.setOverlapConnection(true)');
+    Lines.Add('        Options.setConsoleOutput(true)');
     Lines.Add('        Options.setQuiet(true)');
     Lines.Add('        Framework.resetPrepare()');
     Lines.Add('        let createdApp = try AppHandle(name: CALL_TEST_CLIENT_APP, description: "client test app")');
