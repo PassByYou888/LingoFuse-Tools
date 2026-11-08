@@ -39,6 +39,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_CSharp_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'int'
@@ -51,6 +56,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'double'
   else if T.Same('single') then Result := 'float'
   else if IsStringABIType(T) then Result := 'string'
+  else if IsBytesABIType(T) then Result := 'byte[]'
   else Result := '';
 end;
 
@@ -111,7 +117,9 @@ end;
 
 function PlaceholderValue(const ABIType: TP_String): TP_String;
 begin
-  if IsStringABIType(ABIType) then
+  if IsBytesABIType(ABIType) then
+    Result := 'new byte[] { 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A }'
+  else if IsStringABIType(ABIType) then
     Result := '"test"'
   else if ABIType.Same('single') then
     Result := '0.0f'
@@ -119,6 +127,14 @@ begin
     Result := '0.0'
   else
     Result := '0';
+end;
+
+function FormatResultExpr(const RetType: TP_String): TP_String;
+begin
+  if IsBytesABIType(RetType) then
+    Result := '(r == null ? "<null>" : ("[" + r.Length + " bytes]"))'
+  else
+    Result := 'r.ToString()';
 end;
 
 type
@@ -279,7 +295,7 @@ begin
     Lines.Add('        Console.WriteLine("[OK] Registered ' + ApiCountStr + ' API(s) + 2 test helper(s) (App + P2P).");');
     Lines.Add('        Console.WriteLine("[OK] Press Enter to shut down.");');
     Lines.Add('');
-    Lines.Add('        string line;');
+    Lines.Add('        string? line;');
     Lines.Add('        while ((line = Console.ReadLine()) != null)');
     Lines.Add('        {');
     Lines.Add('            if (line.Length == 0) break;');
@@ -356,7 +372,10 @@ procedure EmitFunctionTest(Lines: TPascalStringList; const MethodName, ApiName: 
 var
   Args: TP_String;
   CallExpr: TP_String;
+  ResultExpr: TP_String;
 begin
+  ResultExpr := FormatResultExpr(F.ReturnType);
+
   Lines.Add('    private static async System.Threading.Tasks.Task Test_' + MethodName + '()');
   Lines.Add('    {');
 
@@ -366,7 +385,7 @@ begin
   Lines.Add('        try');
   Lines.Add('        {');
   Lines.Add('            var r = ' + CallExpr + ';');
-  Lines.Add('            LogPass("' + ApiName + '(app call)", r.ToString());');
+  Lines.Add('            LogPass("' + ApiName + '(app call)", ' + ResultExpr + ');');
   Lines.Add('        }');
   Lines.Add('        catch (Exception ex)');
   Lines.Add('        {');
@@ -378,7 +397,7 @@ begin
   Lines.Add('        try');
   Lines.Add('        {');
   Lines.Add('            var r = await ' + CallExpr + ';');
-  Lines.Add('            LogPass("' + ApiName + '(app async)", r.ToString());');
+  Lines.Add('            LogPass("' + ApiName + '(app async)", ' + ResultExpr + ');');
   Lines.Add('        }');
   Lines.Add('        catch (Exception ex)');
   Lines.Add('        {');
@@ -390,7 +409,7 @@ begin
   Lines.Add('        try');
   Lines.Add('        {');
   Lines.Add('            var r = await ' + CallExpr + ';');
-  Lines.Add('            LogPass("' + ApiName + '(app asyncSeq)", r.ToString());');
+  Lines.Add('            LogPass("' + ApiName + '(app asyncSeq)", ' + ResultExpr + ');');
   Lines.Add('        }');
   Lines.Add('        catch (Exception ex)');
   Lines.Add('        {');
@@ -406,7 +425,7 @@ begin
   Lines.Add('            try');
   Lines.Add('            {');
   Lines.Add('                var r = ' + CallExpr + ';');
-  Lines.Add('                LogPass("' + ApiName + '(uid call)", r.ToString());');
+  Lines.Add('                LogPass("' + ApiName + '(uid call)", ' + ResultExpr + ');');
   Lines.Add('            }');
   Lines.Add('            catch (Exception ex)');
   Lines.Add('            {');
@@ -425,7 +444,7 @@ begin
   Lines.Add('            try');
   Lines.Add('            {');
   Lines.Add('                var r = await ' + CallExpr + ';');
-  Lines.Add('                LogPass("' + ApiName + '(uid async)", r.ToString());');
+  Lines.Add('                LogPass("' + ApiName + '(uid async)", ' + ResultExpr + ');');
   Lines.Add('            }');
   Lines.Add('            catch (Exception ex)');
   Lines.Add('            {');
@@ -444,7 +463,7 @@ begin
   Lines.Add('            try');
   Lines.Add('            {');
   Lines.Add('                var r = await ' + CallExpr + ';');
-  Lines.Add('                LogPass("' + ApiName + '(uid asyncSeq)", r.ToString());');
+  Lines.Add('                LogPass("' + ApiName + '(uid asyncSeq)", ' + ResultExpr + ');');
   Lines.Add('            }');
   Lines.Add('            catch (Exception ex)');
   Lines.Add('            {');
@@ -463,7 +482,7 @@ begin
   Lines.Add('        try');
   Lines.Add('        {');
   Lines.Add('            var r = ' + CallExpr + ';');
-  Lines.Add('            LogPass("' + ApiName + '(p2pname call)", r.ToString());');
+  Lines.Add('            LogPass("' + ApiName + '(p2pname call)", ' + ResultExpr + ');');
   Lines.Add('        }');
   Lines.Add('        catch (Exception ex)');
   Lines.Add('        {');
@@ -475,7 +494,7 @@ begin
   Lines.Add('        try');
   Lines.Add('        {');
   Lines.Add('            var r = await ' + CallExpr + ';');
-  Lines.Add('            LogPass("' + ApiName + '(p2pname async)", r.ToString());');
+  Lines.Add('            LogPass("' + ApiName + '(p2pname async)", ' + ResultExpr + ');');
   Lines.Add('        }');
   Lines.Add('        catch (Exception ex)');
   Lines.Add('        {');
@@ -487,7 +506,7 @@ begin
   Lines.Add('        try');
   Lines.Add('        {');
   Lines.Add('            var r = await ' + CallExpr + ';');
-  Lines.Add('            LogPass("' + ApiName + '(p2pname asyncSeq)", r.ToString());');
+  Lines.Add('            LogPass("' + ApiName + '(p2pname asyncSeq)", ' + ResultExpr + ');');
   Lines.Add('        }');
   Lines.Add('        catch (Exception ex)');
   Lines.Add('        {');
