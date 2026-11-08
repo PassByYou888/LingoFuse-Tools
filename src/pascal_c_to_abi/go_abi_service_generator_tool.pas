@@ -27,6 +27,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Go_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'int32'
@@ -40,6 +45,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'float64'
   else if T.Same('single') then Result := 'float32'
   else if IsStringABIType(T) then Result := 'string'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := '[]byte'
   else Result := '';
 end;
 
@@ -77,7 +83,8 @@ end;
 
 function ABI_Type_To_Go_Default(const T: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then Result := '""'
+  if ABI_Type_Is_LF_Binary_Data(T) then Result := 'nil'
+  else if IsStringABIType(T) then Result := '""'
   else Result := '0';
 end;
 
@@ -133,7 +140,7 @@ begin
 
   if Result.Same('err') or Result.Same('ret') or Result.Same('callErr') or
      Result.Same('uid') or Result.Same('p2pName') or Result.Same('r') or
-     Result.Same('inp') or Result.Same('out') then
+     Result.Same('inp') or Result.Same('out') or Result.Same('data') then
     Result := Result + '_p';
 end;
 
@@ -380,8 +387,15 @@ begin
   for i := 0 to High(F.Params) do
   begin
     PName := MakeSafeGoIdent(F.Params[i].Name, i);
-    ReadFunc := ABI_Type_To_Go_Read_Func(F.Params[i].PascalType);
-    Lines.Add(#9 + PName + ', err := inp.' + ReadFunc + '()');
+    if ABI_Type_Is_LF_Binary_Data(F.Params[i].PascalType) then
+    begin
+      Lines.Add(#9 + PName + ', err := serviceReadBlobField(inp)');
+    end
+    else
+    begin
+      ReadFunc := ABI_Type_To_Go_Read_Func(F.Params[i].PascalType);
+      Lines.Add(#9 + PName + ', err := inp.' + ReadFunc + '()');
+    end;
     Lines.Add(#9 + 'if err != nil {');
     if F.IsFunction then
       Lines.Add(#9 + #9 + 'writeCallbackError(out, ' + GoStrLit('input truncated: ' + PName) + ')');
@@ -413,8 +427,16 @@ begin
     Lines.Add(#9 + #9 + 'return');
     Lines.Add(#9 + '}');
     Lines.Add('');
-    Lines.Add(#9 + 'writeCallbackOK(out)');
-    Lines.Add(#9 + '_ = out.' + WriteFunc + '(ret)');
+
+    if ABI_Type_Is_LF_Binary_Data(F.ReturnType) then
+    begin
+      Lines.Add(#9 + 'serviceWriteBlobResponse(out, ret)');
+    end
+    else
+    begin
+      Lines.Add(#9 + 'writeCallbackOK(out)');
+      Lines.Add(#9 + '_ = out.' + WriteFunc + '(ret)');
+    end;
   end
   else
   begin
@@ -542,6 +564,38 @@ begin
     Lines.Add('func writeCallbackError(out *lingofuse.DataHandle, msg string) {');
     Lines.Add(#9 + '_ = out.WriteUint8(0xFF)');
     Lines.Add(#9 + '_ = out.WriteString(msg)');
+    Lines.Add('}');
+    Lines.Add('');
+
+    Lines.Add('func serviceReadBlobField(handle *lingofuse.DataHandle) ([]byte, error) {');
+    Lines.Add(#9 + 'n, err := handle.ReadInt32()');
+    Lines.Add(#9 + 'if err != nil {');
+    Lines.Add(#9 + #9 + 'return nil, err');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'if n < 0 {');
+    Lines.Add(#9 + #9 + 'return nil, fmt.Errorf("invalid blob length: %d", n)');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'if n == 0 {');
+    Lines.Add(#9 + #9 + 'return []byte{}, nil');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'return handle.ReadBytesExact(int(n))');
+    Lines.Add('}');
+    Lines.Add('');
+
+    Lines.Add('func serviceWriteBlobResponse(out *lingofuse.DataHandle, data []byte) {');
+    Lines.Add(#9 + 'if len(data) > 2147483647 {');
+    Lines.Add(#9 + #9 + 'writeCallbackError(out, "blob too large")');
+    Lines.Add(#9 + #9 + 'return');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'if err := out.WriteUint8(0x00); err != nil {');
+    Lines.Add(#9 + #9 + 'return');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'if err := out.WriteInt32(int32(len(data))); err != nil {');
+    Lines.Add(#9 + #9 + 'return');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'if len(data) > 0 {');
+    Lines.Add(#9 + #9 + '_ = out.WriteBytes(data)');
+    Lines.Add(#9 + '}');
     Lines.Add('}');
     Lines.Add('');
 
