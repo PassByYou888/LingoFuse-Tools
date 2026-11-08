@@ -6,11 +6,9 @@ unit fortran_abi_service_generator_tool;
 interface
 
 uses
-  Z.Core,
-  Z.PascalStrings, Z.UPascalStrings,
+  Z.Core, Z.PascalStrings, Z.UPascalStrings,
   Z.Status, Z.Json, Z.UnicodeMixedLib, Z.ListEngine,
-  Z.Pascal_Func_Model,
-  Z.Parsing, code_decl_to_abi_registry;
+  Z.Pascal_Func_Model, Z.Parsing, code_decl_to_abi_registry;
 
 function GenerateABIServiceFortranCode(Model: TPascal_Func_Model): TPascalStringList;
 
@@ -41,6 +39,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_Bytes(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Fortran_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -63,6 +66,8 @@ begin
     Result := 'real(c_float)'
   else if IsStringABIType(T) then
     Result := 'character(len=:), allocatable'
+  else if ABI_Type_Is_Bytes(T) then
+    Result := 'character(len=1, kind=c_char), allocatable'
   else
     Result := '';
 end;
@@ -154,7 +159,8 @@ begin
     S.Same('ret') or S.Same('istat') or
     S.Same('rc') or S.Same('lf_rc') or
     S.Same('str_status') or S.Same('app') or
-    S.Same('failed_count') or S.Same('dummy_rc');
+    S.Same('failed_count') or S.Same('dummy_rc') or
+    S.Same('bytes_size');
 end;
 
 function MakeSafeFortranIdent(const Name: TP_String; Index: integer): TP_String;
@@ -308,33 +314,63 @@ begin
   end;
 end;
 
+procedure EmitInternalParamDeclLines(Lines: TPascalStringList; const F: TFunctionStructure);
+var
+  j: integer;
+  Ident: TP_String;
+begin
+  for j := 0 to High(F.Params) do
+  begin
+    Ident := MakeSafeFortranIdent(F.Params[j].Name, j);
+    if IsStringABIType(F.Params[j].PascalType) then
+      Lines.Add('    character(len=*), intent(in) :: ' + Ident)
+    else if ABI_Type_Is_Bytes(F.Params[j].PascalType) then
+      Lines.Add('    character(len=1, kind=c_char), dimension(:), intent(in) :: ' + Ident)
+    else
+      Lines.Add('    ' + ABI_Type_To_Fortran_Decl(F.Params[j].PascalType) + ', intent(in) :: ' + Ident);
+  end;
+end;
+
 procedure EmitInternalCallStub(Lines: TPascalStringList; const ApiName: TP_String; const F: TFunctionStructure);
 var
   j: integer;
-  ParamDecl, SigArgs: TP_String;
+  ParamNames: TP_String;
+  HasBytesReturn: boolean;
 begin
-  ParamDecl := '';
+  ParamNames := '';
   for j := 0 to High(F.Params) do
   begin
-    if ParamDecl <> '' then ParamDecl := ParamDecl + ', ';
-    ParamDecl := ParamDecl + MakeSafeFortranIdent(F.Params[j].Name, j);
+    if ParamNames <> '' then ParamNames := ParamNames + ', ';
+    ParamNames := ParamNames + MakeSafeFortranIdent(F.Params[j].Name, j);
   end;
 
-  if ParamDecl <> '' then
-    SigArgs := 'uid, p2p_name, ' + ParamDecl
-  else
-    SigArgs := 'uid, p2p_name';
+  HasBytesReturn := F.IsFunction and ABI_Type_Is_Bytes(F.ReturnType);
+
+  if HasBytesReturn then
+  begin
+    if ParamNames <> '' then
+      Lines.Add('  subroutine internal_call_' + ApiName + '(uid, p2p_name, ' + ParamNames + ', ret)')
+    else
+      Lines.Add('  subroutine internal_call_' + ApiName + '(uid, p2p_name, ret)');
+    Lines.Add('    integer(c_int8_t), intent(in) :: uid(LF_UID_BYTE_COUNT)');
+    Lines.Add('    character(len=*), intent(in) :: p2p_name');
+    EmitInternalParamDeclLines(Lines, F);
+    Lines.Add('    character(len=1, kind=c_char), allocatable, intent(out) :: ret(:)');
+    Lines.Add('    allocate(ret(0))');
+    Lines.Add('  end subroutine');
+    Lines.Add('');
+    Exit;
+  end;
 
   if F.IsFunction then
   begin
-    Lines.Add('  function internal_call_' + ApiName + '(' + SigArgs + ') result(ret)');
+    if ParamNames <> '' then
+      Lines.Add('  function internal_call_' + ApiName + '(uid, p2p_name, ' + ParamNames + ') result(ret)')
+    else
+      Lines.Add('  function internal_call_' + ApiName + '(uid, p2p_name) result(ret)');
     Lines.Add('    integer(c_int8_t), intent(in) :: uid(LF_UID_BYTE_COUNT)');
     Lines.Add('    character(len=*), intent(in) :: p2p_name');
-    for j := 0 to High(F.Params) do
-    begin
-      Lines.Add('    ' + ABI_Type_To_Fortran_Decl(F.Params[j].PascalType) + ', intent(in) :: ' +
-        MakeSafeFortranIdent(F.Params[j].Name, j));
-    end;
+    EmitInternalParamDeclLines(Lines, F);
     if IsStringABIType(F.ReturnType) then
     begin
       Lines.Add('    character(len=:), allocatable :: ret');
@@ -347,27 +383,28 @@ begin
     end;
     Lines.Add('  end function');
     Lines.Add('');
-  end
-  else
-  begin
-    Lines.Add('  subroutine internal_call_' + ApiName + '(' + SigArgs + ')');
-    Lines.Add('    integer(c_int8_t), intent(in) :: uid(LF_UID_BYTE_COUNT)');
-    Lines.Add('    character(len=*), intent(in) :: p2p_name');
-    for j := 0 to High(F.Params) do
-    begin
-      Lines.Add('    ' + ABI_Type_To_Fortran_Decl(F.Params[j].PascalType) + ', intent(in) :: ' +
-        MakeSafeFortranIdent(F.Params[j].Name, j));
-    end;
-    Lines.Add('  end subroutine');
-    Lines.Add('');
+    Exit;
   end;
+
+  if ParamNames <> '' then
+    Lines.Add('  subroutine internal_call_' + ApiName + '(uid, p2p_name, ' + ParamNames + ')')
+  else
+    Lines.Add('  subroutine internal_call_' + ApiName + '(uid, p2p_name)');
+  Lines.Add('    integer(c_int8_t), intent(in) :: uid(LF_UID_BYTE_COUNT)');
+  Lines.Add('    character(len=*), intent(in) :: p2p_name');
+  EmitInternalParamDeclLines(Lines, F);
+  Lines.Add('  end subroutine');
+  Lines.Add('');
 end;
 
 procedure EmitCallback(Lines: TPascalStringList; const ApiName: TP_String; const F: TFunctionStructure);
 var
   j: integer;
   ParamName, ParamType, CallArgs: TP_String;
+  HasBytesReturn: boolean;
 begin
+  HasBytesReturn := F.IsFunction and ABI_Type_Is_Bytes(F.ReturnType);
+
   if F.IsFunction then
   begin
     Lines.Add('  subroutine ' + ApiName + '_callback(input, output) bind(C)');
@@ -384,6 +421,8 @@ begin
   Lines.Add('    character(len=:), allocatable :: p2p_name');
   Lines.Add('    integer(c_int) :: lf_rc');
   Lines.Add('    integer(c_int64_t) :: str_status');
+  Lines.Add('    integer(c_int32_t) :: bytes_size');
+  Lines.Add('');
 
   for j := 0 to High(F.Params) do
   begin
@@ -391,13 +430,17 @@ begin
     ParamType := F.Params[j].PascalType;
     if IsStringABIType(ParamType) then
       Lines.Add('    character(len=:), allocatable :: ' + ParamName)
+    else if ABI_Type_Is_Bytes(ParamType) then
+      Lines.Add('    character(len=1, kind=c_char), allocatable :: ' + ParamName + '(:)')
     else
       Lines.Add('    ' + ABI_Type_To_Fortran_Decl(ParamType) + ' :: ' + ParamName);
   end;
 
   if F.IsFunction then
   begin
-    if IsStringABIType(F.ReturnType) then
+    if HasBytesReturn then
+      Lines.Add('    character(len=1, kind=c_char), allocatable :: ret(:)')
+    else if IsStringABIType(F.ReturnType) then
       Lines.Add('    character(len=:), allocatable :: ret')
     else
       Lines.Add('    ' + ABI_Type_To_Fortran_Decl(F.ReturnType) + ' :: ret');
@@ -426,6 +469,33 @@ begin
       Lines.Add('      return');
       Lines.Add('    end if');
     end
+    else if ABI_Type_Is_Bytes(ParamType) then
+    begin
+      Lines.Add('    lf_rc = lf_data_read_int32(input, bytes_size)');
+      Lines.Add('    if (lf_rc /= 1 .or. bytes_size < 0) then');
+      if F.IsFunction then
+      begin
+        Lines.Add('      lf_rc = lf_data_write_uint8(output, ABI_STATUS_ERROR)');
+        Lines.Add('      lf_rc = lf_data_write_string(output, ' +
+          FortranStrLit('truncated input: ' + ParamName) + ')');
+      end;
+      Lines.Add('      return');
+      Lines.Add('    end if');
+      Lines.Add('    allocate(character(len=1, kind=c_char) :: ' + ParamName + '(bytes_size))');
+      Lines.Add('    if (bytes_size > 0) then');
+      Lines.Add('      lf_rc = int(lf_data_read_bytes(input, ' + ParamName +
+        ', int(bytes_size, c_int64_t)), c_int)');
+      Lines.Add('      if (lf_rc /= bytes_size) then');
+      if F.IsFunction then
+      begin
+        Lines.Add('        lf_rc = lf_data_write_uint8(output, ABI_STATUS_ERROR)');
+        Lines.Add('        lf_rc = lf_data_write_string(output, ' +
+          FortranStrLit('truncated input: ' + ParamName) + ')');
+      end;
+      Lines.Add('        return');
+      Lines.Add('      end if');
+      Lines.Add('    end if');
+    end
     else
     begin
       Lines.Add('    lf_rc = ' + ABI_Type_To_Read_Call(ParamType) + '(input, ' + ParamName + ')');
@@ -449,7 +519,16 @@ begin
     CallArgs := CallArgs + ', ' + MakeSafeFortranIdent(F.Params[j].Name, j);
   end;
 
-  if F.IsFunction then
+  if HasBytesReturn then
+  begin
+    Lines.Add('    call internal_call_' + ApiName + '(uid, p2p_name' + CallArgs + ', ret)');
+    Lines.Add('    lf_rc = lf_data_write_uint8(output, ABI_STATUS_OK)');
+    Lines.Add('    lf_rc = lf_data_write_int32(output, int(size(ret), c_int32_t))');
+    Lines.Add('    if (size(ret) > 0) then');
+    Lines.Add('      lf_rc = lf_data_write_bytes(output, ret, int(size(ret), c_int64_t))');
+    Lines.Add('    end if');
+  end
+  else if F.IsFunction then
   begin
     Lines.Add('    ret = internal_call_' + ApiName + '(uid, p2p_name' + CallArgs + ')');
     Lines.Add('    lf_rc = lf_data_write_uint8(output, ABI_STATUS_OK)');
