@@ -27,6 +27,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Go_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'int32'
@@ -40,6 +45,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'float64'
   else if T.Same('single') then Result := 'float32'
   else if IsStringABIType(T) then Result := 'string'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := '[]byte'
   else Result := '';
 end;
 
@@ -77,7 +83,8 @@ end;
 
 function ABI_Type_To_Go_Default(const T: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then Result := '""'
+  if ABI_Type_Is_LF_Binary_Data(T) then Result := 'nil'
+  else if IsStringABIType(T) then Result := '""'
   else Result := '0';
 end;
 
@@ -142,7 +149,7 @@ begin
   if Result.Same('param') or Result.Same('res') or Result.Same('err') or
      Result.Same('target') or Result.Same('out') or Result.Same('r') or
      Result.Same('uid') or Result.Same('p2pName') or Result.Same('onResult') or
-     Result.Same('timeoutMs') or Result.Same('apiName') then
+     Result.Same('timeoutMs') or Result.Same('apiName') or Result.Same('data') then
     Result := Result + '_p';
 end;
 
@@ -250,10 +257,10 @@ begin
     Result := Prefix + ', ' + Inner;
 end;
 
-procedure EmitWriteParamStatements(
+procedure EmitParamWriteLines(
   Lines: TPascalStringList;
   const F: TFunctionStructure;
-  const Indent: TP_String);
+  const ReturnZero: TP_String);
 var
   i: integer;
   PName, WriteFunc: TP_String;
@@ -261,17 +268,25 @@ begin
   for i := 0 to High(F.Params) do
   begin
     PName := MakeSafeGoIdent(F.Params[i].Name, i);
-    WriteFunc := ABI_Type_To_Go_Write_Func(F.Params[i].PascalType);
-    Lines.Add(Indent + 'if err := param.' + WriteFunc + '(' + PName + '); err != nil {');
-    Lines.Add(Indent + #9 + 'return ' + #39 + 'returnzero' + #39 + ', err');
-    Lines.Add(Indent + '}');
+    if ABI_Type_Is_LF_Binary_Data(F.Params[i].PascalType) then
+    begin
+      Lines.Add(#9 + 'if err := callWriteBlobField(param, ' + PName + '); err != nil {');
+      Lines.Add(#9 + #9 + 'return ' + ReturnZero + ', err');
+      Lines.Add(#9 + '}');
+    end
+    else
+    begin
+      WriteFunc := ABI_Type_To_Go_Write_Func(F.Params[i].PascalType);
+      Lines.Add(#9 + 'if err := param.' + WriteFunc + '(' + PName + '); err != nil {');
+      Lines.Add(#9 + #9 + 'return ' + ReturnZero + ', err');
+      Lines.Add(#9 + '}');
+    end;
   end;
 end;
 
-procedure EmitWriteParamStatementsNoRet(
+procedure EmitParamWriteLinesErrOnly(
   Lines: TPascalStringList;
-  const F: TFunctionStructure;
-  const Indent: TP_String);
+  const F: TFunctionStructure);
 var
   i: integer;
   PName, WriteFunc: TP_String;
@@ -279,10 +294,19 @@ begin
   for i := 0 to High(F.Params) do
   begin
     PName := MakeSafeGoIdent(F.Params[i].Name, i);
-    WriteFunc := ABI_Type_To_Go_Write_Func(F.Params[i].PascalType);
-    Lines.Add(Indent + 'if err := param.' + WriteFunc + '(' + PName + '); err != nil {');
-    Lines.Add(Indent + #9 + 'return err');
-    Lines.Add(Indent + '}');
+    if ABI_Type_Is_LF_Binary_Data(F.Params[i].PascalType) then
+    begin
+      Lines.Add(#9 + 'if err := callWriteBlobField(param, ' + PName + '); err != nil {');
+      Lines.Add(#9 + #9 + 'return err');
+      Lines.Add(#9 + '}');
+    end
+    else
+    begin
+      WriteFunc := ABI_Type_To_Go_Write_Func(F.Params[i].PascalType);
+      Lines.Add(#9 + 'if err := param.' + WriteFunc + '(' + PName + '); err != nil {');
+      Lines.Add(#9 + #9 + 'return err');
+      Lines.Add(#9 + '}');
+    end;
   end;
 end;
 
@@ -292,8 +316,6 @@ procedure EmitSyncCall(
   const ApiName, FuncName, ExtraParamPrefix, TargetExpr, MethodName: TP_String);
 var
   RetType, ParamDecl, ReturnZero, ReadFunc: TP_String;
-  i: integer;
-  PName, WriteFunc: TP_String;
 begin
   RetType := ABI_Type_To_Go_Decl(F.ReturnType);
   ParamDecl := BuildParamDeclWithPrefix(ExtraParamPrefix, F.Params);
@@ -307,14 +329,7 @@ begin
   Lines.Add(#9 + '}');
   Lines.Add(#9 + 'defer param.Close()');
 
-  for i := 0 to High(F.Params) do
-  begin
-    PName := MakeSafeGoIdent(F.Params[i].Name, i);
-    WriteFunc := ABI_Type_To_Go_Write_Func(F.Params[i].PascalType);
-    Lines.Add(#9 + 'if err := param.' + WriteFunc + '(' + PName + '); err != nil {');
-    Lines.Add(#9 + #9 + 'return ' + ReturnZero + ', err');
-    Lines.Add(#9 + '}');
-  end;
+  EmitParamWriteLines(Lines, F, ReturnZero);
 
   Lines.Add(#9 + 'if err := param.SetPosition(0); err != nil {');
   Lines.Add(#9 + #9 + 'return ' + ReturnZero + ', err');
@@ -330,7 +345,10 @@ begin
   Lines.Add(#9 + #9 + 'return ' + ReturnZero + ', err');
   Lines.Add(#9 + '}');
 
-  Lines.Add(#9 + 'out, err := res.' + ReadFunc + '()');
+  if ABI_Type_Is_LF_Binary_Data(F.ReturnType) then
+    Lines.Add(#9 + 'out, err := callReadBlobField(res)')
+  else
+    Lines.Add(#9 + 'out, err := res.' + ReadFunc + '()');
   Lines.Add(#9 + 'if err != nil {');
   Lines.Add(#9 + #9 + 'return ' + ReturnZero + ', err');
   Lines.Add(#9 + '}');
@@ -345,8 +363,6 @@ procedure EmitAsyncCall(
   const ApiName, FuncName, ExtraParamPrefix, TargetExpr, MethodName: TP_String);
 var
   RetType, ParamDecl, ReturnZero, ReadFunc: TP_String;
-  i: integer;
-  PName, WriteFunc: TP_String;
 begin
   RetType := ABI_Type_To_Go_Decl(F.ReturnType);
   ParamDecl := BuildParamDeclWithPrefix(ExtraParamPrefix, F.Params);
@@ -365,14 +381,7 @@ begin
   Lines.Add(#9 + '}');
   Lines.Add(#9 + 'defer param.Close()');
 
-  for i := 0 to High(F.Params) do
-  begin
-    PName := MakeSafeGoIdent(F.Params[i].Name, i);
-    WriteFunc := ABI_Type_To_Go_Write_Func(F.Params[i].PascalType);
-    Lines.Add(#9 + 'if err := param.' + WriteFunc + '(' + PName + '); err != nil {');
-    Lines.Add(#9 + #9 + 'return err');
-    Lines.Add(#9 + '}');
-  end;
+  EmitParamWriteLinesErrOnly(Lines, F);
 
   Lines.Add(#9 + 'if err := param.SetPosition(0); err != nil {');
   Lines.Add(#9 + #9 + 'return err');
@@ -387,7 +396,10 @@ begin
   Lines.Add(#9 + #9 + #9 + 'onResult(' + ReturnZero + ', err)');
   Lines.Add(#9 + #9 + #9 + 'return');
   Lines.Add(#9 + #9 + '}');
-  Lines.Add(#9 + #9 + 'out, err := r.Value.' + ReadFunc + '()');
+  if ABI_Type_Is_LF_Binary_Data(F.ReturnType) then
+    Lines.Add(#9 + #9 + 'out, err := callReadBlobField(r.Value)')
+  else
+    Lines.Add(#9 + #9 + 'out, err := r.Value.' + ReadFunc + '()');
   Lines.Add(#9 + #9 + 'if err != nil {');
   Lines.Add(#9 + #9 + #9 + 'onResult(' + ReturnZero + ', err)');
   Lines.Add(#9 + #9 + #9 + 'return');
@@ -404,8 +416,6 @@ procedure EmitNotify(
   const ApiName, FuncName, ExtraParamPrefix, TargetExpr, MethodName: TP_String);
 var
   ParamDecl: TP_String;
-  i: integer;
-  PName, WriteFunc: TP_String;
 begin
   ParamDecl := BuildParamDeclWithPrefix(ExtraParamPrefix, F.Params);
 
@@ -416,14 +426,7 @@ begin
   Lines.Add(#9 + '}');
   Lines.Add(#9 + 'defer param.Close()');
 
-  for i := 0 to High(F.Params) do
-  begin
-    PName := MakeSafeGoIdent(F.Params[i].Name, i);
-    WriteFunc := ABI_Type_To_Go_Write_Func(F.Params[i].PascalType);
-    Lines.Add(#9 + 'if err := param.' + WriteFunc + '(' + PName + '); err != nil {');
-    Lines.Add(#9 + #9 + 'return err');
-    Lines.Add(#9 + '}');
-  end;
+  EmitParamWriteLinesErrOnly(Lines, F);
 
   Lines.Add(#9 + 'if err := param.SetPosition(0); err != nil {');
   Lines.Add(#9 + #9 + 'return err');
@@ -461,6 +464,7 @@ begin
     Lines.Add('');
     Lines.Add('import (');
     Lines.Add(#9 + '"errors"');
+    Lines.Add(#9 + '"fmt"');
     Lines.Add(#9 + '"time"');
     Lines.Add('');
     Lines.Add(#9 + '"github.com/PassByYou888/LingoFuse/go/lingofuse"');
@@ -499,6 +503,33 @@ begin
     Lines.Add(#9 + #9 + 'return newRemoteError("ABI call [" + apiName + "] failed: " + msg)');
     Lines.Add(#9 + '}');
     Lines.Add(#9 + 'return nil');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('func callWriteBlobField(handle *lingofuse.DataHandle, data []byte) error {');
+    Lines.Add(#9 + 'if len(data) > 2147483647 {');
+    Lines.Add(#9 + #9 + 'return fmt.Errorf("blob too large: %d bytes", len(data))');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'if err := handle.WriteInt32(int32(len(data))); err != nil {');
+    Lines.Add(#9 + #9 + 'return err');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'if len(data) == 0 {');
+    Lines.Add(#9 + #9 + 'return nil');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'return handle.WriteBytes(data)');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('func callReadBlobField(handle *lingofuse.DataHandle) ([]byte, error) {');
+    Lines.Add(#9 + 'n, err := handle.ReadInt32()');
+    Lines.Add(#9 + 'if err != nil {');
+    Lines.Add(#9 + #9 + 'return nil, err');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'if n < 0 {');
+    Lines.Add(#9 + #9 + 'return nil, fmt.Errorf("invalid blob length: %d", n)');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'if n == 0 {');
+    Lines.Add(#9 + #9 + 'return []byte{}, nil');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'return handle.ReadBytesExact(int(n))');
     Lines.Add('}');
     Lines.Add('');
 
