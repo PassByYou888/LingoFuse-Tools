@@ -87,6 +87,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsInt64ABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('int64') or T.Same('uint64');
@@ -105,6 +110,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'abi_pack_double'
   else if T.Same('single') then Result := 'abi_pack_single'
   else if IsStringABIType(T) then Result := 'abi_pack_string'
+  else if IsBytesABIType(T) then Result := 'abi_pack_bytes'
   else Result := '';
 end;
 
@@ -121,12 +127,14 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'abi_read_double'
   else if T.Same('single') then Result := 'abi_read_single'
   else if IsStringABIType(T) then Result := 'abi_read_string'
+  else if IsBytesABIType(T) then Result := 'abi_read_bytes'
   else Result := '';
 end;
 
 function ABI_Type_To_R_Default_Value(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then Result := #39#39
+  else if IsBytesABIType(T) then Result := 'raw(0)'
   else if IsInt64ABIType(T) then Result := 'bit64::as.integer64(0)'
   else if T.Same('double') or T.Same('extended') or T.Same('real') or T.Same('single') then Result := '0'
   else Result := '0L';
@@ -145,6 +153,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'abi_write_ok_double'
   else if T.Same('single') then Result := 'abi_write_ok_single'
   else if IsStringABIType(T) then Result := 'abi_write_ok_string'
+  else if IsBytesABIType(T) then Result := 'abi_write_ok_bytes'
   else Result := '';
 end;
 
@@ -292,6 +301,10 @@ begin
   Lines.Add('abi_pack_string <- function(v) {');
   Lines.Add('  c(charToRaw(enc2utf8(v)), as.raw(0))');
   Lines.Add('}');
+  Lines.Add('abi_pack_bytes <- function(v) {');
+  Lines.Add('  if (is.null(v)) v <- raw(0)');
+  Lines.Add('  c(abi_pack_int32(length(v)), v)');
+  Lines.Add('}');
   Lines.Add('');
 end;
 
@@ -369,6 +382,16 @@ begin
   Lines.Add('  }');
   Lines.Add('  list(value = v, pos = end + 1L)');
   Lines.Add('}');
+  Lines.Add('abi_read_bytes <- function(buf, pos) {');
+  Lines.Add('  r <- abi_read_int32(buf, pos)');
+  Lines.Add('  len <- r$value');
+  Lines.Add('  pos <- r$pos');
+  Lines.Add('  if (len < 0L) stop(' + #39 + 'abi_read_bytes: negative length' + #39 + ')');
+  Lines.Add('  if (len == 0L) return(list(value = raw(0), pos = pos))');
+  Lines.Add('  end <- pos + len - 1L');
+  Lines.Add('  if (end > length(buf)) stop(' + #39 + 'input truncated: bytes' + #39 + ')');
+  Lines.Add('  list(value = buf[pos:end], pos = end + 1L)');
+  Lines.Add('}');
   Lines.Add('');
 end;
 
@@ -387,6 +410,7 @@ begin
   Lines.Add('abi_write_ok_double <- function(v) c(STATUS_OK, abi_pack_double(v))');
   Lines.Add('abi_write_ok_single <- function(v) c(STATUS_OK, abi_pack_single(v))');
   Lines.Add('abi_write_ok_string <- function(v) c(STATUS_OK, abi_pack_string(v))');
+  Lines.Add('abi_write_ok_bytes <- function(v) c(STATUS_OK, abi_pack_bytes(v))');
   Lines.Add('');
 end;
 
