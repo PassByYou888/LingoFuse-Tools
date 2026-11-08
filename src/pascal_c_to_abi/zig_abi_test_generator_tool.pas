@@ -40,6 +40,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Zig_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'i32'
@@ -51,7 +56,7 @@ begin
   else if T.Same('uint64') then Result := 'u64'
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'f64'
   else if T.Same('single') then Result := 'f32'
-  else if IsStringABIType(T) then Result := '[]u8'
+  else if IsStringABIType(T) or IsBytesABIType(T) then Result := '[]u8'
   else Result := '';
 end;
 
@@ -203,6 +208,8 @@ function PlaceholderValue(const ABIType: TP_String): TP_String;
 begin
   if IsStringABIType(ABIType) then
     Result := '"test"'
+  else if IsBytesABIType(ABIType) then
+    Result := '&[_]u8{0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A}'
   else if ABIType.Same('integer') or ABIType.Same('longint') then
     Result := '@as(i32, 1)'
   else if ABIType.Same('int64') then
@@ -301,7 +308,7 @@ begin
     Lines.Add('    const p2p_z = in_.p2pName(alloc) catch |e| return e;');
     Lines.Add('    defer alloc.free(p2p_z);');
     Lines.Add('');
-    Lines.Add('    std.debug.print("[SERVICE] whoami: p2p={s}\\n", .{p2p_z});');
+    Lines.Add('    std.debug.print("[SERVICE] whoami: p2p={s}\n", .{p2p_z});');
     Lines.Add('');
     Lines.Add('    try out_.writeBytes(&[_]u8{STATUS_OK});');
     Lines.Add('    const uid_bytes = uid.toBytes();');
@@ -312,38 +319,38 @@ begin
     Lines.Add('fn cbAskCallMe(_ctx: ?*anyopaque, in_: *lf.DataHandle) lf.Error!void {');
     Lines.Add('    _ = _ctx;');
     Lines.Add('    const uid = in_.p2pUid() catch {');
-    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: no uid\\n", .{});');
+    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: no uid\n", .{});');
     Lines.Add('        return;');
     Lines.Add('    };');
     Lines.Add('    if (uid.isNull()) {');
-    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: null uid\\n", .{});');
+    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: null uid\n", .{});');
     Lines.Add('        return;');
     Lines.Add('    }');
     Lines.Add('');
-    Lines.Add('    std.debug.print("[SERVICE] ask_call_me: invoking client via uid\\n", .{});');
+    Lines.Add('    std.debug.print("[SERVICE] ask_call_me: invoking client via uid\n", .{});');
     Lines.Add('');
     Lines.Add('    var req = try data.create(TEST_REPORT_IDENTITY_API);');
     Lines.Add('    defer req.deinit();');
     Lines.Add('    try req.writeString("service initiates call");');
     Lines.Add('');
     Lines.Add('    const resp_opt = lf.framework.callOptionalByUid(uid, &req, 5000) catch {');
-    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: call failed\\n", .{});');
+    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: call failed\n", .{});');
     Lines.Add('        return;');
     Lines.Add('    };');
     Lines.Add('    if (resp_opt) |resp_in| {');
     Lines.Add('        var resp = resp_in;');
     Lines.Add('        defer resp.deinit();');
-    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: client responded\\n", .{});');
+    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: client responded\n", .{});');
     Lines.Add('    } else {');
-    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: no response (timeout)\\n", .{});');
+    Lines.Add('        std.debug.print("[SERVICE] ask_call_me: no response (timeout)\n", .{});');
     Lines.Add('    }');
     Lines.Add('}');
     Lines.Add('');
     Lines.Add('pub fn main() void {');
-    Lines.Add('    std.debug.print("=== ' + UnitName.Text + ' ABI service test ===\\n", .{});');
+    Lines.Add('    std.debug.print("=== ' + UnitName.Text + ' ABI service test ===\n", .{});');
     Lines.Add('');
     Lines.Add('    lf.framework.init() catch |err| {');
-    Lines.Add('        std.debug.print("[FATAL] init: {}\\n", .{err});');
+    Lines.Add('        std.debug.print("[FATAL] init: {}\n", .{err});');
     Lines.Add('        exit(1);');
     Lines.Add('    };');
     Lines.Add('    defer lf.framework.deinit();');
@@ -358,36 +365,36 @@ begin
     Lines.Add('    lf.framework.resetPrepare();');
     Lines.Add('');
     Lines.Add('    _ = lf.framework.prepareService(TEST_ENDPOINT, TEST_ENDPOINT) catch |err| {');
-    Lines.Add('        std.debug.print("[FATAL] prepareService: {}\\n", .{err});');
+    Lines.Add('        std.debug.print("[FATAL] prepareService: {}\n", .{err});');
     Lines.Add('        exit(1);');
     Lines.Add('    };');
     Lines.Add('');
     Lines.Add('    var app = lf.AppHandle.create(TEST_APP_NAME, TEST_APP_NAME) catch |err| {');
-    Lines.Add('        std.debug.print("[FATAL] createApp: {}\\n", .{err});');
+    Lines.Add('        std.debug.print("[FATAL] createApp: {}\n", .{err});');
     Lines.Add('        exit(1);');
     Lines.Add('    };');
     Lines.Add('');
     Lines.Add('    svc.registerAllAbiApis(&app) catch |err| {');
-    Lines.Add('        std.debug.print("[FATAL] registerAllAbiApis: {}\\n", .{err});');
+    Lines.Add('        std.debug.print("[FATAL] registerAllAbiApis: {}\n", .{err});');
     Lines.Add('        exit(1);');
     Lines.Add('    };');
     Lines.Add('    app.registerCall(TEST_WHOAMI_API, "service whoami", null, cbWhoami) catch {};');
     Lines.Add('    app.registerNotify(TEST_ASK_CALL_ME_API, "ask service to call client", null, cbAskCallMe) catch {};');
     Lines.Add('');
     Lines.Add('    svc.registerAllP2pAbiApis() catch |err| {');
-    Lines.Add('        std.debug.print("[FATAL] registerAllP2pAbiApis: {}\\n", .{err});');
+    Lines.Add('        std.debug.print("[FATAL] registerAllP2pAbiApis: {}\n", .{err});');
     Lines.Add('        exit(1);');
     Lines.Add('    };');
     Lines.Add('    lf.p2p.registerP2PCall(TEST_WHOAMI_API, "service whoami", null, cbWhoami) catch {};');
     Lines.Add('    lf.p2p.registerP2PNotify(TEST_ASK_CALL_ME_API, "ask service to call client", null, cbAskCallMe) catch {};');
     Lines.Add('');
     Lines.Add('    _ = lf.framework.prepareClient(TEST_ENDPOINT, &app) catch |err| {');
-    Lines.Add('        std.debug.print("[FATAL] prepareClient: {}\\n", .{err});');
+    Lines.Add('        std.debug.print("[FATAL] prepareClient: {}\n", .{err});');
     Lines.Add('        exit(1);');
     Lines.Add('    };');
     Lines.Add('');
     Lines.Add('    if (!lf.framework.prepareDone()) {');
-    Lines.Add('        std.debug.print("[FATAL] prepareDone returned false\\n", .{});');
+    Lines.Add('        std.debug.print("[FATAL] prepareDone returned false\n", .{});');
     Lines.Add('        exit(1);');
     Lines.Add('    }');
     Lines.Add('');
@@ -401,20 +408,20 @@ begin
     Lines.Add('        Sleep(200);');
     Lines.Add('    }');
     Lines.Add('    if (!ready) {');
-    Lines.Add('        std.debug.print("[WARN] whoami not visible within 10s\\n", .{});');
+    Lines.Add('        std.debug.print("[WARN] whoami not visible within 10s\n", .{});');
     Lines.Add('    }');
     Lines.Add('');
-    Lines.Add('    std.debug.print("[OK] Service ready on {s}\\n", .{TEST_ENDPOINT});');
-    Lines.Add('    std.debug.print("[OK] App: {s}\\n", .{TEST_APP_NAME});');
-    Lines.Add('    std.debug.print("[OK] P2P: {s}\\n", .{TEST_P2P_NAME});');
-    Lines.Add('    std.debug.print("[OK] Auto-exit after {} seconds (Ctrl+C to exit sooner)\\n", .{TEST_AUTO_EXIT_SECONDS});');
+    Lines.Add('    std.debug.print("[OK] Service ready on {s}\n", .{TEST_ENDPOINT});');
+    Lines.Add('    std.debug.print("[OK] App: {s}\n", .{TEST_APP_NAME});');
+    Lines.Add('    std.debug.print("[OK] P2P: {s}\n", .{TEST_P2P_NAME});');
+    Lines.Add('    std.debug.print("[OK] Auto-exit after {} seconds (Ctrl+C to exit sooner)\n", .{TEST_AUTO_EXIT_SECONDS});');
     Lines.Add('');
     Lines.Add('    var elapsed: u32 = 0;');
     Lines.Add('    while (elapsed < TEST_AUTO_EXIT_SECONDS) : (elapsed += 1) {');
     Lines.Add('        Sleep(1000);');
     Lines.Add('    }');
     Lines.Add('');
-    Lines.Add('    std.debug.print("[OK] Shutting down...\\n", .{});');
+    Lines.Add('    std.debug.print("[OK] Shutting down...\n", .{});');
     Lines.Add('    lf.framework.exitMainThread();');
     Lines.Add('    app.deinit();');
     Lines.Add('    lf.framework.shutdown();');
@@ -444,6 +451,11 @@ begin
   begin
     Lines.Add('                defer self.alloc.free(v);');
     Lines.Add('                reportString(' + ZigStrLit(ApiName + '(async)') + ', v);');
+  end
+  else if IsBytesABIType(F.ReturnType) then
+  begin
+    Lines.Add('                defer self.alloc.free(v);');
+    Lines.Add('                reportBytes(' + ZigStrLit(ApiName + '(async)') + ', v);');
   end
   else
   begin
@@ -488,6 +500,17 @@ begin
     Lines.Add('        }');
     Lines.Add('    }');
   end
+  else if IsBytesABIType(F.ReturnType) then
+  begin
+    Lines.Add('    {');
+    Lines.Add('        if (' + CallExpr + ') |result| {');
+    Lines.Add('            defer alloc.free(result);');
+    Lines.Add('            reportBytes(' + ZigStrLit(Label_) + ', result);');
+    Lines.Add('        } else |err| {');
+    Lines.Add('            reportFail(' + ZigStrLit(Label_) + ', @errorName(err));');
+    Lines.Add('        }');
+    Lines.Add('    }');
+  end
   else
   begin
     Lines.Add('    {');
@@ -513,6 +536,15 @@ begin
     Lines.Add('        if (' + CallExpr + ') |result| {');
     Lines.Add('            defer alloc.free(result);');
     Lines.Add('            reportString(' + ZigStrLit(Label_) + ', result);');
+    Lines.Add('        } else |err| {');
+    Lines.Add('            reportFail(' + ZigStrLit(Label_) + ', @errorName(err));');
+    Lines.Add('        }');
+  end
+  else if IsBytesABIType(F.ReturnType) then
+  begin
+    Lines.Add('        if (' + CallExpr + ') |result| {');
+    Lines.Add('            defer alloc.free(result);');
+    Lines.Add('            reportBytes(' + ZigStrLit(Label_) + ', result);');
     Lines.Add('        } else |err| {');
     Lines.Add('            reportFail(' + ZigStrLit(Label_) + ', @errorName(err));');
     Lines.Add('        }');
@@ -572,7 +604,7 @@ var
   HasAlloc: boolean;
 begin
   Args := BuildPlaceholderArgs(F.Params);
-  HasAlloc := IsStringABIType(F.ReturnType);
+  HasAlloc := IsStringABIType(F.ReturnType) or IsBytesABIType(F.ReturnType);
 
   EmitCallTestWaiter(Lines, ApiName, ZigIdent, F);
 
@@ -815,25 +847,30 @@ begin
     Lines.Add('fn reportPass(label: []const u8, value: ?[]const u8) void {');
     Lines.Add('    g_pass += 1;');
     Lines.Add('    if (value) |v| {');
-    Lines.Add('        std.debug.print("[PASS] {s} = {s}\\n", .{label, v});');
+    Lines.Add('        std.debug.print("[PASS] {s} = {s}\n", .{label, v});');
     Lines.Add('    } else {');
-    Lines.Add('        std.debug.print("[PASS] {s}\\n", .{label});');
+    Lines.Add('        std.debug.print("[PASS] {s}\n", .{label});');
     Lines.Add('    }');
     Lines.Add('}');
     Lines.Add('');
     Lines.Add('fn reportString(label: []const u8, value: []const u8) void {');
     Lines.Add('    g_pass += 1;');
-    Lines.Add('    std.debug.print("[PASS] {s} = {s}\\n", .{label, value});');
+    Lines.Add('    std.debug.print("[PASS] {s} = {s}\n", .{label, value});');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('fn reportBytes(label: []const u8, bytes: []const u8) void {');
+    Lines.Add('    g_pass += 1;');
+    Lines.Add('    std.debug.print("[PASS] {s} = <{d} bytes>\n", .{label, bytes.len});');
     Lines.Add('}');
     Lines.Add('');
     Lines.Add('fn reportFail(label: []const u8, reason: []const u8) void {');
     Lines.Add('    g_fail += 1;');
-    Lines.Add('    std.debug.print("[FAIL] {s} -- {s}\\n", .{label, reason});');
+    Lines.Add('    std.debug.print("[FAIL] {s} -- {s}\n", .{label, reason});');
     Lines.Add('}');
     Lines.Add('');
     Lines.Add('fn reportSkip(label: []const u8, reason: []const u8) void {');
     Lines.Add('    g_skip += 1;');
-    Lines.Add('    std.debug.print("[SKIP] {s} -- {s}\\n", .{label, reason});');
+    Lines.Add('    std.debug.print("[SKIP] {s} -- {s}\n", .{label, reason});');
     Lines.Add('}');
     Lines.Add('');
     Lines.Add('fn cbReportIdentity(_ctx: ?*anyopaque, in_: *lf.DataHandle, out_: *lf.DataHandle) lf.Error!void {');
@@ -847,7 +884,7 @@ begin
     Lines.Add('    g_has_service_uid.store(!uid.isNull(), .release);');
     Lines.Add('    g_service_called_me.store(true, .release);');
     Lines.Add('');
-    Lines.Add('    std.debug.print("[CLIENT] service called me: p2p={s}\\n", .{p2p_z});');
+    Lines.Add('    std.debug.print("[CLIENT] service called me: p2p={s}\n", .{p2p_z});');
     Lines.Add('');
     Lines.Add('    try out_.writeBytes(&[_]u8{STATUS_OK});');
     Lines.Add('    try out_.writeString("identity received");');
@@ -919,7 +956,7 @@ begin
     Lines.Add('    _ = try lf.framework.prepareClient(TEST_ENDPOINT, &app);');
     Lines.Add('');
     Lines.Add('    if (!lf.framework.prepareDone()) {');
-    Lines.Add('        std.debug.print("[FATAL] prepareDone returned false\\n", .{});');
+    Lines.Add('        std.debug.print("[FATAL] prepareDone returned false\n", .{});');
     Lines.Add('        return error.PrepareFailed;');
     Lines.Add('    }');
     Lines.Add('');
@@ -933,11 +970,11 @@ begin
     Lines.Add('        sleepMs(200);');
     Lines.Add('    }');
     Lines.Add('    if (!ready) {');
-    Lines.Add('        std.debug.print("[WARN] service_test not visible after 10s\\n", .{});');
-    Lines.Add('        std.debug.print("[WARN] start service_test first, then run this program\\n", .{});');
+    Lines.Add('        std.debug.print("[WARN] service_test not visible after 10s\n", .{});');
+    Lines.Add('        std.debug.print("[WARN] start service_test first, then run this program\n", .{});');
     Lines.Add('    }');
     Lines.Add('');
-    Lines.Add('    std.debug.print("[READY] Client online\\n", .{});');
+    Lines.Add('    std.debug.print("[READY] Client online\n", .{});');
     Lines.Add('');
     Lines.Add('    const alloc = std.heap.page_allocator;');
     Lines.Add('    var my_uid: lf.Uid = lf.Uid.NULL;');
@@ -946,18 +983,18 @@ begin
     Lines.Add('    if (probeClientIdentity(&my_uid, &my_p2p)) |_| {');
     Lines.Add('        var hex: [64]u8 = undefined;');
     Lines.Add('        my_uid.toHexBuf(&hex);');
-    Lines.Add('        std.debug.print("[INFO] client uid = {s}\\n", .{&hex});');
-    Lines.Add('        std.debug.print("[INFO] client p2p = {s}\\n", .{my_p2p});');
+    Lines.Add('        std.debug.print("[INFO] client uid = {s}\n", .{&hex});');
+    Lines.Add('        std.debug.print("[INFO] client p2p = {s}\n", .{my_p2p});');
     Lines.Add('    } else |err| {');
-    Lines.Add('        std.debug.print("[WARN] whoami failed: {} -- uid tests will be skipped\\n", .{err});');
+    Lines.Add('        std.debug.print("[WARN] whoami failed: {} -- uid tests will be skipped\n", .{err});');
     Lines.Add('    }');
     Lines.Add('');
     Lines.Add('    if (waitServiceUid(10000)) {');
     Lines.Add('        var svc_hex: [64]u8 = undefined;');
     Lines.Add('        g_service_uid.toHexBuf(&svc_hex);');
-    Lines.Add('        std.debug.print("[INFO] service uid = {s}\\n", .{&svc_hex});');
+    Lines.Add('        std.debug.print("[INFO] service uid = {s}\n", .{&svc_hex});');
     Lines.Add('    } else {');
-    Lines.Add('        std.debug.print("[WARN] service-initiated call timed out\\n", .{});');
+    Lines.Add('        std.debug.print("[WARN] service-initiated call timed out\n", .{});');
     Lines.Add('    }');
     Lines.Add('');
     Lines.Add('    const overall_start = nowMs();');
@@ -969,11 +1006,11 @@ begin
     Lines.Add('');
     Lines.Add('    const elapsed = nowMs() - overall_start;');
     Lines.Add('');
-    Lines.Add('    std.debug.print("\\n=== Summary ===\\n", .{});');
-    Lines.Add('    std.debug.print("Pass: {d}\\n", .{g_pass});');
-    Lines.Add('    std.debug.print("Fail: {d}\\n", .{g_fail});');
-    Lines.Add('    std.debug.print("Skip: {d}\\n", .{g_skip});');
-    Lines.Add('    std.debug.print("Elapsed: {d} ms\\n", .{elapsed});');
+    Lines.Add('    std.debug.print("\n=== Summary ===\n", .{});');
+    Lines.Add('    std.debug.print("Pass: {d}\n", .{g_pass});');
+    Lines.Add('    std.debug.print("Fail: {d}\n", .{g_fail});');
+    Lines.Add('    std.debug.print("Skip: {d}\n", .{g_skip});');
+    Lines.Add('    std.debug.print("Elapsed: {d} ms\n", .{elapsed});');
     Lines.Add('');
     Lines.Add('    lf.framework.exitMainThread();');
     Lines.Add('    app.deinit();');
@@ -981,16 +1018,16 @@ begin
     Lines.Add('}');
     Lines.Add('');
     Lines.Add('pub fn main() void {');
-    Lines.Add('    std.debug.print("=== ' + UnitName.Text + ' ABI client test ===\\n", .{});');
+    Lines.Add('    std.debug.print("=== ' + UnitName.Text + ' ABI client test ===\n", .{});');
     Lines.Add('');
     Lines.Add('    lf.framework.init() catch |err| {');
-    Lines.Add('        std.debug.print("[FATAL] init: {}\\n", .{err});');
+    Lines.Add('        std.debug.print("[FATAL] init: {}\n", .{err});');
     Lines.Add('        exit(1);');
     Lines.Add('    };');
     Lines.Add('    defer lf.framework.deinit();');
     Lines.Add('');
     Lines.Add('    run() catch |err| {');
-    Lines.Add('        std.debug.print("[FATAL] run: {}\\n", .{err});');
+    Lines.Add('        std.debug.print("[FATAL] run: {}\n", .{err});');
     Lines.Add('        lf.framework.shutdown();');
     Lines.Add('        exit(1);');
     Lines.Add('    };');
