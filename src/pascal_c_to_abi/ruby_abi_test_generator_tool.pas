@@ -15,22 +15,7 @@ uses
 function GenerateABIServiceTestRubyCode(Model: TPascal_Func_Model): TPascalStringList;
 function GenerateABICallTestRubyCode(Model: TPascal_Func_Model): TPascalStringList;
 
-const
-  GenerateCode_LogEnabled: boolean = False;
-
 implementation
-
-procedure Log(const Msg: TP_String); overload;
-begin
-  if GenerateCode_LogEnabled then
-    DoStatus('[ruby_abi_test_generator] %s', [Msg.Text]);
-end;
-
-procedure Log(const Fmt: TP_String; const Args: array of const); overload;
-begin
-  if GenerateCode_LogEnabled then
-    DoStatus('[ruby_abi_test_generator] %s', [PFormat(Fmt, Args)]);
-end;
 
 function IsStringABIType(const T: TP_String): boolean;
 begin
@@ -39,13 +24,19 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsSupportedABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('integer') or T.Same('longint') or T.Same('int64') or
     T.Same('cardinal') or T.Same('dword') or T.Same('longword') or
     T.Same('word') or T.Same('smallint') or T.Same('byte') or
     T.Same('uint64') or T.Same('double') or T.Same('single') or
-    T.Same('extended') or T.Same('real') or IsStringABIType(T);
+    T.Same('extended') or T.Same('real') or IsStringABIType(T) or
+    IsBytesABIType(T);
 end;
 
 function MakeApiName(const FuncName: TP_String): TP_String;
@@ -100,7 +91,9 @@ begin
      Result.Same('result') or Result.Same('status') or Result.Same('msg') or
      Result.Same('handle') or Result.Same('resp') or Result.Same('raw') or
      Result.Same('app') or Result.Same('tramp') or Result.Same('issue') or
-     Result.Same('deserialize') or Result.Same('ref_addr') or Result.Same('result_addr') then
+     Result.Same('deserialize') or Result.Same('ref_addr') or Result.Same('result_addr') or
+     Result.Same('v') or Result.Same('e') or Result.Same('n') or
+     Result.Same('bytes') or Result.Same('buf') or Result.Same('data') then
     Result := Result + '_param';
 end;
 
@@ -206,23 +199,14 @@ begin
       if not IsSupportedABIType(f.Params[j].PascalType) then
       begin
         Supported := False;
-        Log(PFormat('Skipped "%s": parameter "%s" has unsupported ABI type "%s"',
-          [f.Name.Text, f.Params[j].Name.Text, f.Params[j].PascalType.Text]));
         Break;
       end;
 
     if Supported and f.IsFunction and (not IsSupportedABIType(f.ReturnType)) then
-    begin
       Supported := False;
-      Log(PFormat('Skipped "%s": return type "%s" is not a supported ABI type',
-        [f.Name.Text, f.ReturnType.Text]));
-    end;
 
     if Supported and (f.Name.Len = 0) then
-    begin
       Supported := False;
-      Log('Skipped: routine with empty Name');
-    end;
 
     if Supported then
     begin
@@ -232,23 +216,28 @@ begin
   end;
 end;
 
+function PlaceholderLiteral(const T: TP_String): TP_String;
+begin
+  if IsStringABIType(T) then
+    Result := RubyStrLit('test')
+  else if IsBytesABIType(T) then
+    Result := '"\xA5\x5A\xA5\x5A\xA5\x5A\xA5\x5A".b'
+  else if T.Same('double') or T.Same('single') or T.Same('extended') or T.Same('real') then
+    Result := '3.14'
+  else
+    Result := '42';
+end;
+
 function BuildPlaceholderArgsLiteral(const Params: TParamArray): TP_String;
 var
   i: integer;
-  T: TP_String;
 begin
   Result := '[';
   for i := 0 to High(Params) do
   begin
     if i > 0 then
       Result.Append(', ');
-    T := Params[i].PascalType;
-    if IsStringABIType(T) then
-      Result.Append(RubyStrLit('test'))
-    else if T.Same('double') or T.Same('single') or T.Same('extended') or T.Same('real') then
-      Result.Append('3.14')
-    else
-      Result.Append('42');
+    Result.Append(PlaceholderLiteral(Params[i].PascalType));
   end;
   Result.Append(']');
 end;
@@ -438,30 +427,37 @@ begin
   Lines.Add('    end');
   Lines.Add('');
   Lines.Add('    def probe_client_identity');
-  Lines.Add('      param = LingoFuse::DataHandle.new(WHOAMI_API)');
-  Lines.Add('      begin');
-  Lines.Add('        param.write_string(' + #39 + #39 + ')');
-  Lines.Add('        param.position = 0');
-  Lines.Add('        raw = LingoFuse::Native.lf_call(DEFAULT_TARGET_APP, safe_addr(param), 10000)');
-  Lines.Add('        return false if raw.nil?');
-  Lines.Add('        resp = LingoFuse::DataHandle.from_raw(raw, true)');
+  Lines.Add('      30.times do');
+  Lines.Add('        param = nil');
+  Lines.Add('        resp = nil');
   Lines.Add('        begin');
-  Lines.Add('          return false if resp.size < 34');
-  Lines.Add('          resp.position = 0');
-  Lines.Add('          status = resp.read_uint8');
-  Lines.Add('          return false unless status == STATUS_OK');
-  Lines.Add('          uid_bytes = resp.read_bytes_exact(32)');
-  Lines.Add('          p2p_name = resp.read_string');
-  Lines.Add('          is_null = uid_bytes.bytes.all? { |b| b == 0 }');
-  Lines.Add('          puts "[INFO] client uid  = #{uid_bytes.unpack1(' + RubyStrLit('H*') + ')}"');
-  Lines.Add('          puts "[INFO] client p2p  = #{p2p_name}"');
-  Lines.Add('          !is_null');
+  Lines.Add('          param = LingoFuse::DataHandle.new(WHOAMI_API)');
+  Lines.Add('          param.write_string(' + #39 + #39 + ')');
+  Lines.Add('          param.position = 0');
+  Lines.Add('          raw = LingoFuse::Native.lf_call(DEFAULT_TARGET_APP, safe_addr(param), 2000)');
+  Lines.Add('          if raw');
+  Lines.Add('            resp = LingoFuse::DataHandle.from_raw(raw, true)');
+  Lines.Add('            if resp.size >= 34');
+  Lines.Add('              resp.position = 0');
+  Lines.Add('              status = resp.read_uint8');
+  Lines.Add('              if status == STATUS_OK');
+  Lines.Add('                uid_bytes = resp.read_bytes_exact(32)');
+  Lines.Add('                p2p_name = resp.read_string');
+  Lines.Add('                is_null = uid_bytes.bytes.all? { |b| b == 0 }');
+  Lines.Add('                puts "[INFO] client uid  = #{uid_bytes.unpack1(' + #39 + 'H*' + #39 + ')}"');
+  Lines.Add('                puts "[INFO] client p2p  = #{p2p_name}"');
+  Lines.Add('                return !is_null');
+  Lines.Add('              end');
+  Lines.Add('            end');
+  Lines.Add('          end');
+  Lines.Add('        rescue StandardError');
   Lines.Add('        ensure');
-  Lines.Add('          resp.dispose');
+  Lines.Add('          resp.dispose if resp');
+  Lines.Add('          param.dispose if param');
   Lines.Add('        end');
-  Lines.Add('      ensure');
-  Lines.Add('        param.dispose');
+  Lines.Add('        sleep(0.5)');
   Lines.Add('      end');
+  Lines.Add('      false');
   Lines.Add('    end');
   Lines.Add('');
   Lines.Add('    def test_service_initiates_call');
@@ -492,9 +488,28 @@ begin
   Lines.Add('    end');
   Lines.Add('');
   Lines.Add('    def wait_for_service');
-  Lines.Add('      30.times do');
-  Lines.Add('        return true if LingoFuse::Framework.check_api(DEFAULT_TARGET_APP, WHOAMI_API)');
-  Lines.Add('        sleep(0.2)');
+  Lines.Add('      60.times do');
+  Lines.Add('        param = nil');
+  Lines.Add('        resp = nil');
+  Lines.Add('        begin');
+  Lines.Add('          param = LingoFuse::DataHandle.new(WHOAMI_API)');
+  Lines.Add('          param.write_string(' + #39 + #39 + ')');
+  Lines.Add('          param.position = 0');
+  Lines.Add('          raw = LingoFuse::Native.lf_call(DEFAULT_TARGET_APP, safe_addr(param), 1000)');
+  Lines.Add('          if raw');
+  Lines.Add('            resp = LingoFuse::DataHandle.from_raw(raw, true)');
+  Lines.Add('            if resp.size >= 34');
+  Lines.Add('              resp.position = 0');
+  Lines.Add('              status = resp.read_uint8');
+  Lines.Add('              return true if status == STATUS_OK');
+  Lines.Add('            end');
+  Lines.Add('          end');
+  Lines.Add('        rescue StandardError');
+  Lines.Add('        ensure');
+  Lines.Add('          resp.dispose if resp');
+  Lines.Add('          param.dispose if param');
+  Lines.Add('        end');
+  Lines.Add('        sleep(0.5)');
   Lines.Add('      end');
   Lines.Add('      false');
   Lines.Add('    end');
@@ -662,7 +677,7 @@ begin
 end;
 
 procedure EmitCallTestTail(Lines: TPascalStringList;
-  const UnitName: TP_String;
+  const UnitName, NormalizedUnit: TP_String;
   const SupportedFuncs: TArryFunctionStructure;
   const ApiNames: TPascalStringList);
 var
@@ -678,7 +693,6 @@ begin
   Lines.Add('      LingoFuse::NativeBridge.start if LingoFuse::NativeBridge.available?');
   Lines.Add('');
   Lines.Add('      LingoFuse::Framework.reset_prepare');
-  Lines.Add('      LingoFuse::Framework.prepare_service(DEFAULT_ENDPOINT, DEFAULT_ENDPOINT)');
   Lines.Add('');
   Lines.Add('      client_app = LingoFuse::AppHandle.new(CLIENT_APP_NAME, ' + RubyStrLit('client test app') + ')');
   Lines.Add('      client_app.register_call(REPORT_IDENTITY_API, ' + RubyStrLit('report service identity') + ', &method(:cb_report_service_identity))');
@@ -706,7 +720,7 @@ begin
   Lines.Add('        puts ' + RubyStrLit('[OK] service-initiated call'));
   Lines.Add('        uid = STATE[:mutex].synchronize { STATE[:service_uid] }');
   Lines.Add('        p2p = STATE[:mutex].synchronize { STATE[:service_p2p] }');
-  Lines.Add('        puts "[INFO] service uid = #{uid.unpack1(' + RubyStrLit('H*') + ')}" if uid');
+  Lines.Add('        puts "[INFO] service uid = #{uid.unpack1(' + #39 + 'H*' + #39 + ')}" if uid');
   Lines.Add('        puts "[INFO] service p2p = #{p2p}"');
   Lines.Add('      else');
   Lines.Add('        report_fail(' + RubyStrLit('service-initiated call') + ', ' + RubyStrLit('timeout or no uid') + ')');
@@ -735,7 +749,7 @@ begin
   Lines.Add('  end');
   Lines.Add('end');
   Lines.Add('');
-  Lines.Add(UnitName.ReplaceChar(#32#9'./\@', '_') + '_abi::CallTest.main');
+  Lines.Add(NormalizedUnit + '_abi::CallTest.main');
   Lines.Add('');
 end;
 
@@ -746,30 +760,21 @@ var
 begin
   Result := nil;
   if Model = nil then
-  begin
-    Log('GenerateABIServiceTestRubyCode: Model is nil');
     Exit;
-  end;
 
   UnitName := Model.UnitName;
   if UnitName.Len = 0 then
-  begin
-    Log('GenerateABIServiceTestRubyCode: UnitName is empty');
     Exit;
-  end;
 
   NormalizedUnit := MakeApiName(UnitName);
   AppName := NormalizedUnit + '_abi';
   P2PName := NormalizedUnit + '_service_test_p2p';
   Endpoint := 'ipc:' + AppName;
 
-  Log(PFormat('Generating Ruby ABI service test for unit "%s"', [UnitName.Text]));
-
   Lines := TPascalStringList.Create;
   try
     EmitServiceTestBody(Lines, UnitName, NormalizedUnit, AppName, P2PName, Endpoint);
     Result := Lines;
-    Log(PFormat('Generated %d lines for Ruby ABI service test', [Lines.Count]));
   finally
     if Result <> Lines then
       Lines.Free;
@@ -788,27 +793,18 @@ var
 begin
   Result := nil;
   if Model = nil then
-  begin
-    Log('GenerateABICallTestRubyCode: Model is nil');
     Exit;
-  end;
 
   UnitName := Model.UnitName;
   if UnitName.Len = 0 then
-  begin
-    Log('GenerateABICallTestRubyCode: UnitName is empty');
     Exit;
-  end;
 
   NormalizedUnit := MakeApiName(UnitName);
   AppName := NormalizedUnit + '_abi';
   P2PName := NormalizedUnit + '_service_test_p2p';
   Endpoint := 'ipc:' + AppName;
 
-  Log(PFormat('Generating Ruby ABI call test for unit "%s"', [UnitName.Text]));
-
   SupportedFuncs := CollectSupportedFunctions(Model);
-  Log(PFormat('Call test exercises %d ABI APIs', [Length(SupportedFuncs)]));
 
   ApiNames := TPascalStringList.Create;
   Lines := TPascalStringList.Create;
@@ -838,10 +834,9 @@ begin
         EmitProcedureTest(Lines, ApiNames[i], F);
     end;
 
-    EmitCallTestTail(Lines, UnitName, SupportedFuncs, ApiNames);
+    EmitCallTestTail(Lines, UnitName, NormalizedUnit, SupportedFuncs, ApiNames);
 
     Result := Lines;
-    Log(PFormat('Generated %d lines for Ruby ABI call test', [Lines.Count]));
   finally
     ApiNames.Free;
   end;
