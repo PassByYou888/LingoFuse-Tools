@@ -6,11 +6,9 @@ unit fortran_abi_call_generator_tool;
 interface
 
 uses
-  Z.Core,
-  Z.PascalStrings, Z.UPascalStrings,
+  Z.Core, Z.PascalStrings, Z.UPascalStrings,
   Z.Status, Z.Json, Z.UnicodeMixedLib, Z.ListEngine,
-  Z.Pascal_Func_Model,
-  Z.Parsing, code_decl_to_abi_registry;
+  Z.Pascal_Func_Model, Z.Parsing, code_decl_to_abi_registry;
 
 function GenerateABICallFortranCode(Model: TPascal_Func_Model): TPascalStringList;
 
@@ -41,6 +39,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_Bytes(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Fortran_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -63,6 +66,8 @@ begin
     Result := 'real(c_float)'
   else if IsStringABIType(T) then
     Result := 'character(len=:), allocatable'
+  else if ABI_Type_Is_Bytes(T) then
+    Result := 'character(len=1, kind=c_char), allocatable'
   else
     Result := '';
 end;
@@ -157,6 +162,7 @@ begin
   Result :=
     S.Same('req') or S.Same('resp') or S.Same('ret') or S.Same('rc') or
     S.Same('lf_rc') or S.Same('status_byte') or S.Same('str_status') or
+    S.Same('bytes_size') or
     S.Same('app') or S.Same('uid') or S.Same('p2p_name') or
     S.Same('abi_targetapp') or S.Same('abi_timeout') or S.Same('abi_lasterror') or
     S.Same('abi_status_ok') or S.Same('abi_status_error');
@@ -322,9 +328,12 @@ begin
   for i := 0 to High(Params) do
   begin
     PName := MakeSafeFortranIdent(Params[i].Name, i);
-    PTyp := ABI_Type_To_Fortran_Decl(Params[i].PascalType);
+    if ABI_Type_Is_Bytes(Params[i].PascalType) then
+      PTyp := 'character(len=1, kind=c_char), dimension(:), intent(in)'
+    else
+      PTyp := ABI_Type_To_Fortran_Decl(Params[i].PascalType) + ', intent(in)';
     if Result <> '' then Result.Append(sLineBreak);
-    Result.Append('    ' + PTyp + ', intent(in) :: ' + PName);
+    Result.Append('    ' + PTyp + ' :: ' + PName);
   end;
 end;
 
@@ -357,24 +366,64 @@ procedure EmitWriteParams(Lines: TPascalStringList; const Params: TParamArray;
   const FailRc: Integer);
 var
   i: integer;
-  PName, WriteFn: TP_String;
+  PName, WriteFn, FailRcStr: TP_String;
 begin
+  FailRcStr := umlIntToStr(FailRc) + '_c_int32_t';
   for i := 0 to High(Params) do
   begin
     PName := MakeSafeFortranIdent(Params[i].Name, i);
-    WriteFn := ABI_Type_To_Write_Func(Params[i].PascalType);
-    Lines.Add('    lf_rc = ' + WriteFn + '(req, ' + PName + ')');
-    Lines.Add('    if (lf_rc /= 1) then');
-    Lines.Add('      rc = ' + umlIntToStr(FailRc) + '_c_int32_t');
-    Lines.Add('      call lf_data_destroy(req)');
-    Lines.Add('      return');
-    Lines.Add('    end if');
+    if ABI_Type_Is_Bytes(Params[i].PascalType) then
+    begin
+      Lines.Add('    lf_rc = lf_data_write_int32(req, int(size(' + PName + '), c_int32_t))');
+      Lines.Add('    if (lf_rc /= 1) then');
+      Lines.Add('      rc = ' + FailRcStr);
+      Lines.Add('      call lf_data_destroy(req)');
+      Lines.Add('      return');
+      Lines.Add('    end if');
+      Lines.Add('    if (size(' + PName + ') > 0) then');
+      Lines.Add('      lf_rc = lf_data_write_bytes(req, ' + PName + ', int(size(' + PName + '), c_int64_t))');
+      Lines.Add('      if (lf_rc /= 1) then');
+      Lines.Add('        rc = ' + FailRcStr);
+      Lines.Add('        call lf_data_destroy(req)');
+      Lines.Add('        return');
+      Lines.Add('      end if');
+      Lines.Add('    end if');
+    end
+    else
+    begin
+      WriteFn := ABI_Type_To_Write_Func(Params[i].PascalType);
+      Lines.Add('    lf_rc = ' + WriteFn + '(req, ' + PName + ')');
+      Lines.Add('    if (lf_rc /= 1) then');
+      Lines.Add('      rc = ' + FailRcStr);
+      Lines.Add('      call lf_data_destroy(req)');
+      Lines.Add('      return');
+      Lines.Add('    end if');
+    end;
   end;
 end;
 
 procedure EmitReadRetAndCleanup(Lines: TPascalStringList; const RetType: TP_String);
 begin
-  if IsStringABIType(RetType) then
+  if ABI_Type_Is_Bytes(RetType) then
+  begin
+    Lines.Add('    lf_rc = lf_data_read_int32(resp, bytes_size)');
+    Lines.Add('    if (lf_rc /= 1 .or. bytes_size < 0) then');
+    Lines.Add('      call lf_data_destroy(resp)');
+    Lines.Add('      rc = 6_c_int32_t');
+    Lines.Add('      return');
+    Lines.Add('    end if');
+    Lines.Add('    allocate(character(len=1, kind=c_char) :: ret(bytes_size))');
+    Lines.Add('    if (bytes_size > 0) then');
+    Lines.Add('      lf_rc = int(lf_data_read_bytes(resp, ret, int(bytes_size, c_int64_t)), c_int)');
+    Lines.Add('      if (lf_rc /= bytes_size) then');
+    Lines.Add('        call lf_data_destroy(resp)');
+    Lines.Add('        rc = 6_c_int32_t');
+    Lines.Add('        return');
+    Lines.Add('      end if');
+    Lines.Add('    end if');
+    Lines.Add('    call lf_data_destroy(resp)');
+  end
+  else if IsStringABIType(RetType) then
   begin
     Lines.Add('    call lf_data_read_string(resp, ret, str_status)');
     Lines.Add('    call lf_data_destroy(resp)');
@@ -403,7 +452,12 @@ begin
   ParamDeclLines := BuildParamDeclLines(F.Params);
   ParamSig := BuildSignatureParamListWithPrefix(AddrParamName, F.Params);
 
-  if IsStringABIType(F.ReturnType) then
+  if ABI_Type_Is_Bytes(F.ReturnType) then
+  begin
+    RetDecl := '    character(len=1, kind=c_char), allocatable, intent(out) :: ret(:)';
+    RetInit := '';
+  end
+  else if IsStringABIType(F.ReturnType) then
   begin
     RetDecl := '    character(len=:), allocatable, intent(out) :: ret';
     RetInit := '    ret = ' + FortranStrLit('');
@@ -425,9 +479,12 @@ begin
   Lines.Add('    integer(c_int) :: lf_rc');
   Lines.Add('    integer(c_int8_t) :: status_byte');
   Lines.Add('    integer(c_int64_t) :: str_status');
+  Lines.Add('    integer(c_int32_t) :: bytes_size');
   Lines.Add('');
   Lines.Add('    rc = -1_c_int32_t');
-  Lines.Add(RetInit);
+  if RetInit <> '' then
+    Lines.Add(RetInit);
+
   Lines.Add('    req = lf_data_create(' + FortranStrLit(ApiName) + ')');
   Lines.Add('    if (.not. c_associated(req)) then');
   Lines.Add('      rc = 1_c_int32_t');
