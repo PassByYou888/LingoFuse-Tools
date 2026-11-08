@@ -7,23 +7,39 @@
 
 ## 1. What This Repository Is
 
-**LingoFuse-Tools** is a suite of three code generators for the [LingoFuse](https://github.com/PassByYou888/LingoFuse) cross-language RPC framework.
+**LingoFuse-Tools** is the **interface generation layer** of the [LingoFuse](https://github.com/PassByYou888/LingoFuse) cross-language communication foundation.
 
-Each tool takes a **Pascal unit** or a **C header** as input and emits **service-side and caller-side source code** for multiple target languages, along with a **companion Markdown README** for every artifact.
+It solves one problem: **a cross-language interface is expensive to maintain, not expensive to write once.** One `Add(a, b: Integer): Integer` must exist in Python, C++, C#, Rust, Go, Java, JS, TS, Erlang, Julia, Zig, Swift, Ruby, Fortran, Dart, R — plus tests, build scripts, and docs. Change the signature once, and every language can silently drift out of alignment.
 
-**Three tools, three protocols:**
+LingoFuse-Tools turns the interface from a **maintenance burden** into a **generated artifact**. You maintain **one declaration** (a Pascal unit or a C header). The toolchain projects it onto every target language, every protocol, every test and build script. Change the declaration, regenerate, all targets refresh together. **There is no hand-maintained per-language copy that can drift, because there is no hand-maintained per-language copy.**
+
+**Three tools, three protocols, one input contract:**
 
 | Tool | Protocol | Directory |
 |------|----------|-----------|
 | `code_decl_to_abi` | LingoFuse binary ABI | `src/pascal_c_to_abi/` |
-| `code_decl_to_json_abi` | HTTP + JSON (via bridge) | `src/pascal_c_to_json_abi/` |
+| `code_decl_to_json_abi` | HTTP + JSON (via `bridge.py`) | `src/pascal_c_to_json_abi/` |
 | `code_decl_to_mcp` | Model Context Protocol | `src/pascal_c_to_mcp/` |
 
-**Every tool supports three entry points** — GUI, CLI, and MCP API — and **ships with a self-contained knowledge base** for full AI takeover.
+**Every tool supports three entry points** — GUI, CLI, and MCP API — and **ships with a self-contained knowledge base** for full AI takeover. GUI/CLI/MCP outputs are byte-identical; MCP `internal_call_*` calls the same handlers the GUI uses.
 
 ---
 
-## 2. Authoritative Documents — Read in This Order
+## 2. The Three Tool Lines: How to Choose
+
+| Scenario | Tool |
+|---|---|
+| Both ends can load the LingoFuse runtime; numeric/string-heavy payloads; high concurrency | `code_decl_to_abi` |
+| One end is a browser, an external HTTP client, or a language with no LingoFuse binding | `code_decl_to_json_abi` |
+| The function should become an MCP tool an AI agent can discover | `code_decl_to_mcp` |
+
+**Language coverage (deduplicated):** 20 target languages. `code_decl_to_abi` covers 17 with both Service and Call. `code_decl_to_json_abi` covers 20 with both Service and Call, **except** JavaScript (browser), PHP, and Delphi which are **Call-only**. `code_decl_to_mcp` covers 4 (Pascal, Python, C++, C#).
+
+**Delphi, PHP, and JavaScript (browser) appear only in the JSON line, and only on the Call side.** They have no Service generation and no ABI/MCP generator.
+
+---
+
+## 3. Authoritative Documents — Read in This Order
 
 An LLM agent should read the following documents **in order**. Each document is written to be consumed without reading the tool's source code.
 
@@ -54,6 +70,8 @@ Before feeding a declaration to any tool, read the corresponding rule document. 
 | C | `src/pascal_c_to_abi/C_code_abi_rule.md` |
 | MCP-specific contracts | `src/pascal_c_to_mcp/MCP_API_Contract.md` |
 
+> **Silently dropped** means: not "partially generated", not "runtime error", but **the entire declaration is excluded during normalization**. The generator logs a reason; it does not emit a broken artifact.
+
 ### Step 4 — Tool description authoring (critical for agents)
 
 | Document | Path | Purpose |
@@ -62,39 +80,38 @@ Before feeding a declaration to any tool, read the corresponding rule document. 
 
 ---
 
-## 3. Canonical Q&A for Agents
+## 4. Canonical Q&A for Agents
 
 ### Q: What does this repository do?
 
 A: It generates cross-language binding code. Give it a Pascal unit or C header; it produces service-side and caller-side code for multiple target languages, plus a companion Markdown README for every artifact.
 
-### Q: Which tool should I use?
+### Q: What is the "single source of truth"?
 
-| Scenario | Tool |
-|----------|------|
-| Both ends are LingoFuse-native, high-concurrency, numeric-heavy payloads | `code_decl_to_abi` |
-| One end is a browser, an external HTTP client, or a language without a LingoFuse binding | `code_decl_to_json_abi` |
-| You want to expose functions as MCP tools to an AI agent | `code_decl_to_mcp` |
+A: `TPascal_Func_Model` (the LV1 intermediate model). Every generator — for every language, every protocol, every test — reads from this same model. Code and companion Markdown are generated in the same pass, so **they never drift out of sync**.
 
 ### Q: How do I drive a tool?
 
 | Entry point | How |
 |-------------|-----|
-| **GUI** | Launch the executable with **no arguments**; drive the five tabs |
+| **GUI** | Launch the executable with **no arguments**; drive the five tabs (Welcome → Source Code → Source ↔ JSON → JSON ↔ Model → Final Source) |
 | **CLI** | Launch with **arguments**; source and target languages are detected from file extensions |
 | **MCP API** | Register with the `agent_main_app` beacon; drive through MCP tool calls |
+| **Programmatic** | Call `GenerateXxxCode(Model)` from your own Pascal unit; the generators are ordinary Pascal units |
 
 ### Q: What MCP tools does each tool expose?
 
-| Tool | MCP tools |
-|------|-----------|
-| `code_decl_to_abi` | 31 |
-| `code_decl_to_json_abi` | 3 (`Generate` / `ListFiles` / `GetFile`) |
-| `code_decl_to_mcp` | 11 |
+| Tool | MCP tools | Notes |
+|------|-----------|-------|
+| `code_decl_to_abi` | 31 | Per-language Convert + Read, plus pipeline-level tools |
+| `code_decl_to_json_abi` | 3 | `Generate` / `ListFiles` / `GetFile` — deliberate minimal surface |
+| `code_decl_to_mcp` | 11 | `SetSourceCode` / `ConvertToXxxMCP` / `GetLastXxxCode` / `Readme` etc. |
+
+**Three-step MCP workflow** (for `code_decl_to_mcp`): `SetSourceCode` → `ConvertToXxxMCP` → `GetLastXxxCode` / `Readme`. No GUI interaction, no CLI invocation, indistinguishable from calling any other MCP tool.
 
 ### Q: What types are supported?
 
-Only three normalized type families:
+Only three normalized type families. **Anything outside these three families causes the entire declaration to be silently dropped.**
 
 - **Integer** — `integer`, `int64`, `cardinal`, `longint`, `dword`, `word`, `smallint`, `byte`, `uint64`, `longword`
 - **Float** — `double`, `single`, `extended`, `real`
@@ -102,27 +119,29 @@ Only three normalized type families:
 
 **Everything else causes the entire declaration to be silently dropped.** This includes `Boolean`, `Variant`, arrays, records, classes, interfaces, enums, sets, generics, pointers, function pointers, `Currency`, `Comp`, and `TDateTime`.
 
-**Workaround**: serialize complex values into a JSON `string` and deserialize on the receiving side.
+**Workaround**: serialize complex values into a JSON `string` and deserialize on the receiving side. This is the **only supported escape hatch** for complex types.
+
+**Procedures (no return value)** are valid — they generate `void` return types in target languages. Only the parameter and return **types** are restricted, not the function/procedure distinction.
 
 ### Q: What are the known pitfalls?
 
-The three knowledge bases document all known pitfalls with stable IDs:
+The knowledge bases document all known pitfalls with stable IDs. See `LingoFuse_Pascal_Complete_Guide.md` (under `src/common/`) for the Pascal core-layer pitfalls:
 
-| ID prefix | Subsystem | Document |
-|-----------|-----------|----------|
-| `LF-APP-*` | Application/handle layer | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-CB-*` | Callback layer | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-DATA-*` | Data handle layer | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-NET-*` | Network preparation | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-CALL-*` | Remote call | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-SEQ-*` | Sequenced notify | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-CHK-*` | Query/cache | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-OPT-*` | Runtime options | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-CLEAN-*` | Cleanup/lifecycle | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-THREAD-*` | Threading model | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-TYPE-*` | Types/compilation | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-XLANG-*` | Cross-language data | `LingoFuse_Pascal_Complete_Guide.md` |
-| `LF-JSON-*` | JSON usage layer | `LingoFuse_Pascal_Complete_Guide.md` |
+| ID prefix | Subsystem |
+|-----------|-----------|
+| `LF-APP-*` | Application/handle layer |
+| `LF-CB-*` | Callback layer |
+| `LF-DATA-*` | Data handle layer |
+| `LF-NET-*` | Network preparation |
+| `LF-CALL-*` | Remote call |
+| `LF-SEQ-*` | Sequenced notify |
+| `LF-CHK-*` | Query/cache |
+| `LF-OPT-*` | Runtime options |
+| `LF-CLEAN-*` | Cleanup/lifecycle |
+| `LF-THREAD-*` | Threading model |
+| `LF-TYPE-*` | Types/compilation |
+| `LF-XLANG-*` | Cross-language data |
+| `LF-JSON-*` | JSON usage layer |
 
 **The four iron rules** (from `LingoFuse_Pascal_Complete_Guide.md`):
 
@@ -209,15 +228,20 @@ Any error        : {"error": "<msg>"}
 
 **The bridge must always be running** for any HTTP/JSON call artifact to work. The service itself does not go through the bridge.
 
+### Q: What is the "no drift" guarantee?
+
+All three tools generate **code, tests, build scripts, and companion Markdown from the same `TPascal_Func_Model` in the same pass**. There is no separate "interface definition" that can drift from "interface implementation". This is structurally different from gRPC's `.proto`-to-stub model: `.proto` is a **separate artifact**; `TPascal_Func_Model` is **derived directly from the implementation source**.
+
 ---
 
-## 4. File Path Index
+## 5. File Path Index
 
 ### Root
 
 ```
 LICENSE
 readme.md
+llms.txt
 .gitmodules
 ```
 
@@ -237,21 +261,17 @@ code_decl_to_abi.lpr             # Main program (GUI + CLI dispatch)
 code_decl_to_abi_cmdline.pas     # CLI frontend
 code_decl_to_abi_frm.pas / .lfm  # GUI frontend
 code_decl_to_abi_mcp_api_tool_provider_unit.pas  # 31 MCP tools
-pas_abi_service_generator_tool.pas   # Pascal service generator
-pas_abi_call_generator_tool.pas      # Pascal call generator
-py_abi_service_generator_tool.pas    # Python service generator
-py_abi_call_generator_tool.pas       # Python call generator
-cpp_abi_service_generator_tool.pas   # C++ service generator
-cpp_abi_call_generator_tool.pas      # C++ call generator
-cpp_abi_cmake_generator_tool.pas     # CMake + test program generator
-csharp_abi_service_generator_tool.pas  # C# service generator
-csharp_abi_call_generator_tool.pas     # C# call generator
-csharp_abi_test_generator_tool.pas     # C# test program generator
+<lang>_abi_service_generator_tool.pas   # <lang> = pas / py / cpp / csharp / rust / go / java / nodejs / ts / erlang / julia / zig / swift / ruby / fortran / dart / r
+<lang>_abi_call_generator_tool.pas      # same <lang> set
+<lang>_abi_test_generator_tool.pas      # per-language test program (where applicable)
+cpp_abi_cmake_generator_tool.pas        # CMake + C++ test program
 pascal_code_abi_rule.md          # Pascal declaration rule
 C_code_abi_rule.md               # C declaration rule
 code_decl_to_abi_OPERATIONS.md   # Developer knowledge base
 code_decl_to_abi_USER_GUIDE.md   # End-to-end user guide
 ```
+
+**Generator naming pattern**: every target language contributes `<lang>_abi_service_generator_tool.pas` and `<lang>_abi_call_generator_tool.pas`. The 17 `<lang>` values are: `pas`, `py`, `cpp`, `csharp`, `rust`, `go`, `java`, `nodejs`, `ts`, `erlang`, `julia`, `zig`, `swift`, `ruby`, `fortran`, `dart`, `r`.
 
 ### `src/pascal_c_to_json_abi/`
 
@@ -260,22 +280,17 @@ code_decl_to_json_abi.lpr        # Main program
 code_decl_to_json_abi_cmdline.pas # CLI frontend
 code_decl_to_abi_json_frm.pas / .lfm  # GUI frontend
 code_decl_to_json_abi_mcp_api_tool_provider_unit.pas  # 3 MCP tools
-http_pas_abi_service_generator_tool.pas   # Pascal service generator
-http_pas_abi_call_generator_tool.pas      # Pascal call generator
-http_py_abi_service_generator_tool.pas    # Python service generator
-http_py_abi_call_generator_tool.pas       # Python call generator
-http_cpp_abi_service_generator_tool.pas   # C++ service generator
-http_cpp_abi_call_generator_tool.pas      # C++ call generator
-http_csharp_abi_service_generator_tool.pas  # C# service generator
-http_csharp_abi_call_generator_tool.pas     # C# call generator
-http_csharp_abi_test_generator_tool.pas     # C# test program generator
-http_js_abi_call_generator_tool.pas       # JavaScript call generator
-http_cmake_generator_tool.pas             # CMake + C++ test driver generator
+http_<lang>_abi_service_generator_tool.pas   # same 17 <lang> as ABI line
+http_<lang>_abi_call_generator_tool.pas      # same 17 <lang>
+http_js_abi_call_generator_tool.pas          # JavaScript (browser) — Call only
+http_cmake_generator_tool.pas                # CMake + C++ test driver
 C_code_abi_rule.md               # C declaration rule
 pascal_code_abi_rule.md          # Pascal declaration rule
 code_decl_to_json_abi_knowledge_base.md  # Developer knowledge base
 code_decl_to_json_abi_USER_GUIDE.md      # End-to-end user guide
 ```
+
+**Note**: the JSON line additionally has `http_js_abi_call_generator_tool.pas` (Call-only) and `http_bridge_setup_generator_tool.pas` (bridge launch scripts). The 20 target languages are the 17 ABI languages + JavaScript (browser) + PHP + Delphi — but PHP and Delphi also appear in the ABI directory as `<lang>_abi_*` generators for Call-only generation.
 
 ### `src/pascal_c_to_mcp/`
 
@@ -303,47 +318,63 @@ Submodule providing `Z.Core`, `Z.Json`, `Z.Pascal_Func_Model`, `Z.Pascal_Func_To
 
 ---
 
-## 5. Glossary
+## 6. Glossary
 
 | Term | Meaning |
 |------|---------|
 | **LV0** | Raw parser output — syntactic metadata (source positions, raw type spellings, modifiers) |
 | **LV1** | Normalized model (`TPascal_Func_Model`) — the only intermediate that generators see |
 | **`TPascal_Func_Model`** | The single source of truth for all code and documentation generation |
-| **Beacon** | LingoFuse tool registry — agents discover available tools here |
+| **Beacon** | LingoFuse tool registry — agents discover available tools here (default `agent_main_app`) |
 | **App name** | LingoFuse application identity; matches case-insensitively on the network |
 | **Data handle** (`TDataHnd`) | Opaque byte buffer containing an API name and payload |
 | **Sequenced Notify** | FIFO-ordered notification for a given `(App, API)` pair |
 | **MCP** | Model Context Protocol — the agent-to-tool communication standard |
 | **Bridge** | `bridge.py` — the HTTP↔RPC forwarder required by all HTTP/JSON call artifacts |
 | **Companion Markdown** | The `.md` file generated alongside every code artifact; contains build/test/deploy instructions |
+| **Companion Markdown is the real deliverable** | The generated `.md` contains the test program, interface reference, build instructions, and CMake script. Read it before building or deploying. |
 
 ---
 
-## 6. Repository Metadata
+## 7. Repository Metadata
 
 - **Owner**: [PassByYou888](https://github.com/PassByYou888)
 - **License**: MIT (consistent with the LingoFuse ecosystem)
 - **Language**: English throughout (documents and generated artifacts)
 - **Build system**: Lazarus / FPC (`lazbuild`) or Delphi
 - **Cross-platform**: Windows, Linux, macOS (any platform with a UI subsystem)
-- **Roadmap**: 30 target programming languages
+- **Target languages (deduplicated)**: **20**
+  - `code_decl_to_abi`: 17 (Service + Call)
+  - `code_decl_to_json_abi`: 20 (Service + Call, except JS/PHP/Delphi Call-only)
+  - `code_decl_to_mcp`: 4 (Pascal, Python, C++, C#)
+- **Roadmap**: 30 target programming languages (mechanical 8-step extension process; no architectural ceiling)
 
 ---
 
-## 7. Ecosystem Links
+## 8. Ecosystem Links
 
 Only repositories that are part of the LingoFuse ecosystem:
 
 | Repository | Description |
 |------------|-------------|
-| [LingoFuse](https://github.com/PassByYou888/LingoFuse) | Core cross-language RPC framework |
+| [LingoFuse](https://github.com/PassByYou888/LingoFuse) | Core cross-language RPC framework / distributed system foundation |
 | [LingoFuse-Tools](https://github.com/PassByYou888/LingoFuse-Tools) | **This repository.** Code generator suite |
 | [LingoFuse-pasAgent-v3](https://github.com/PassByYou888/LingoFuse-pasAgent-v3) | Pascal agent runtime (multimodal) |
 | [LingoFuse-pasAgent](https://github.com/PassByYou888/LingoFuse-pasAgent) | Previous-generation Pascal agent |
 | [LingoFuse-cppAgent](https://github.com/PassByYou888/LingoFuse-cppAgent) | C++ integration layer |
+| [zIPC](https://github.com/PassByYou888/zIPC) | Same-machine IPC engine under LingoFuse |
+
+---
+
+## 9. What This Repository Is Not
+
+- **Not a general-purpose code-generation framework.** It generates cross-language bindings for LingoFuse. It does not generate ORMs, REST clients, protobuf stubs, or anything unrelated to LingoFuse's wire protocol.
+- **Not an IDL-first system.** There is no separate IDL. The declaration **is** the implementation. This is why there is no IDL-drift failure mode.
+- **Not a "one command, all languages, no setup" tool.** The generators themselves must be built (FPC / Lazarus). Target-language build scripts require the target language's toolchain to be installed. The generator guarantees **the generated code is complete**; it does not guarantee **your machine has every compiler pre-installed**.
+- **Not suitable for object-in / object-out interfaces.** Types outside the three ABI families are dropped. You must make a serialization decision at the declaration level. This is deliberate friction, not a defect.
+- **Not a community-supported project.** Single maintainer. Issues are answered, but no SLA, no Stack Overflow, no third-party tutorials.
 
 ---
 
 *This file follows the [llms.txt](https://llmstxt.org/) convention. It is intended to be consumed by LLM agents and crawlers.*
-*Last updated: 2026-09-28*
+*Last updated: 2026-11-08*
