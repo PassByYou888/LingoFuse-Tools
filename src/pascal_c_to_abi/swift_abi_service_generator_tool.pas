@@ -38,6 +38,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Swift_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -60,6 +65,8 @@ begin
     Result := 'Float'
   else if IsStringABIType(T) then
     Result := 'String'
+  else if IsBytesABIType(T) then
+    Result := '[UInt8]'
   else
     Result := '';
 end;
@@ -120,6 +127,8 @@ function ABI_Type_To_Swift_Default(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then
     Result := '""'
+  else if IsBytesABIType(T) then
+    Result := '[]'
   else if T.Same('double') or T.Same('single') or T.Same('extended') or T.Same('real') then
     Result := '0.0'
   else
@@ -396,6 +405,31 @@ begin
     Result := Prefix + ', ' + Args;
 end;
 
+procedure EmitBytesHelpers(Lines: TPascalStringList);
+begin
+  Lines.Add('    private static func readBytesParam(_ h: DataHandle) throws -> [UInt8] {');
+  Lines.Add('        let n = try h.readInt32()');
+  Lines.Add('        if n < 0 {');
+  Lines.Add('            throw LingoFuseError.readFailed(operation: "readBytesParam", expected: 0, actual: Int(n))');
+  Lines.Add('        }');
+  Lines.Add('        if n == 0 {');
+  Lines.Add('            return []');
+  Lines.Add('        }');
+  Lines.Add('        return try h.readBytesExact(Int(n))');
+  Lines.Add('    }');
+  Lines.Add('');
+  Lines.Add('    private static func writeBytesParam(_ h: DataHandle, _ v: [UInt8]) throws {');
+  Lines.Add('        guard let n32 = Int32(exactly: v.count) else {');
+  Lines.Add('            throw LingoFuseError.writeFailed(operation: "writeBytesParam", expected: v.count, actual: Int64(0))');
+  Lines.Add('        }');
+  Lines.Add('        try h.writeInt32(n32)');
+  Lines.Add('        if !v.isEmpty {');
+  Lines.Add('            try h.writeBytes(v)');
+  Lines.Add('        }');
+  Lines.Add('    }');
+  Lines.Add('');
+end;
+
 procedure EmitInternalStub(Lines: TPascalStringList;
   const ApiName: TP_String; const F: TFunctionStructure);
 var
@@ -453,8 +487,13 @@ begin
   begin
     PName := MakeSafeSwiftIdent(F.Params[i].Name, i);
     PTyp := ABI_Type_To_Swift_Decl(F.Params[i].PascalType);
-    ReadFunc := ABI_Type_To_Swift_ReadFunc(F.Params[i].PascalType);
-    Lines.Add('            let ' + PName + ': ' + PTyp + ' = try input.' + ReadFunc + '()');
+    if IsBytesABIType(F.Params[i].PascalType) then
+      Lines.Add('            let ' + PName + ': ' + PTyp + ' = try readBytesParam(input)')
+    else
+    begin
+      ReadFunc := ABI_Type_To_Swift_ReadFunc(F.Params[i].PascalType);
+      Lines.Add('            let ' + PName + ': ' + PTyp + ' = try input.' + ReadFunc + '()');
+    end;
   end;
 
   ArgList := BuildArgList(F.Params);
@@ -464,8 +503,13 @@ begin
   begin
     Lines.Add('            let result = internalCall_' + ApiName + '(' + Head + ')');
     Lines.Add('            try output.writeUInt8(statusOK)');
-    WriteFunc := ABI_Type_To_Swift_WriteFunc(F.ReturnType);
-    Lines.Add('            try output.' + WriteFunc + '(result)');
+    if IsBytesABIType(F.ReturnType) then
+      Lines.Add('            try writeBytesParam(output, result)')
+    else
+    begin
+      WriteFunc := ABI_Type_To_Swift_WriteFunc(F.ReturnType);
+      Lines.Add('            try output.' + WriteFunc + '(result)');
+    end;
   end
   else
     Lines.Add('            internalNotify_' + ApiName + '(' + Head + ')');
@@ -583,6 +627,8 @@ begin
     Lines.Add('    public static let statusOK: UInt8 = 0x00');
     Lines.Add('    public static let statusError: UInt8 = 0xFF');
     Lines.Add('');
+
+    EmitBytesHelpers(Lines);
 
     UsedApiNames.Clear;
     for i := 0 to High(SupportedFuncs) do
