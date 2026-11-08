@@ -43,6 +43,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Dart_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -63,6 +68,8 @@ begin
     Result := 'double'
   else if T.Same('single') then
     Result := 'double'
+  else if IsBytesABIType(T) then
+    Result := 'Uint8List'
   else if IsStringABIType(T) then
     Result := 'String'
   else
@@ -224,7 +231,9 @@ begin
   begin
     if i > 0 then
       Result := Result + ', ';
-    if IsStringABIType(Params[i].PascalType) then
+    if IsBytesABIType(Params[i].PascalType) then
+      Result := Result + 'Uint8List.fromList(<int>[0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A])'
+    else if IsStringABIType(Params[i].PascalType) then
       Result := Result + DartStrLit('test')
     else if Params[i].PascalType.Same('double') or
       Params[i].PascalType.Same('single') or
