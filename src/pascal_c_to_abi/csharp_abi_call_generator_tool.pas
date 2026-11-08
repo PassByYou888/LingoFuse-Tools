@@ -38,6 +38,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_CSharp_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'int'
@@ -50,6 +55,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'double'
   else if T.Same('single') then Result := 'float'
   else if IsStringABIType(T) then Result := 'string'
+  else if IsBytesABIType(T) then Result := 'byte[]'
   else Result := '';
 end;
 
@@ -294,6 +300,28 @@ begin
   end;
 end;
 
+procedure EmitBlobHelperClass(Lines: TPascalStringList);
+begin
+  Lines.Add('    internal static class LfAbiBlobHelper');
+  Lines.Add('    {');
+  Lines.Add('        public static byte[] Read(DataHandle h)');
+  Lines.Add('        {');
+  Lines.Add('            int len = h.ReadInt32();');
+  Lines.Add('            if (len < 0) throw new LingoFuseException("Invalid blob length: " + len);');
+  Lines.Add('            if (len == 0) return Array.Empty<byte>();');
+  Lines.Add('            return h.ReadBytesExact(len);');
+  Lines.Add('        }');
+  Lines.Add('');
+  Lines.Add('        public static void Write(DataHandle h, byte[] data)');
+  Lines.Add('        {');
+  Lines.Add('            if (data == null) data = Array.Empty<byte>();');
+  Lines.Add('            h.WriteInt32(data.Length);');
+  Lines.Add('            if (data.Length > 0) h.WriteBytes(data);');
+  Lines.Add('        }');
+  Lines.Add('    }');
+  Lines.Add('');
+end;
+
 procedure EmitCheckResponseHelpers(Lines: TPascalStringList);
 begin
   Lines.Add('        private static void CheckResponse(DataHandle response, string apiName)');
@@ -301,7 +329,7 @@ begin
   Lines.Add('            if (!response.IsValid || response.Size == 0)');
   Lines.Add('            {');
   Lines.Add('                throw new LingoFuseCallException(');
-  Lines.Add('                    "ABI call \"" + apiName + "\" returned an empty response (timeout or target application not found).",');
+  Lines.Add('                    "ABI call " + apiName + " returned an empty response (timeout or target application not found).",');
   Lines.Add('                    targetApp: TargetApp,');
   Lines.Add('                    targetApi: apiName);');
   Lines.Add('            }');
@@ -312,7 +340,7 @@ begin
   Lines.Add('                string err = "";');
   Lines.Add('                try { err = response.ReadString(); } catch { }');
   Lines.Add('                throw new LingoFuseException(');
-  Lines.Add('                    "ABI call \"" + apiName + "\" failed: " + err);');
+  Lines.Add('                    "ABI call " + apiName + " failed: " + err);');
   Lines.Add('            }');
   Lines.Add('        }');
   Lines.Add('');
@@ -331,7 +359,7 @@ begin
   Lines.Add('            catch (Exception ex)');
   Lines.Add('            {');
   Lines.Add('                throw new LingoFuseCallException(');
-  Lines.Add('                    "ABI call \"" + apiName + "\" failed to dispatch: " + ex.Message,');
+  Lines.Add('                    "ABI call " + apiName + " failed to dispatch: " + ex.Message,');
   Lines.Add('                    targetApp: TargetApp,');
   Lines.Add('                    targetApi: apiName);');
   Lines.Add('            }');
@@ -339,7 +367,7 @@ begin
   Lines.Add('            {');
   Lines.Add('                response.Dispose();');
   Lines.Add('                throw new LingoFuseCallException(');
-  Lines.Add('                    "ABI call \"" + apiName + "\" returned an empty response (timeout or target application not found).",');
+  Lines.Add('                    "ABI call " + apiName + " returned an empty response (timeout or target application not found).",');
   Lines.Add('                    targetApp: TargetApp,');
   Lines.Add('                    targetApi: apiName);');
   Lines.Add('            }');
@@ -351,7 +379,7 @@ begin
   Lines.Add('                try { err = response.ReadString(); } catch { }');
   Lines.Add('                response.Dispose();');
   Lines.Add('                throw new LingoFuseException(');
-  Lines.Add('                    "ABI call \"" + apiName + "\" failed: " + err);');
+  Lines.Add('                    "ABI call " + apiName + " failed: " + err);');
   Lines.Add('            }');
   Lines.Add('            return response;');
   Lines.Add('        }');
@@ -380,8 +408,13 @@ begin
   Lines.Add('            {');
   for i := 0 to High(F.Params) do
   begin
-    WriterMethod := ABI_Type_To_CSharp_Writer_Method(F.Params[i].PascalType);
-    Lines.Add('                param.' + WriterMethod + '(' + MakeSafeCSharpParamName(F.Params[i].Name, i) + ');');
+    if IsBytesABIType(F.Params[i].PascalType) then
+      Lines.Add('                LfAbiBlobHelper.Write(param, ' + MakeSafeCSharpParamName(F.Params[i].Name, i) + ');')
+    else
+    begin
+      WriterMethod := ABI_Type_To_CSharp_Writer_Method(F.Params[i].PascalType);
+      Lines.Add('                param.' + WriterMethod + '(' + MakeSafeCSharpParamName(F.Params[i].Name, i) + ');');
+    end;
   end;
   if Length(F.Params) > 0 then
     Lines.Add('');
@@ -391,7 +424,10 @@ begin
     Lines.Add('                using (var response = ' + CallFunc + '(' + FirstParamExpr + ', param, Timeout))');
   Lines.Add('                {');
   Lines.Add('                    CheckResponse(response, ' + CSharpStrLit(ApiName) + ');');
-  Lines.Add('                    return response.' + ABI_Type_To_CSharp_Reader_Method(F.ReturnType) + '();');
+  if IsBytesABIType(F.ReturnType) then
+    Lines.Add('                    return LfAbiBlobHelper.Read(response);')
+  else
+    Lines.Add('                    return response.' + ABI_Type_To_CSharp_Reader_Method(F.ReturnType) + '();');
   Lines.Add('                }');
   Lines.Add('            }');
   Lines.Add('        }');
@@ -420,8 +456,13 @@ begin
   Lines.Add('            {');
   for i := 0 to High(F.Params) do
   begin
-    WriterMethod := ABI_Type_To_CSharp_Writer_Method(F.Params[i].PascalType);
-    Lines.Add('                param.' + WriterMethod + '(' + MakeSafeCSharpParamName(F.Params[i].Name, i) + ');');
+    if IsBytesABIType(F.Params[i].PascalType) then
+      Lines.Add('                LfAbiBlobHelper.Write(param, ' + MakeSafeCSharpParamName(F.Params[i].Name, i) + ');')
+    else
+    begin
+      WriterMethod := ABI_Type_To_CSharp_Writer_Method(F.Params[i].PascalType);
+      Lines.Add('                param.' + WriterMethod + '(' + MakeSafeCSharpParamName(F.Params[i].Name, i) + ');');
+    end;
   end;
   if Length(F.Params) > 0 then
     Lines.Add('');
@@ -430,7 +471,10 @@ begin
   else
     Lines.Add('                using (var response = await CheckResponseAsync(' + CallFunc + '(' + FirstParamExpr + ', param), ' + CSharpStrLit(ApiName) + ').ConfigureAwait(false))');
   Lines.Add('                {');
-  Lines.Add('                    return response.' + ABI_Type_To_CSharp_Reader_Method(F.ReturnType) + '();');
+  if IsBytesABIType(F.ReturnType) then
+    Lines.Add('                    return LfAbiBlobHelper.Read(response);')
+  else
+    Lines.Add('                    return response.' + ABI_Type_To_CSharp_Reader_Method(F.ReturnType) + '();');
   Lines.Add('                }');
   Lines.Add('            }');
   Lines.Add('        }');
@@ -458,8 +502,13 @@ begin
   Lines.Add('            {');
   for i := 0 to High(F.Params) do
   begin
-    WriterMethod := ABI_Type_To_CSharp_Writer_Method(F.Params[i].PascalType);
-    Lines.Add('                param.' + WriterMethod + '(' + MakeSafeCSharpParamName(F.Params[i].Name, i) + ');');
+    if IsBytesABIType(F.Params[i].PascalType) then
+      Lines.Add('                LfAbiBlobHelper.Write(param, ' + MakeSafeCSharpParamName(F.Params[i].Name, i) + ');')
+    else
+    begin
+      WriterMethod := ABI_Type_To_CSharp_Writer_Method(F.Params[i].PascalType);
+      Lines.Add('                param.' + WriterMethod + '(' + MakeSafeCSharpParamName(F.Params[i].Name, i) + ');');
+    end;
   end;
   if FirstParamExpr = '' then
     Lines.Add('                ' + NotifyFunc + '(TargetApp, param);')
@@ -512,11 +561,15 @@ begin
     Lines.Add('        public const byte Error = 0xFF;');
     Lines.Add('    }');
     Lines.Add('');
+
+    EmitBlobHelperClass(Lines);
+
     Lines.Add('    public static class ABI');
     Lines.Add('    {');
     Lines.Add('        public static string TargetApp = ' + CSharpStrLit(TargetAppName) + ';');
     Lines.Add('        public static ulong Timeout = 5000;');
     Lines.Add('');
+
     EmitCheckResponseHelpers(Lines);
     Lines.Add('');
 
