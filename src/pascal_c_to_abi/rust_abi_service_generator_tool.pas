@@ -38,6 +38,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Rust_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -60,6 +65,8 @@ begin
     Result := 'f32'
   else if IsStringABIType(T) then
     Result := 'String'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'Vec<u8>'
   else
     Result := '';
 end;
@@ -68,6 +75,8 @@ function ABI_Type_To_Rust_Param_Decl(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then
     Result := '&str'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := '&[u8]'
   else
     Result := ABI_Type_To_Rust_Decl(T);
 end;
@@ -76,6 +85,8 @@ function ABI_Type_To_Rust_Default(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then
     Result := 'String::new()'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'Vec::new()'
   else if T.Same('double') or T.Same('extended') or T.Same('real') or T.Same('single') then
     Result := '0.0'
   else
@@ -373,11 +384,26 @@ begin
   begin
     PName := MakeSafeRustIdent(Params[i].Name, i);
     Result := Result + ', ';
-    if IsStringABIType(Params[i].PascalType) then
+    if IsStringABIType(Params[i].PascalType) or ABI_Type_Is_LF_Binary_Data(Params[i].PascalType) then
       Result := Result + '&' + PName
     else
       Result := Result + PName;
   end;
+end;
+
+procedure EmitWireHelpers(Lines: TPascalStringList);
+begin
+  Lines.Add('fn lf_read_blob(handle: &mut DataHandle) -> Result<Vec<u8>, Error> {');
+  Lines.Add('    let n: i32 = handle.read()?;');
+  Lines.Add('    if n < 0 {');
+  Lines.Add('        return Err(Error::new(ErrorCode::ReadFailed, "invalid blob length"));');
+  Lines.Add('    }');
+  Lines.Add('    if n == 0 {');
+  Lines.Add('        return Ok(Vec::new());');
+  Lines.Add('    }');
+  Lines.Add('    handle.read_bytes_exact(n as usize)');
+  Lines.Add('}');
+  Lines.Add('');
 end;
 
 procedure EmitInternalCallStub(Lines: TPascalStringList; const ApiName: TP_String; const F: TFunctionStructure);
@@ -417,6 +443,23 @@ begin
   if IsStringABIType(PascalType) then
   begin
     Lines.Add('    let ' + PName + ': String = match input.read_string() {');
+    Lines.Add('        Ok(v) => v,');
+    if HasOutput then
+    begin
+      Lines.Add('        Err(_) => {');
+      Lines.Add('            let mut buf: Vec<u8> = vec![STATUS_ERROR];');
+      Lines.Add('            buf.extend_from_slice(b"truncated input: ' + PName + '\x00");');
+      Lines.Add('            let _ = output.write_bytes(&buf);');
+      Lines.Add('            return;');
+      Lines.Add('        }');
+    end
+    else
+      Lines.Add('        Err(_) => return,');
+    Lines.Add('    };');
+  end
+  else if ABI_Type_Is_LF_Binary_Data(PascalType) then
+  begin
+    Lines.Add('    let ' + PName + ': Vec<u8> = match lf_read_blob(input) {');
     Lines.Add('        Ok(v) => v,');
     if HasOutput then
     begin
@@ -493,6 +536,16 @@ begin
       Lines.Add('            buf.push(STATUS_OK);');
       Lines.Add('            buf.extend_from_slice(v.as_bytes());');
       Lines.Add('            buf.push(0);');
+      Lines.Add('            let _ = output.write_bytes(&buf);');
+      Lines.Add('        }');
+    end
+    else if ABI_Type_Is_LF_Binary_Data(F.ReturnType) then
+    begin
+      Lines.Add('        Ok(v) => {');
+      Lines.Add('            let mut buf: Vec<u8> = Vec::with_capacity(1 + 4 + v.len());');
+      Lines.Add('            buf.push(STATUS_OK);');
+      Lines.Add('            buf.extend_from_slice(&(v.len() as i32).to_le_bytes());');
+      Lines.Add('            buf.extend_from_slice(&v);');
       Lines.Add('            let _ = output.write_bytes(&buf);');
       Lines.Add('        }');
     end
@@ -621,7 +674,7 @@ begin
     Lines.Add('');
     Lines.Add('use lingofuse::app_handle::AppHandle;');
     Lines.Add('use lingofuse::data_handle::DataHandle;');
-    Lines.Add('use lingofuse::error::Error;');
+    Lines.Add('use lingofuse::error::{Error, ErrorCode};');
     Lines.Add('use lingofuse::p2p;');
     Lines.Add('use lingofuse::uid::Uid;');
     Lines.Add('');
@@ -631,6 +684,8 @@ begin
     Lines.Add('pub const STATUS_OK: u8 = 0x00;');
     Lines.Add('pub const STATUS_ERROR: u8 = 0xFF;');
     Lines.Add('');
+
+    EmitWireHelpers(Lines);
 
     UsedApiNames.Clear;
     for i := 0 to High(SupportedFuncs) do
