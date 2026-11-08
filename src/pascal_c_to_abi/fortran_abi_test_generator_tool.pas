@@ -6,11 +6,9 @@ unit fortran_abi_test_generator_tool;
 interface
 
 uses
-  Z.Core,
-  Z.PascalStrings, Z.UPascalStrings,
+  Z.Core, Z.PascalStrings, Z.UPascalStrings,
   Z.Status, Z.Json, Z.UnicodeMixedLib, Z.ListEngine,
-  Z.Pascal_Func_Model,
-  Z.Parsing, code_decl_to_abi_registry;
+  Z.Pascal_Func_Model, Z.Parsing, code_decl_to_abi_registry;
 
 function GenerateABIServiceTestFortranCode(Model: TPascal_Func_Model): TPascalStringList;
 function GenerateABICallTestFortranCode(Model: TPascal_Func_Model): TPascalStringList;
@@ -42,6 +40,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_Bytes(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Fortran_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'integer(c_int32_t)'
@@ -54,6 +57,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'real(c_double)'
   else if T.Same('single') then Result := 'real(c_float)'
   else if IsStringABIType(T) then Result := 'character(len=:), allocatable'
+  else if ABI_Type_Is_Bytes(T) then Result := 'character(len=1, kind=c_char), allocatable'
   else Result := '';
 end;
 
@@ -99,15 +103,18 @@ begin
   Result :=
     S.Same('uid') or S.Same('p2p_name') or S.Same('input') or S.Same('output') or
     S.Same('ret') or S.Same('rc') or S.Same('lf_rc') or S.Same('str_status') or
-    S.Same('status_byte') or S.Same('app') or S.Same('req') or S.Same('resp') or
+    S.Same('status_byte') or S.Same('bytes_size') or S.Same('app') or
+    S.Same('req') or S.Same('resp') or
     S.Same('g_pass') or S.Same('g_fail') or S.Same('g_skip') or
     S.Same('g_running') or S.Same('g_uptime_ms') or
     S.Same('g_client_uid') or S.Same('g_service_uid') or
     S.Same('g_pending_callback') or S.Same('g_service_called_me') or
-    S.Same('g_has_service_uid') or
+    S.Same('g_has_service_uid') or S.Same('g_service_identity_seen') or
+    S.Same('g_service_p2p_name') or
     S.Same('pass') or S.Same('fail') or S.Same('local_rc') or
-    S.Same('msg') or S.Same('uidPtr') or
-    S.Same('s') or S.Same('hexch') or S.Same('j') or S.Same('v');
+    S.Same('msg') or S.Same('uidptr') or
+    S.Same('s') or S.Same('hexch') or S.Same('j') or S.Same('v') or
+    S.Same('n') or S.Same('i');
 end;
 
 function MakeSafeFortranIdent(const Name: TP_String; Index: integer): TP_String;
@@ -203,25 +210,15 @@ begin
   end;
 end;
 
-function BuildPlaceholderArgs(const Params: TParamArray): TP_String;
-var
-  i: integer;
-begin
-  Result := '';
-  for i := 0 to High(Params) do
-  begin
-    if Result <> '' then Result := Result + ', ';
-    Result := Result + PlaceholderValue(Params[i].PascalType);
-  end;
-end;
-
 procedure EmitArgsAndReturnVars(Lines: TPascalStringList; const F: TFunctionStructure);
 var
   j: integer;
 begin
   for j := 0 to High(F.Params) do
   begin
-    if IsStringABIType(F.Params[j].PascalType) then
+    if ABI_Type_Is_Bytes(F.Params[j].PascalType) then
+      Lines.Add('  character(len=1, kind=c_char), allocatable :: p' + umlIntToStr(j).Text + '(:)')
+    else if IsStringABIType(F.Params[j].PascalType) then
       Lines.Add('  character(len=:), allocatable :: p' + umlIntToStr(j).Text)
     else
       Lines.Add('  ' + ABI_Type_To_Fortran_Decl(F.Params[j].PascalType) +
@@ -229,7 +226,9 @@ begin
   end;
   if F.IsFunction then
   begin
-    if IsStringABIType(F.ReturnType) then
+    if ABI_Type_Is_Bytes(F.ReturnType) then
+      Lines.Add('  character(len=1, kind=c_char), allocatable :: ret(:)')
+    else if IsStringABIType(F.ReturnType) then
       Lines.Add('  character(len=:), allocatable :: ret')
     else
       Lines.Add('  ' + ABI_Type_To_Fortran_Decl(F.ReturnType) + ' :: ret');
@@ -241,25 +240,33 @@ var
   j: integer;
 begin
   for j := 0 to High(F.Params) do
-    Lines.Add('  p' + umlIntToStr(j).Text + ' = ' + PlaceholderValue(F.Params[j].PascalType));
+  begin
+    if ABI_Type_Is_Bytes(F.Params[j].PascalType) then
+      Lines.Add('  call init_test_bytes(8_c_int32_t, p' + umlIntToStr(j).Text + ')')
+    else
+      Lines.Add('  p' + umlIntToStr(j).Text + ' = ' + PlaceholderValue(F.Params[j].PascalType));
+  end;
 end;
 
-procedure EmitFunctionTestCall(Lines: TPascalStringList; const ApiName: TP_String);
+procedure EmitInitTestBytesHelper(Lines: TPascalStringList);
 begin
-  Lines.Add('  call test_' + ApiName + '(g_pass, g_fail)');
-end;
-
-procedure EmitProcedureTestCall(Lines: TPascalStringList; const ApiName: TP_String);
-begin
-  Lines.Add('  call test_' + ApiName + '(g_pass, g_fail)');
+  Lines.Add('  subroutine init_test_bytes(n, out)');
+  Lines.Add('    integer(c_int32_t), intent(in) :: n');
+  Lines.Add('    character(len=1, kind=c_char), allocatable, intent(out) :: out(:)');
+  Lines.Add('    integer :: j');
+  Lines.Add('    allocate(out(int(n)))');
+  Lines.Add('    do j = 1, int(n)');
+  Lines.Add('      out(j) = char(65 + mod(j - 1, 26), c_char)');
+  Lines.Add('    end do');
+  Lines.Add('  end subroutine');
+  Lines.Add('');
 end;
 
 procedure EmitFunctionTestSub(Lines: TPascalStringList; const ApiName: TP_String; const F: TFunctionStructure);
 var
-  PlaceholderArgs, ArgNames: TP_String;
+  ArgNames: TP_String;
   j: integer;
 begin
-  PlaceholderArgs := BuildPlaceholderArgs(F.Params);
   ArgNames := '';
   for j := 0 to High(F.Params) do
   begin
@@ -276,7 +283,7 @@ begin
   EmitAssignPlaceholders(Lines, F);
   Lines.Add('');
   Lines.Add('    rc = -1_c_int32_t');
-  if PlaceholderArgs = '' then
+  if ArgNames = '' then
     Lines.Add('    call ' + ApiName + '(DEFAULT_TARGET_APP, ret, rc)')
   else
     Lines.Add('    call ' + ApiName + '(DEFAULT_TARGET_APP, ' + ArgNames + ', ret, rc)');
@@ -292,7 +299,7 @@ begin
   Lines.Add('');
   Lines.Add('    if (g_has_service_uid) then');
   Lines.Add('      rc = -1_c_int32_t');
-  if PlaceholderArgs = '' then
+  if ArgNames = '' then
     Lines.Add('      call ' + ApiName + '_UID_Call(g_service_uid, ret, rc)')
   else
     Lines.Add('      call ' + ApiName + '_UID_Call(g_service_uid, ' + ArgNames + ', ret, rc)');
@@ -311,7 +318,7 @@ begin
   Lines.Add('    end if');
   Lines.Add('');
   Lines.Add('    rc = -1_c_int32_t');
-  if PlaceholderArgs = '' then
+  if ArgNames = '' then
     Lines.Add('    call ' + ApiName + '_P2PName_Call(DEFAULT_TARGET_P2P_NAME, ret, rc)')
   else
     Lines.Add('    call ' + ApiName + '_P2PName_Call(DEFAULT_TARGET_P2P_NAME, ' + ArgNames + ', ret, rc)');
@@ -793,9 +800,9 @@ begin
     for i := 0 to High(SupportedFuncs) do
     begin
       if SupportedFuncs[i].IsFunction then
-        EmitFunctionTestCall(Lines, ApiNames[i])
+        Lines.Add('  call test_' + ApiNames[i] + '(g_pass, g_fail)')
       else
-        EmitProcedureTestCall(Lines, ApiNames[i]);
+        Lines.Add('  call test_' + ApiNames[i] + '(g_pass, g_fail)');
     end;
 
     Lines.Add('');
@@ -855,6 +862,7 @@ begin
     Lines.Add('    call lf_free_library()');
     Lines.Add('  end subroutine');
     Lines.Add('');
+    EmitInitTestBytesHelper(Lines);
     Lines.Add('  function uid_to_hex(uid) result(s)');
     Lines.Add('    integer(c_int8_t), intent(in) :: uid(LF_UID_BYTE_COUNT)');
     Lines.Add('    character(len=64) :: s');
