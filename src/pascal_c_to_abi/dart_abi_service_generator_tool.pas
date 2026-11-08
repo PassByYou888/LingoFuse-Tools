@@ -38,6 +38,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Dart_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -58,6 +63,8 @@ begin
     Result := 'double'
   else if T.Same('single') then
     Result := 'double'
+  else if IsBytesABIType(T) then
+    Result := 'Uint8List'
   else if IsStringABIType(T) then
     Result := 'String'
   else
@@ -84,6 +91,8 @@ begin
     Result := 'writeDouble'
   else if T.Same('single') then
     Result := 'writeSingle'
+  else if IsBytesABIType(T) then
+    Result := '__WRITE_TBYTES__'
   else if IsStringABIType(T) then
     Result := 'writeString'
   else
@@ -110,6 +119,8 @@ begin
     Result := 'readDouble'
   else if T.Same('single') then
     Result := 'readSingle'
+  else if IsBytesABIType(T) then
+    Result := '__READ_TBYTES__'
   else if IsStringABIType(T) then
     Result := 'readString'
   else
@@ -118,7 +129,9 @@ end;
 
 function ABI_Type_Default_Literal(const T: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then
+  if IsBytesABIType(T) then
+    Result := 'Uint8List(0)'
+  else if IsStringABIType(T) then
     Result := #39#39
   else if T.Same('double') or T.Same('single') or
     T.Same('extended') or T.Same('real') then
@@ -347,6 +360,23 @@ begin
   end;
 end;
 
+function AnyTBytesInFunctions(const Funcs: TArryFunctionStructure): Boolean;
+var
+  i, j: integer;
+  F: TFunctionStructure;
+begin
+  Result := False;
+  for i := 0 to High(Funcs) do
+  begin
+    F := Funcs[i];
+    if F.IsFunction and IsBytesABIType(F.ReturnType) then
+      Exit(True);
+    for j := 0 to High(F.Params) do
+      if IsBytesABIType(F.Params[j].PascalType) then
+        Exit(True);
+  end;
+end;
+
 function BuildDartParamDecl(const Params: TParamArray): TP_String;
 var
   i: integer;
@@ -387,7 +417,10 @@ begin
   begin
     PName := MakeSafeDartIdent(Params[i].Name, i);
     ReadFn := ABI_Type_To_Reader_Method(Params[i].PascalType);
-    Lines.Add(Indent + 'final ' + PName + ' = _lf_r.' + ReadFn + '();');
+    if ReadFn = '__READ_TBYTES__' then
+      Lines.Add(Indent + 'final ' + PName + ' = _lfReadTBytes(_lf_r);')
+    else
+      Lines.Add(Indent + 'final ' + PName + ' = _lf_r.' + ReadFn + '();');
   end;
 end;
 
@@ -432,7 +465,10 @@ begin
   else
     Lines.Add('    final _lf_ret = internal_call_' + ApiName + '(' + ArgList + ');');
   Lines.Add('    _lf_w.writeUInt8(STATUS_OK);');
-  Lines.Add('    _lf_w.' + WriteFn + '(_lf_ret);');
+  if WriteFn = '__WRITE_TBYTES__' then
+    Lines.Add('    _lfWriteTBytes(_lf_w, _lf_ret);')
+  else
+    Lines.Add('    _lf_w.' + WriteFn + '(_lf_ret);');
   Lines.Add('  } catch (_lf_e) {');
   Lines.Add('    final _lf_ew = AbiWriter();');
   Lines.Add('    _lf_ew.writeUInt8(STATUS_ERROR);');
@@ -489,6 +525,25 @@ begin
     DartStrLit(Description) + ', callback_' + ApiName + ');');
 end;
 
+procedure EmitTBytesHelpers(Lines: TPascalStringList);
+begin
+  Lines.Add('Uint8List _lfReadTBytes(AbiReader r) {');
+  Lines.Add('  final _lf_sz = r.readInt32();');
+  Lines.Add('  if (_lf_sz < 0) {');
+  Lines.Add('    throw StateError(' + DartStrLit('invalid TBytes length: ') + ' + _lf_sz.toString());');
+  Lines.Add('  }');
+  Lines.Add('  return r.readBytes(_lf_sz);');
+  Lines.Add('}');
+  Lines.Add('');
+  Lines.Add('void _lfWriteTBytes(AbiWriter w, Uint8List data) {');
+  Lines.Add('  w.writeInt32(data.length);');
+  Lines.Add('  if (data.isNotEmpty) {');
+  Lines.Add('    w.writeBytes(data);');
+  Lines.Add('  }');
+  Lines.Add('}');
+  Lines.Add('');
+end;
+
 function MakeUniqueApiName(const Source: TP_String; Used: TPascalStringList): TP_String;
 var
   j: integer;
@@ -513,6 +568,7 @@ var
   ApiName, Description: TP_String;
   F: TFunctionStructure;
   Lines: TPascalStringList;
+  NeedTBytes: Boolean;
 begin
   Result := nil;
   if Model = nil then
@@ -535,7 +591,9 @@ begin
   Log(PFormat('Generating Dart ABI service for unit "%s"', [UnitName.Text]));
 
   SupportedFuncs := CollectSupportedFunctions(Model);
-  Log(PFormat('Service covers %d ABI APIs', [Length(SupportedFuncs)]));
+  NeedTBytes := AnyTBytesInFunctions(SupportedFuncs);
+  Log(PFormat('Service covers %d ABI APIs (TBytes helpers: %s)',
+    [Length(SupportedFuncs), if_(NeedTBytes, 'yes', 'no')]));
 
   UsedApiNames := TPascalStringList.Create;
   Lines := TPascalStringList.Create;
@@ -546,6 +604,10 @@ begin
     Lines.Add('');
     Lines.Add('import ' + DartStrLit('package:lingofuse/lingofuse.dart') + ';');
     Lines.Add('');
+
+    if NeedTBytes then
+      EmitTBytesHelpers(Lines);
+
     Lines.Add('const String DEFAULT_APP_NAME = ' + DartStrLit(AppName) + ';');
     Lines.Add('const String DEFAULT_APP_DESC = ' + DartStrLit(AppDesc) + ';');
     Lines.Add('');
@@ -619,6 +681,7 @@ begin
     Result := Lines;
     Log(PFormat('Generated %d lines for Dart ABI service', [Lines.Count]));
   finally
+    UsedApiNames.Free;
   end;
 end;
 
