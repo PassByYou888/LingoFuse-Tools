@@ -39,6 +39,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Zig_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'i32'
@@ -50,13 +55,13 @@ begin
   else if T.Same('uint64') then Result := 'u64'
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'f64'
   else if T.Same('single') then Result := 'f32'
-  else if IsStringABIType(T) then Result := '[]u8'
+  else if IsStringABIType(T) or IsBytesABIType(T) then Result := '[]u8'
   else Result := '';
 end;
 
 function ABI_Type_To_Zig_Param_Decl(const T: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then
+  if IsStringABIType(T) or IsBytesABIType(T) then
     Result := '[]const u8'
   else
     Result := ABI_Type_To_Zig_Decl(T);
@@ -267,6 +272,29 @@ begin
     Result := Prefix + ', ' + TypedParams;
 end;
 
+procedure EmitWireHelpers(Lines: TPascalStringList);
+begin
+  Lines.Add('fn lf_abi_write_blob(hnd: *lf.DataHandle, v: []const u8) lf.Error!void {');
+  Lines.Add('    if (v.len > 0x7FFFFFFF) return error.WriteFailed;');
+  Lines.Add('    try hnd.write(@as(i32, @intCast(v.len)));');
+  Lines.Add('    if (v.len > 0) try hnd.writeBytes(v);');
+  Lines.Add('}');
+  Lines.Add('');
+  Lines.Add('fn lf_abi_read_blob(hnd: *lf.DataHandle, alloc: std.mem.Allocator) lf.Error![]u8 {');
+  Lines.Add('    var n: i32 = 0;');
+  Lines.Add('    if (!try hnd.read(&n)) return error.ReadFailed;');
+  Lines.Add('    if (n < 0) return error.ReadFailed;');
+  Lines.Add('    const un: usize = @intCast(n);');
+  Lines.Add('    if (un == 0) return alloc.alloc(u8, 0) catch error.OutOfMemory;');
+  Lines.Add('    const buf = alloc.alloc(u8, un) catch return error.OutOfMemory;');
+  Lines.Add('    errdefer alloc.free(buf);');
+  Lines.Add('    const got = try hnd.readBytes(buf);');
+  Lines.Add('    if (got != un) return error.ReadFailed;');
+  Lines.Add('    return buf;');
+  Lines.Add('}');
+  Lines.Add('');
+end;
+
 procedure EmitParamWrites(Lines: TPascalStringList;
   const Params: TParamArray);
 var
@@ -278,6 +306,8 @@ begin
     PName := MakeSafeZigIdent(Params[i].Name, i);
     if IsStringABIType(Params[i].PascalType) then
       Lines.Add('    try req.writeString(' + PName + ');')
+    else if IsBytesABIType(Params[i].PascalType) then
+      Lines.Add('    try lf_abi_write_blob(&req, ' + PName + ');')
     else
       Lines.Add('    try req.write(' + PName + ');');
   end;
@@ -287,10 +317,12 @@ procedure EmitReadResponseFunction(Lines: TPascalStringList;
   const ApiName, ZigIdent: TP_String; const F: TFunctionStructure);
 var
   RetDecl, FnSig: TP_String;
+  NeedsAlloc: boolean;
 begin
   RetDecl := ABI_Type_To_Zig_Decl(F.ReturnType);
+  NeedsAlloc := IsStringABIType(F.ReturnType) or IsBytesABIType(F.ReturnType);
 
-  if IsStringABIType(F.ReturnType) then
+  if NeedsAlloc then
     FnSig := 'fn read_' + ZigIdent + '_response(hnd: *lf.DataHandle, alloc: std.mem.Allocator) Error!' + RetDecl + ' {'
   else
     FnSig := 'fn read_' + ZigIdent + '_response(hnd: *lf.DataHandle) Error!' + RetDecl + ' {';
@@ -304,6 +336,8 @@ begin
   Lines.Add('    if (status != STATUS_OK) return error.CallFailed;');
   if IsStringABIType(F.ReturnType) then
     Lines.Add('    return lf.io.readString(hnd, alloc);')
+  else if IsBytesABIType(F.ReturnType) then
+    Lines.Add('    return lf_abi_read_blob(hnd, alloc);')
   else
   begin
     Lines.Add('    var v: ' + RetDecl + ' = undefined;');
@@ -331,11 +365,14 @@ end;
 
 procedure EmitAsyncContext(Lines: TPascalStringList;
   const ApiName: TP_String; const F: TFunctionStructure);
+var
+  NeedsAlloc: boolean;
 begin
+  NeedsAlloc := IsStringABIType(F.ReturnType) or IsBytesABIType(F.ReturnType);
   Lines.Add('const ' + ApiName + 'AsyncCtx = struct {');
   Lines.Add('    user_ctx: ?*anyopaque,');
   Lines.Add('    user_handler: ' + ApiName + 'AsyncHandler,');
-  if IsStringABIType(F.ReturnType) then
+  if NeedsAlloc then
     Lines.Add('    alloc: std.mem.Allocator,');
   Lines.Add('};');
   Lines.Add('');
@@ -352,7 +389,7 @@ begin
   Lines.Add('    const result: ' + ApiName + 'Result = switch (ar) {');
   Lines.Add('        .ok => |h| blk: {');
   Lines.Add('            var hh = h;');
-  if IsStringABIType(F.ReturnType) then
+  if IsStringABIType(F.ReturnType) or IsBytesABIType(F.ReturnType) then
     ReadCall := 'read_' + ZigIdent + '_response(&hh, c.alloc)'
   else
     ReadCall := 'read_' + ZigIdent + '_response(&hh)';
@@ -373,17 +410,17 @@ procedure EmitSyncFunction(Lines: TPascalStringList;
   const AddrZigType, AddrName: TP_String);
 var
   FnName, ExtraParam, ParamStr: TP_String;
-  HasAlloc: boolean;
+  NeedsAlloc: boolean;
 begin
   FnName := ZigIdent + FnSuffix;
-  HasAlloc := IsStringABIType(F.ReturnType);
+  NeedsAlloc := IsStringABIType(F.ReturnType) or IsBytesABIType(F.ReturnType);
 
   ExtraParam := '';
   if AddrName <> '' then
     ExtraParam := AddrName + ': ' + AddrZigType;
 
   ParamStr := PrefixParams(ExtraParam, BuildTypedParams(F.Params));
-  if HasAlloc then
+  if NeedsAlloc then
     ParamStr := PrefixParams('alloc: std.mem.Allocator', ParamStr);
 
   Lines.Add('pub fn ' + FnName + '(' + ParamStr + ') Error!' +
@@ -394,7 +431,7 @@ begin
   Lines.Add('    var resp = (try lf.framework.' + CallFn + '(' + AddrPrefix +
     ', &req, ABI_TIMEOUT)) orelse return error.CallFailed;');
   Lines.Add('    defer resp.deinit();');
-  if HasAlloc then
+  if NeedsAlloc then
     Lines.Add('    return read_' + ZigIdent + '_response(&resp, alloc);')
   else
     Lines.Add('    return read_' + ZigIdent + '_response(&resp);');
@@ -409,17 +446,17 @@ procedure EmitAsyncFunction(Lines: TPascalStringList;
   const AddrZigType, AddrName: TP_String);
 var
   FnName, ExtraParam, ParamStr: TP_String;
-  HasAlloc: boolean;
+  NeedsAlloc: boolean;
 begin
   FnName := ZigIdent + FnSuffix;
-  HasAlloc := IsStringABIType(F.ReturnType);
+  NeedsAlloc := IsStringABIType(F.ReturnType) or IsBytesABIType(F.ReturnType);
 
   ExtraParam := '';
   if AddrName <> '' then
     ExtraParam := AddrName + ': ' + AddrZigType;
 
   ParamStr := PrefixParams(ExtraParam, BuildTypedParams(F.Params));
-  if HasAlloc then
+  if NeedsAlloc then
     ParamStr := PrefixParams('alloc: std.mem.Allocator', ParamStr);
   ParamStr := PrefixParams(ParamStr,
     'user_ctx: ?*anyopaque, user_handler: ' + ApiName + 'AsyncHandler');
@@ -429,7 +466,7 @@ begin
   Lines.Add('    defer req.deinit();');
   EmitParamWrites(Lines, F.Params);
   Lines.Add('    const ctx = std.heap.page_allocator.create(' + ApiName + 'AsyncCtx) catch return error.OutOfMemory;');
-  if HasAlloc then
+  if NeedsAlloc then
     Lines.Add('    ctx.* = .{ .user_ctx = user_ctx, .user_handler = user_handler, .alloc = alloc };')
   else
     Lines.Add('    ctx.* = .{ .user_ctx = user_ctx, .user_handler = user_handler };');
@@ -570,6 +607,7 @@ begin
     Lines.Add('');
     Lines.Add('const STATUS_OK: u8 = 0x00;');
     Lines.Add('');
+    EmitWireHelpers(Lines);
 
     for i := 0 to High(SupportedFuncs) do
     begin
