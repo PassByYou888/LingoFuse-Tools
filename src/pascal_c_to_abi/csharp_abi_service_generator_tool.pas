@@ -38,6 +38,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_CSharp_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -60,6 +65,8 @@ begin
     Result := 'float'
   else if IsStringABIType(T) then
     Result := 'string'
+  else if IsBytesABIType(T) then
+    Result := 'byte[]'
   else
     Result := '';
 end;
@@ -96,7 +103,9 @@ end;
 
 function ABI_Type_To_CSharp_Default(const T: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then
+  if IsBytesABIType(T) then
+    Result := 'Array.Empty<byte>()'
+  else if IsStringABIType(T) then
     Result := 'string.Empty'
   else if T.Same('double') or T.Same('extended') or T.Same('real') then
     Result := '0.0'
@@ -367,6 +376,28 @@ begin
   end;
 end;
 
+procedure EmitBlobHelperClass(Lines: TPascalStringList);
+begin
+  Lines.Add('    internal static class LfAbiBlobHelper');
+  Lines.Add('    {');
+  Lines.Add('        public static byte[] Read(DataHandle h)');
+  Lines.Add('        {');
+  Lines.Add('            int len = h.ReadInt32();');
+  Lines.Add('            if (len < 0) throw new LingoFuseException("Invalid blob length: " + len);');
+  Lines.Add('            if (len == 0) return Array.Empty<byte>();');
+  Lines.Add('            return h.ReadBytesExact(len);');
+  Lines.Add('        }');
+  Lines.Add('');
+  Lines.Add('        public static void Write(DataHandle h, byte[] data)');
+  Lines.Add('        {');
+  Lines.Add('            if (data == null) data = Array.Empty<byte>();');
+  Lines.Add('            h.WriteInt32(data.Length);');
+  Lines.Add('            if (data.Length > 0) h.WriteBytes(data);');
+  Lines.Add('        }');
+  Lines.Add('    }');
+  Lines.Add('');
+end;
+
 function GenerateABIServiceCsharpCode(Model: TPascal_Func_Model): TPascalStringList;
 var
   i, j: integer;
@@ -417,6 +448,8 @@ begin
     Lines.Add('        public const byte Error = 0xFF;');
     Lines.Add('    }');
     Lines.Add('');
+
+    EmitBlobHelperClass(Lines);
 
     Lines.Add('    public static class InternalCalls');
     Lines.Add('    {');
@@ -498,15 +531,27 @@ begin
         begin
           PName := MakeSafeCSharpParamName(f.Params[j].Name, j);
           PTyp := ABI_Type_To_CSharp_Decl(f.Params[j].PascalType);
-          ReaderMethod := ABI_Type_To_CSharp_Reader_Method(f.Params[j].PascalType);
-          Lines.Add('                ' + PTyp + ' ' + PName + ' = inHandle.' + ReaderMethod + '();');
+          if IsBytesABIType(f.Params[j].PascalType) then
+          begin
+            Lines.Add('                byte[] ' + PName + ' = LfAbiBlobHelper.Read(inHandle);');
+          end
+          else
+          begin
+            ReaderMethod := ABI_Type_To_CSharp_Reader_Method(f.Params[j].PascalType);
+            Lines.Add('                ' + PTyp + ' ' + PName + ' = inHandle.' + ReaderMethod + '();');
+          end;
           ArgList := ArgList + ', ' + PName;
         end;
         RetType := ABI_Type_To_CSharp_Decl(f.ReturnType);
-        WriterMethod := ABI_Type_To_CSharp_Writer_Method(f.ReturnType);
         Lines.Add('                ' + RetType + ' ret = InternalCalls.InternalCall_' + ApiName + '(' + ArgList + ');');
         Lines.Add('                outHandle.WriteUInt8(WireStatus.Ok);');
-        Lines.Add('                outHandle.' + WriterMethod + '(ret);');
+        if IsBytesABIType(f.ReturnType) then
+          Lines.Add('                LfAbiBlobHelper.Write(outHandle, ret);')
+        else
+        begin
+          WriterMethod := ABI_Type_To_CSharp_Writer_Method(f.ReturnType);
+          Lines.Add('                outHandle.' + WriterMethod + '(ret);');
+        end;
         Lines.Add('            }');
         Lines.Add('            catch (Exception ex)');
         Lines.Add('            {');
@@ -535,8 +580,15 @@ begin
         begin
           PName := MakeSafeCSharpParamName(f.Params[j].Name, j);
           PTyp := ABI_Type_To_CSharp_Decl(f.Params[j].PascalType);
-          ReaderMethod := ABI_Type_To_CSharp_Reader_Method(f.Params[j].PascalType);
-          Lines.Add('                ' + PTyp + ' ' + PName + ' = inHandle.' + ReaderMethod + '();');
+          if IsBytesABIType(f.Params[j].PascalType) then
+          begin
+            Lines.Add('                byte[] ' + PName + ' = LfAbiBlobHelper.Read(inHandle);');
+          end
+          else
+          begin
+            ReaderMethod := ABI_Type_To_CSharp_Reader_Method(f.Params[j].PascalType);
+            Lines.Add('                ' + PTyp + ' ' + PName + ' = inHandle.' + ReaderMethod + '();');
+          end;
           ArgList := ArgList + ', ' + PName;
         end;
         Lines.Add('                InternalCalls.InternalCall_' + ApiName + '(' + ArgList + ');');
