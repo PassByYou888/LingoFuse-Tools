@@ -131,6 +131,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsInt64ABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('int64') or T.Same('uint64');
@@ -149,6 +154,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'abi_pack_double'
   else if T.Same('single') then Result := 'abi_pack_single'
   else if IsStringABIType(T) then Result := 'abi_pack_string'
+  else if IsBytesABIType(T) then Result := 'abi_pack_bytes'
   else Result := '';
 end;
 
@@ -161,6 +167,8 @@ function PlaceholderValue(const ABIType: TP_String): TP_String;
 begin
   if IsStringABIType(ABIType) then
     Result := RStrLit('test')
+  else if IsBytesABIType(ABIType) then
+    Result := 'as.raw(c(1L, 2L, 3L, 4L))'
   else if ABIType.Same('double') or ABIType.Same('single')
     or ABIType.Same('extended') or ABIType.Same('real') then
     Result := '3.14'
@@ -336,12 +344,18 @@ begin
   Lines.Add('abi_test_ask_call_me_callback <- function(input_raw, ctx) {');
   Lines.Add('  tryCatch({');
   Lines.Add('    cat(' + RStrLitNL('[SERVICE] ask_call_me: scheduling async call to client') + ')');
-  Lines.Add('    lf_async_call(');
-  Lines.Add('      ' + RStrLit('LF_TEST_CLIENT_SELF') + ',');
+  Lines.Add('    uid <- ctx$sender_uid');
+  Lines.Add('    if (is.null(uid) || length(uid) != 32L) {');
+  Lines.Add('      cat(' + RStrLitNL('[SERVICE] ask_call_me: no UID available') + ')');
+  Lines.Add('      return(invisible(NULL))');
+  Lines.Add('    }');
+  Lines.Add('    lf_uid_async_call(');
+  Lines.Add('      uid,');
   Lines.Add('      ' + RStrLit('LF_TEST_REPORT_SERVICE_IDENTITY') + ',');
   Lines.Add('      ' + RStrLit('service initiates call') + ',');
   Lines.Add('      on_success = function(result, user_data) {');
-  Lines.Add('        cat(sprintf(' + RStrLitNL('[SERVICE] ask_call_me: client responded: %s') + ', result))');
+  Lines.Add('        msg <- if (is.character(result) && length(result) == 1L) result else ' + RStrLit('') );
+  Lines.Add('        cat(sprintf(' + RStrLitNL('[SERVICE] ask_call_me: client responded: %s') + ', msg))');
   Lines.Add('      },');
   Lines.Add('      on_error = function(msg, kind, user_data) {');
   Lines.Add('        cat(sprintf(' + RStrLitNL('[SERVICE] ask_call_me: async failed (kind=%d): %s') + ', as.integer(kind), msg))');
@@ -393,7 +407,13 @@ begin
   Lines.Add('lf_set_opt_console_output(TRUE)');
   Lines.Add('');
   Lines.Add('endpoint <- sprintf(' + RStrLit('ipc:%s') + ', ABI_TARGET_APP)');
-  Lines.Add('lf_prepare_client(endpoint, NULL)');
+  Lines.Add('client_app <- lf_create_app(' + RStrLit('LF_TEST_CLIENT_SELF') + ', ' + RStrLit('client test app') + ')');
+  Lines.Add('lf_register_call(client_app, ' + RStrLit('LF_TEST_REPORT_SERVICE_IDENTITY') + ', ' + RStrLit('report service identity') + ', function(payload) {');
+  Lines.Add('  msg <- if (is.character(payload) && length(payload) == 1L) payload else ' + RStrLit('') );
+  Lines.Add('  cat(sprintf(' + RStrLitNL('[CLIENT] service called me: msg=%s') + ', msg))');
+  Lines.Add('  ' + RStrLit('identity received') );
+  Lines.Add('}, bin = FALSE)');
+  Lines.Add('lf_prepare_client(endpoint, client_app)');
   Lines.Add('');
   Lines.Add('if (lf_prepare_done() != 1) {');
   Lines.Add('  stop(' + RStrLit('lf_prepare_done failed') + ')');
@@ -410,7 +430,7 @@ begin
   Lines.Add('');
   Lines.Add('if (!wait_app(ABI_TARGET_APP)) {');
   Lines.Add('  cat(' + RStrLitNL('[FATAL] service not ready') + ')');
-  Lines.Add('  lf_cleanup(NULL)');
+  Lines.Add('  lf_cleanup(client_app)');
   Lines.Add('  quit(status = 1L)');
   Lines.Add('}');
   Lines.Add('');
@@ -482,7 +502,7 @@ begin
   Lines.Add('cat(sprintf(' + RStrLitNL('Fail: %d') + ', fail))');
   Lines.Add('cat(sprintf(' + RStrLitNL('Skip: %d') + ', skip))');
   Lines.Add('');
-  Lines.Add('lf_cleanup(NULL)');
+  Lines.Add('lf_cleanup(client_app)');
   Lines.Add('');
   Lines.Add('if (fail > 0L) quit(status = 2L)');
   Lines.Add('');
