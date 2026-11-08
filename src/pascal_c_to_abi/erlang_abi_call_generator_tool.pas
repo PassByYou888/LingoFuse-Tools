@@ -42,6 +42,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsFloatABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('double') or T.Same('single') or T.Same('extended') or T.Same('real');
@@ -52,7 +57,8 @@ begin
   Result := T.Same('integer') or T.Same('int64') or T.Same('cardinal')
     or T.Same('longint') or T.Same('dword') or T.Same('word')
     or T.Same('smallint') or T.Same('byte') or T.Same('uint64')
-    or T.Same('longword') or IsFloatABIType(T) or IsStringABIType(T);
+    or T.Same('longword') or IsFloatABIType(T) or IsStringABIType(T)
+    or IsBytesABIType(T);
 end;
 
 function MakeApiName(const FuncName: TP_String): SystemString;
@@ -194,6 +200,8 @@ begin
     Result := '<<' + VarName + ':64/little-float>>'
   else if T.Same('single') then
     Result := '<<' + VarName + ':32/little-float>>'
+  else if IsBytesABIType(T) then
+    Result := 'lf_enc_bytes(' + VarName + ')'
   else if IsStringABIType(T) then
     Result := 'lf_enc_string(' + VarName + ')'
   else
@@ -220,6 +228,8 @@ begin
     Result := 'lf_decode_ret_double'
   else if T.Same('single') then
     Result := 'lf_decode_ret_single'
+  else if IsBytesABIType(T) then
+    Result := 'lf_decode_ret_bytes'
   else if IsStringABIType(T) then
     Result := 'lf_decode_ret_string'
   else
@@ -334,6 +344,7 @@ begin
 
   Lines.Add('-compile({nowarn_unused_function, [');
   Lines.Add('    {lf_enc_string, 1},');
+  Lines.Add('    {lf_enc_bytes, 1},');
   Lines.Add('    {lf_decode_error, 1},');
   Lines.Add('    {lf_decode_ret_int32, 1},');
   Lines.Add('    {lf_decode_ret_int64, 1},');
@@ -345,6 +356,7 @@ begin
   Lines.Add('    {lf_decode_ret_single, 1},');
   Lines.Add('    {lf_decode_ret_double, 1},');
   Lines.Add('    {lf_decode_ret_string, 1},');
+  Lines.Add('    {lf_decode_ret_bytes, 1},');
   Lines.Add('    {lf_do_call_sync, 5},');
   Lines.Add('    {lf_do_call_async, 6},');
   Lines.Add('    {lf_do_notify, 4},');
@@ -360,6 +372,14 @@ begin
   Lines.Add('        _ -> erlang:error(badarg)');
   Lines.Add('    end;');
   Lines.Add('lf_enc_string(_) -> erlang:error(badarg).');
+  Lines.Add('');
+
+  Lines.Add('lf_enc_bytes(Bin) when is_binary(Bin) ->');
+  Lines.Add('    Sz = byte_size(Bin),');
+  Lines.Add('    <<Sz:32/little-signed, Bin/binary>>;');
+  Lines.Add('lf_enc_bytes(List) when is_list(List) ->');
+  Lines.Add('    lf_enc_bytes(iolist_to_binary(List));');
+  Lines.Add('lf_enc_bytes(_) -> erlang:error(badarg).');
   Lines.Add('');
 
   Lines.Add('lf_decode_error(Rest) ->');
@@ -440,6 +460,21 @@ begin
   Lines.Add('lf_decode_ret_string(<<255, Rest/binary>>) -> lf_decode_error(Rest);');
   Lines.Add('lf_decode_ret_string(<<S, _/binary>>) -> {error, {unexpected_status, S}};');
   Lines.Add('lf_decode_ret_string(_) -> {error, <<"empty response">>}.');
+  Lines.Add('');
+
+  Lines.Add('lf_decode_ret_bytes(<<0, Sz:32/little-signed, Rest/binary>>) when Sz >= 0 ->');
+  Lines.Add('    case Rest of');
+  Lines.Add('        <<Data:Sz/binary, _/binary>> -> {ok, Data};');
+  Lines.Add('        _ -> {error, <<"truncated bytes">>}');
+  Lines.Add('    end;');
+  Lines.Add('lf_decode_ret_bytes(<<0, _/binary>>) ->');
+  Lines.Add('    {error, <<"truncated bytes (or negative length)">>};');
+  Lines.Add('lf_decode_ret_bytes(<<255, Rest/binary>>) ->');
+  Lines.Add('    lf_decode_error(Rest);');
+  Lines.Add('lf_decode_ret_bytes(<<S, _/binary>>) ->');
+  Lines.Add('    {error, {unexpected_status, S}};');
+  Lines.Add('lf_decode_ret_bytes(_) ->');
+  Lines.Add('    {error, <<"empty response">>}.');
   Lines.Add('');
 
   Lines.Add('lf_do_call_sync(Kind, Target, Api, Body, Decoder) ->');
