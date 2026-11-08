@@ -38,6 +38,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Rust_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -60,6 +65,8 @@ begin
     Result := 'f32'
   else if IsStringABIType(T) then
     Result := 'String'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'Vec<u8>'
   else
     Result := '';
 end;
@@ -68,6 +75,8 @@ function ABI_Type_To_Rust_Param_Decl(const T: TP_String): TP_String;
 begin
   if IsStringABIType(T) then
     Result := '&' + #39 + 'static str'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := '&[u8]'
   else
     Result := ABI_Type_To_Rust_Decl(T);
 end;
@@ -347,6 +356,8 @@ begin
     PName := MakeSafeRustIdent(Params[i].Name, i);
     if IsStringABIType(Params[i].PascalType) then
       Lines.Add('    param.write_string(' + PName + ')?;')
+    else if ABI_Type_Is_LF_Binary_Data(Params[i].PascalType) then
+      Lines.Add('    lf_write_blob(&mut param, ' + PName + ')?;')
     else
       Lines.Add('    param.write(' + PName + ')?;');
   end;
@@ -371,6 +382,8 @@ begin
   Lines.Add('    }');
   if IsStringABIType(F.ReturnType) then
     Lines.Add('    handle.read_string()')
+  else if ABI_Type_Is_LF_Binary_Data(F.ReturnType) then
+    Lines.Add('    lf_read_blob(&mut handle)')
   else
     Lines.Add('    handle.read()');
   Lines.Add('}');
@@ -693,6 +706,29 @@ begin
   Lines.Add('');
 end;
 
+procedure EmitWireHelpers(Lines: TPascalStringList);
+begin
+  Lines.Add('fn lf_write_blob(handle: &mut DataHandle, data: &[u8]) -> Result<(), Error> {');
+  Lines.Add('    if data.len() > i32::MAX as usize {');
+  Lines.Add('        return Err(Error::new(ErrorCode::InvalidArgument, "blob too large"));');
+  Lines.Add('    }');
+  Lines.Add('    handle.write(data.len() as i32)?;');
+  Lines.Add('    handle.write_bytes(data)');
+  Lines.Add('}');
+  Lines.Add('');
+  Lines.Add('fn lf_read_blob(handle: &mut DataHandle) -> Result<Vec<u8>, Error> {');
+  Lines.Add('    let n: i32 = handle.read()?;');
+  Lines.Add('    if n < 0 {');
+  Lines.Add('        return Err(Error::new(ErrorCode::ReadFailed, "invalid blob length"));');
+  Lines.Add('    }');
+  Lines.Add('    if n == 0 {');
+  Lines.Add('        return Ok(Vec::new());');
+  Lines.Add('    }');
+  Lines.Add('    handle.read_bytes_exact(n as usize)');
+  Lines.Add('}');
+  Lines.Add('');
+end;
+
 function GenerateABICallRsCode(Model: TPascal_Func_Model): TPascalStringList;
 var
   i, j: integer;
@@ -747,6 +783,9 @@ begin
     Lines.Add('');
     Lines.Add('const STATUS_OK: u8 = 0x00;');
     Lines.Add('');
+
+    EmitWireHelpers(Lines);
+
     Lines.Add('fn _expect_response(r: Option<DataHandle>, api_name: &' + #39 + 'static str) -> Result<DataHandle, Error> {');
     Lines.Add('    r.ok_or_else(|| Error::new(');
     Lines.Add('        ErrorCode::CallFailed,');
