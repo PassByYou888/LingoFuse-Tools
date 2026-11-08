@@ -42,6 +42,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function IsFloatABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('double') or T.Same('single') or T.Same('extended') or T.Same('real');
@@ -52,7 +57,8 @@ begin
   Result := T.Same('integer') or T.Same('int64') or T.Same('cardinal')
     or T.Same('longint') or T.Same('dword') or T.Same('word')
     or T.Same('smallint') or T.Same('byte') or T.Same('uint64')
-    or T.Same('longword') or IsFloatABIType(T) or IsStringABIType(T);
+    or T.Same('longword') or IsFloatABIType(T) or IsStringABIType(T)
+    or IsBytesABIType(T);
 end;
 
 function MakeApiName(const FuncName: TP_String): SystemString;
@@ -116,7 +122,9 @@ end;
 
 function DefaultResultFor(const T: TP_String): SystemString;
 begin
-  if IsStringABIType(T) then
+  if IsBytesABIType(T) then
+    Result := '<<>>'
+  else if IsStringABIType(T) then
     Result := '<<>>'
   else if IsFloatABIType(T) then
     Result := '0.0'
@@ -183,6 +191,8 @@ begin
     Result := 'decode_double'
   else if T.Same('single') then
     Result := 'decode_single'
+  else if IsBytesABIType(T) then
+    Result := 'decode_bytes'
   else if IsStringABIType(T) then
     Result := 'decode_string'
   else
@@ -209,6 +219,8 @@ begin
     Result := 'encode_ok_double'
   else if T.Same('single') then
     Result := 'encode_ok_single'
+  else if IsBytesABIType(T) then
+    Result := 'encode_ok_bytes'
   else if IsStringABIType(T) then
     Result := 'encode_ok_string'
   else
@@ -508,6 +520,7 @@ begin
     Items.Add('{decode_single,1}');
     Items.Add('{decode_double,1}');
     Items.Add('{decode_string,1}');
+    Items.Add('{decode_bytes,1}');
     Items.Add('{encode_ok_void,0}');
     Items.Add('{encode_ok_int8,1}');
     Items.Add('{encode_ok_uint8,1}');
@@ -520,6 +533,7 @@ begin
     Items.Add('{encode_ok_single,1}');
     Items.Add('{encode_ok_double,1}');
     Items.Add('{encode_ok_string,1}');
+    Items.Add('{encode_ok_bytes,1}');
     Items.Add('{encode_error,1}');
     Items.Add('{lf_reg_or_zero,1}');
     for i := 0 to High(Funcs) do
@@ -587,6 +601,14 @@ begin
   Lines.Add('            throw({decode_error, <<"string">>})');
   Lines.Add('    end.');
   Lines.Add('');
+  Lines.Add('decode_bytes(<<Sz:32/little-signed, Rest/binary>>) when Sz >= 0 ->');
+  Lines.Add('    case Rest of');
+  Lines.Add('        <<Data:Sz/binary, Tail/binary>> -> {Data, Tail};');
+  Lines.Add('        _ -> throw({decode_error, <<"bytes">>})');
+  Lines.Add('    end;');
+  Lines.Add('decode_bytes(_) ->');
+  Lines.Add('    throw({decode_error, <<"bytes">>}).');
+  Lines.Add('');
   Lines.Add('encode_ok_void() -> <<0>>.');
   Lines.Add('');
   Lines.Add('encode_ok_int8(V) -> <<0, V:8/little-signed>>.');
@@ -600,6 +622,9 @@ begin
   Lines.Add('encode_ok_single(V) -> <<0, V:32/little-float>>.');
   Lines.Add('encode_ok_double(V) -> <<0, V:64/little-float>>.');
   Lines.Add('encode_ok_string(S) -> <<0, S/binary, 0>>.');
+  Lines.Add('encode_ok_bytes(Bin) when is_binary(Bin) ->');
+  Lines.Add('    Sz = byte_size(Bin),');
+  Lines.Add('    <<0, Sz:32/little-signed, Bin/binary>>.');
   Lines.Add('');
   Lines.Add('encode_error(Msg) -> <<255, Msg/binary, 0>>.');
 end;
