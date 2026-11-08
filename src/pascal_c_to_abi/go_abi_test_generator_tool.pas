@@ -28,6 +28,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Go_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'int32'
@@ -41,6 +46,7 @@ begin
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'float64'
   else if T.Same('single') then Result := 'float32'
   else if IsStringABIType(T) then Result := 'string'
+  else if ABI_Type_Is_LF_Binary_Data(T) then Result := '[]byte'
   else Result := '';
 end;
 
@@ -200,6 +206,8 @@ function PlaceholderForType(const PascalType: TP_String): TP_String;
 begin
   if IsStringABIType(PascalType) then
     Result := '"test"'
+  else if ABI_Type_Is_LF_Binary_Data(PascalType) then
+    Result := '[]byte{0xA5, 0x5A, 0xA5, 0x5A}'
   else if PascalType.Same('double') or PascalType.Same('extended') or
     PascalType.Same('real') or PascalType.Same('single') then
     Result := '3.14'
@@ -667,6 +675,26 @@ begin
     Lines.Add(#9 + #9 + #9 + 'reportFail(label, r.err.Error())');
     Lines.Add(#9 + #9 + '} else {');
     Lines.Add(#9 + #9 + #9 + 'reportPass(fmt.Sprintf("%s = %v", label, r.value))');
+    Lines.Add(#9 + #9 + '}');
+    Lines.Add(#9 + 'case <-time.After(10 * time.Second):');
+    Lines.Add(#9 + #9 + 'reportFail(label, "timeout")');
+    Lines.Add(#9 + '}');
+    Lines.Add('}');
+    Lines.Add('');
+    Lines.Add('func asyncBytes(label string, dispatch func(cb func([]byte, error)) error) {');
+    Lines.Add(#9 + 'ch := make(chan callResult[[]byte], 1)');
+    Lines.Add(#9 + 'if err := dispatch(func(v []byte, e error) {');
+    Lines.Add(#9 + #9 + 'ch <- callResult[[]byte]{value: v, err: e}');
+    Lines.Add(#9 + '}); err != nil {');
+    Lines.Add(#9 + #9 + 'reportFail(label, err.Error())');
+    Lines.Add(#9 + #9 + 'return');
+    Lines.Add(#9 + '}');
+    Lines.Add(#9 + 'select {');
+    Lines.Add(#9 + 'case r := <-ch:');
+    Lines.Add(#9 + #9 + 'if r.err != nil {');
+    Lines.Add(#9 + #9 + #9 + 'reportFail(label, r.err.Error())');
+    Lines.Add(#9 + #9 + '} else {');
+    Lines.Add(#9 + #9 + #9 + 'reportPass(fmt.Sprintf("%s = <%d bytes>", label, len(r.value)))');
     Lines.Add(#9 + #9 + '}');
     Lines.Add(#9 + 'case <-time.After(10 * time.Second):');
     Lines.Add(#9 + #9 + 'reportFail(label, "timeout")');
