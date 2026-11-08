@@ -14,28 +14,18 @@ uses
 
 function GenerateABICallRubyCode(Model: TPascal_Func_Model): TPascalStringList;
 
-const
-  GenerateCode_LogEnabled: boolean = False;
-
 implementation
-
-procedure Log(const Msg: TP_String); overload;
-begin
-  if GenerateCode_LogEnabled then
-    DoStatus('[ruby_abi_call_generator] %s', [Msg.Text]);
-end;
-
-procedure Log(const Fmt: TP_String; const Args: array of const); overload;
-begin
-  if GenerateCode_LogEnabled then
-    DoStatus('[ruby_abi_call_generator] %s', [PFormat(Fmt, Args)]);
-end;
 
 function IsStringABIType(const T: TP_String): boolean;
 begin
   Result := T.Same('string') or T.Same('ansistring') or T.Same('unicodestring') or
     T.Same('tpascalstring') or T.Same('tupascalstring') or
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
+end;
+
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
 end;
 
 function ABI_Type_To_Ruby_Read_Func(const T: TP_String): TP_String;
@@ -68,9 +58,25 @@ begin
   else Result := '';
 end;
 
+function ABI_Type_To_Ruby_Read_Expr(const T, HandleVar: TP_String): TP_String;
+begin
+  if IsBytesABIType(T) then
+    Result := 'read_lf_binary_data(' + HandleVar + ')'
+  else
+    Result := HandleVar + '.' + ABI_Type_To_Ruby_Read_Func(T);
+end;
+
+function ABI_Type_To_Ruby_Write_Stmt(const T, HandleVar, ValueVar: TP_String): TP_String;
+begin
+  if IsBytesABIType(T) then
+    Result := 'write_lf_binary_data(' + HandleVar + ', ' + ValueVar + ')'
+  else
+    Result := HandleVar + '.' + ABI_Type_To_Ruby_Write_Func(T) + '(' + ValueVar + ')';
+end;
+
 function IsSupportedABIType(const T: TP_String): boolean;
 begin
-  Result := ABI_Type_To_Ruby_Read_Func(T) <> '';
+  Result := IsBytesABIType(T) or (ABI_Type_To_Ruby_Read_Func(T) <> '');
 end;
 
 function MakeApiName(const FuncName: TP_String): TP_String;
@@ -131,7 +137,9 @@ begin
      Result.Same('result') or Result.Same('status') or Result.Same('msg') or
      Result.Same('handle') or Result.Same('resp') or Result.Same('raw') or
      Result.Same('app') or Result.Same('tramp') or Result.Same('issue') or
-     Result.Same('deserialize') or Result.Same('ref_addr') or Result.Same('result_addr') then
+     Result.Same('deserialize') or Result.Same('ref_addr') or Result.Same('result_addr') or
+     Result.Same('v') or Result.Same('e') or Result.Same('n') or
+     Result.Same('bytes') or Result.Same('buf') or Result.Same('data') then
     Result := Result + '_param';
 end;
 
@@ -237,23 +245,14 @@ begin
       if not IsSupportedABIType(f.Params[j].PascalType) then
       begin
         Supported := False;
-        Log(PFormat('Skipped "%s": parameter "%s" has unsupported ABI type "%s"',
-          [f.Name.Text, f.Params[j].Name.Text, f.Params[j].PascalType.Text]));
         Break;
       end;
 
     if Supported and f.IsFunction and (not IsSupportedABIType(f.ReturnType)) then
-    begin
       Supported := False;
-      Log(PFormat('Skipped "%s": return type "%s" is not a supported ABI type',
-        [f.Name.Text, f.ReturnType.Text]));
-    end;
 
     if Supported and (f.Name.Len = 0) then
-    begin
       Supported := False;
-      Log('Skipped: routine with empty Name');
-    end;
 
     if Supported then
     begin
@@ -294,22 +293,41 @@ end;
 procedure EmitWriteParamStatements(Lines: TPascalStringList; const Params: TParamArray; const Indent: TP_String);
 var
   i: integer;
-  PName, WriteFn: TP_String;
+  PName: TP_String;
 begin
   for i := 0 to High(Params) do
   begin
     PName := MakeSafeRubyIdent(Params[i].Name, i);
-    WriteFn := ABI_Type_To_Ruby_Write_Func(Params[i].PascalType);
-    Lines.Add(Indent + 'param.' + WriteFn + '(' + PName + ')');
+    Lines.Add(Indent + ABI_Type_To_Ruby_Write_Stmt(Params[i].PascalType, 'param', PName));
   end;
 end;
 
-procedure EmitReadResponseFunction(Lines: TPascalStringList; const ApiName: TP_String; const F: TFunctionStructure);
-var
-  ReadFn: TP_String;
+procedure EmitWireHelpers(Lines: TPascalStringList);
 begin
-  ReadFn := ABI_Type_To_Ruby_Read_Func(F.ReturnType);
+  Lines.Add('    def handle_addr(h)');
+  Lines.Add('      r = h.raw');
+  Lines.Add('      return nil if r.nil?');
+  Lines.Add('      r.respond_to?(:to_i) ? r.to_i : r');
+  Lines.Add('    end');
+  Lines.Add('');
+  Lines.Add('    def write_lf_binary_data(h, data)');
+  Lines.Add('      bytes = data.nil? ? ' + #39 + #39 + '.b : data');
+  Lines.Add('      bytes = bytes.b unless bytes.encoding == Encoding::ASCII_8BIT');
+  Lines.Add('      h.write_int32(bytes.bytesize)');
+  Lines.Add('      h.write_bytes(bytes) if bytes.bytesize > 0');
+  Lines.Add('    end');
+  Lines.Add('');
+  Lines.Add('    def read_lf_binary_data(h)');
+  Lines.Add('      n = h.read_int32');
+  Lines.Add('      raise LingoFuse::IoError.new("invalid byte array length: #{n}", operation: ' + #39 + 'read_lf_binary_data' + #39 + ') if n < 0');
+  Lines.Add('      return ' + #39 + #39 + '.b if n == 0');
+  Lines.Add('      h.read_bytes_exact(n)');
+  Lines.Add('    end');
+  Lines.Add('');
+end;
 
+procedure EmitReadResponseFunction(Lines: TPascalStringList; const ApiName: TP_String; const F: TFunctionStructure);
+begin
   Lines.Add('    def read_' + ApiName + '_response(h)');
   Lines.Add('      h.position = 0');
   Lines.Add('      status = h.read_uint8');
@@ -322,7 +340,7 @@ begin
   Lines.Add('        end');
   Lines.Add('        raise LingoFuse::CallError.new("ABI call ' + ApiName + ' failed: #{msg}")');
   Lines.Add('      end');
-  Lines.Add('      h.' + ReadFn);
+  Lines.Add('      ' + ABI_Type_To_Ruby_Read_Expr(F.ReturnType, 'h'));
   Lines.Add('    end');
   Lines.Add('');
 end;
@@ -578,25 +596,16 @@ var
 begin
   Result := nil;
   if Model = nil then
-  begin
-    Log('GenerateABICallRubyCode: Model is nil');
     Exit;
-  end;
 
   UnitName := Model.UnitName;
   if UnitName.Len = 0 then
-  begin
-    Log('GenerateABICallRubyCode: UnitName is empty');
     Exit;
-  end;
 
   NormalizedUnit := MakeApiName(UnitName);
   TargetApp := NormalizedUnit + '_abi';
 
-  Log(PFormat('Generating Ruby ABI call for unit "%s"', [UnitName.Text]));
-
   SupportedFuncs := CollectSupportedFunctions(Model);
-  Log(PFormat('Call covers %d ABI APIs', [Length(SupportedFuncs)]));
 
   UsedApiNames := TPascalStringList.Create;
   Lines := TPascalStringList.Create;
@@ -613,12 +622,7 @@ begin
     Lines.Add('');
     Lines.Add('    module_function');
     Lines.Add('');
-    Lines.Add('    def handle_addr(h)');
-    Lines.Add('      r = h.raw');
-    Lines.Add('      return nil if r.nil?');
-    Lines.Add('      r.respond_to?(:to_i) ? r.to_i : r');
-    Lines.Add('    end');
-    Lines.Add('');
+    EmitWireHelpers(Lines);
 
     UsedApiNames.Clear;
     for i := 0 to High(SupportedFuncs) do
@@ -665,7 +669,6 @@ begin
     Lines.Add('');
 
     Result := Lines;
-    Log(PFormat('Generated %d lines for Ruby ABI call', [Lines.Count]));
   finally
     UsedApiNames.Free;
   end;
