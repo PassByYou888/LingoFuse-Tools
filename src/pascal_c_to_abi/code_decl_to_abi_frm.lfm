@@ -2090,6 +2090,7 @@ object code_decl_to_abi_form: Tcode_decl_to_abi_form
         end
       end
       object Final_source_PairSplitter: TPairSplitter
+        Cursor = crDefault
         Left = 0
         Height = 348
         Top = 25
