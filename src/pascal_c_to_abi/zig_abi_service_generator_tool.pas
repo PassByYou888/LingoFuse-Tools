@@ -39,6 +39,11 @@ begin
     or T.Same('pwidechar');
 end;
 
+function IsBytesABIType(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Zig_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then Result := 'i32'
@@ -50,14 +55,22 @@ begin
   else if T.Same('uint64') then Result := 'u64'
   else if T.Same('double') or T.Same('extended') or T.Same('real') then Result := 'f64'
   else if T.Same('single') then Result := 'f32'
-  else if IsStringABIType(T) then Result := '[]const u8'
+  else if IsStringABIType(T) or IsBytesABIType(T) then Result := '[]u8'
   else Result := '';
+end;
+
+function ABI_Type_To_Zig_Param_Decl(const T: TP_String): TP_String;
+begin
+  if IsStringABIType(T) or IsBytesABIType(T) then
+    Result := '[]const u8'
+  else
+    Result := ABI_Type_To_Zig_Decl(T);
 end;
 
 function ABI_Type_Default_Expr(const T: TP_String): TP_String;
 begin
-  if IsStringABIType(T) then
-    Result := '""'
+  if IsStringABIType(T) or IsBytesABIType(T) then
+    Result := 'std.heap.page_allocator.alloc(u8, 0) catch unreachable'
   else if T.Same('single') or T.Same('double') or T.Same('extended') or T.Same('real') then
     Result := '0.0'
   else
@@ -286,27 +299,51 @@ begin
   Lines.Add('');
 end;
 
+procedure EmitWireHelpers(Lines: TPascalStringList);
+begin
+  Lines.Add('fn lf_abi_write_blob(hnd: *lf.DataHandle, v: []const u8) lf.Error!void {');
+  Lines.Add('    if (v.len > 0x7FFFFFFF) return error.WriteFailed;');
+  Lines.Add('    try hnd.write(@as(i32, @intCast(v.len)));');
+  Lines.Add('    if (v.len > 0) try hnd.writeBytes(v);');
+  Lines.Add('}');
+  Lines.Add('');
+  Lines.Add('fn lf_abi_read_blob(hnd: *lf.DataHandle, alloc: std.mem.Allocator) lf.Error![]u8 {');
+  Lines.Add('    var n: i32 = 0;');
+  Lines.Add('    if (!try hnd.read(&n)) return error.ReadFailed;');
+  Lines.Add('    if (n < 0) return error.ReadFailed;');
+  Lines.Add('    const un: usize = @intCast(n);');
+  Lines.Add('    if (un == 0) return alloc.alloc(u8, 0) catch error.OutOfMemory;');
+  Lines.Add('    const buf = alloc.alloc(u8, un) catch return error.OutOfMemory;');
+  Lines.Add('    errdefer alloc.free(buf);');
+  Lines.Add('    const got = try hnd.readBytes(buf);');
+  Lines.Add('    if (got != un) return error.ReadFailed;');
+  Lines.Add('    return buf;');
+  Lines.Add('}');
+  Lines.Add('');
+end;
+
 procedure EmitInternalCallStub(Lines: TPascalStringList;
   const ApiName, ZigIdent: TP_String; const F: TFunctionStructure);
 var
   i: integer;
   ParamParts, IgnoreBody: TP_String;
-  ParamName, TypeDecl: TP_String;
+  ParamName, ParamTypeDecl, RetTypeDecl: TP_String;
 begin
   ParamParts := '_uid: lf.Uid, _p2p_name: []const u8';
   IgnoreBody := '    _ = _uid;' + #13#10 + '    _ = _p2p_name;';
   for i := 0 to High(F.Params) do
   begin
     ParamName := MakeSafeZigIdent(F.Params[i].Name, i);
-    TypeDecl := ABI_Type_To_Zig_Decl(F.Params[i].PascalType);
-    ParamParts := ParamParts + ', ' + ParamName + ': ' + TypeDecl;
+    ParamTypeDecl := ABI_Type_To_Zig_Param_Decl(F.Params[i].PascalType);
+    ParamParts := ParamParts + ', ' + ParamName + ': ' + ParamTypeDecl;
     IgnoreBody := IgnoreBody + #13#10 + '    _ = ' + ParamName + ';';
   end;
 
   if F.IsFunction then
   begin
+    RetTypeDecl := ABI_Type_To_Zig_Decl(F.ReturnType);
     Lines.Add('pub fn internal_call_' + ZigIdent + '(' + ParamParts + ') !' +
-      ABI_Type_To_Zig_Decl(F.ReturnType) + ' {');
+      RetTypeDecl + ' {');
     Lines.Add(IgnoreBody);
     Lines.Add('    return ' + ABI_Type_Default_Expr(F.ReturnType) + ';');
     Lines.Add('}');
@@ -341,6 +378,21 @@ begin
     Exit;
   end;
 
+  if IsBytesABIType(PascalType) then
+  begin
+    Lines.Add('    const ' + ParamName + ' = lf_abi_read_blob(in_, alloc) catch |e| {');
+    if HasOut then
+    begin
+      Lines.Add('        w_err(out_, ' + ZigStrLit('input truncated: ' + ParamName) + ');');
+      Lines.Add('        return e;');
+    end
+    else
+      Lines.Add('        return e;');
+    Lines.Add('    };');
+    Lines.Add('    defer alloc.free(' + ParamName + ');');
+    Exit;
+  end;
+
   Lines.Add('    var ' + ParamName + ': ' + TypeDecl + ' = ' +
     ABI_Type_Default_Expr(PascalType) + ';');
   Lines.Add('    if (!try in_.read(&' + ParamName + ')) {');
@@ -360,6 +412,8 @@ begin
   Lines.Add('    try out_.writeBytes(&[_]u8{STATUS_OK});');
   if IsStringABIType(PascalType) then
     Lines.Add('    try out_.writeString(' + VarName + ');')
+  else if IsBytesABIType(PascalType) then
+    Lines.Add('    try lf_abi_write_blob(out_, ' + VarName + ');')
   else
     Lines.Add('    try out_.write(' + VarName + ');');
 end;
@@ -370,8 +424,10 @@ var
   i: integer;
   IsCall: boolean;
   ParamName, ArgList: TP_String;
+  NeedsFree: boolean;
 begin
   IsCall := F.IsFunction;
+  NeedsFree := IsStringABIType(F.ReturnType) or IsBytesABIType(F.ReturnType);
 
   if IsCall then
     Lines.Add('fn callback_' + ZigIdent +
@@ -408,6 +464,8 @@ begin
     Lines.Add('        w_err(out_, @errorName(e));');
     Lines.Add('        return e;');
     Lines.Add('    };');
+    if NeedsFree then
+      Lines.Add('    defer alloc.free(result);');
     Lines.Add('');
     EmitWriteResultLines(Lines, 'result', F.ReturnType);
   end
@@ -543,6 +601,7 @@ begin
     Lines.Add('const STATUS_ERROR: u8 = 0xFF;');
     Lines.Add('');
     EmitErrorHelpers(Lines);
+    EmitWireHelpers(Lines);
 
     for i := 0 to High(SupportedFuncs) do
       EmitInternalCallStub(Lines, UsedApiNames[i], UsedZigIdents[i], SupportedFuncs[i]);
