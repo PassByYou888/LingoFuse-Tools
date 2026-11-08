@@ -39,6 +39,11 @@ begin
     T.Same('tp_string') or T.Same('pchar') or T.Same('pansichar') or T.Same('pwidechar');
 end;
 
+function ABI_Type_Is_LF_Binary_Data(const T: TP_String): boolean;
+begin
+  Result := T.Same('tbytes') or T.Same('array of byte') or T.Same('cbytes');
+end;
+
 function ABI_Type_To_Rust_Decl(const T: TP_String): TP_String;
 begin
   if T.Same('integer') or T.Same('longint') then
@@ -61,6 +66,8 @@ begin
     Result := 'f32'
   else if IsStringABIType(T) then
     Result := 'String'
+  else if ABI_Type_Is_LF_Binary_Data(T) then
+    Result := 'Vec<u8>'
   else
     Result := '';
 end;
@@ -115,10 +122,20 @@ begin
   Result.Append('"');
 end;
 
+function DescribeFuncName(const RetType: TP_String): TP_String;
+begin
+  if RetType = 'Vec<u8>' then
+    Result := 'describe_blob'
+  else
+    Result := 'describe_' + RetType;
+end;
+
 function PlaceholderArg(const ABIType: TP_String): TP_String;
 begin
   if IsStringABIType(ABIType) then
     Result := CStrLit('test')
+  else if ABI_Type_Is_LF_Binary_Data(ABIType) then
+    Result := '&[0xA5u8, 0x5Au8, 0xA5u8, 0x5Au8]'
   else if ABIType.Same('double') or ABIType.Same('single') or
           ABIType.Same('extended') or ABIType.Same('real') then
     Result := '0.0'
@@ -232,7 +249,7 @@ begin
   if IsFunction then
   begin
     Lines.Add('    match ' + FullCall + ' {');
-    Lines.Add('        Ok(v) => report_pass(' + CStrLit(Label_) + ', Some(describe_' + RetType + '(v))),');
+    Lines.Add('        Ok(v) => report_pass(' + CStrLit(Label_) + ', Some(' + DescribeFuncName(RetType) + '(v))),');
     Lines.Add('        Err(e) => report_fail(' + CStrLit(Label_) + ', &format!("{}", e)),');
     Lines.Add('    }');
   end
@@ -261,7 +278,7 @@ begin
   Lines.Add('        let (tx, rx) = mpsc::channel::<Result<' + RetType + ', Error>>();');
   Lines.Add('        match call::' + FuncName + '(' + FullArgs + ') {');
   Lines.Add('            Ok(()) => match rx.recv_timeout(Duration::from_secs(10)) {');
-  Lines.Add('                Ok(Ok(v)) => report_pass(' + CStrLit(Label_) + ', Some(describe_' + RetType + '(v))),');
+  Lines.Add('                Ok(Ok(v)) => report_pass(' + CStrLit(Label_) + ', Some(' + DescribeFuncName(RetType) + '(v))),');
   Lines.Add('                Ok(Err(e)) => report_fail(' + CStrLit(Label_) + ', &format!("{}", e)),');
   Lines.Add('                Err(_) => report_fail(' + CStrLit(Label_) + ', "timeout"),');
   Lines.Add('            },');
@@ -371,6 +388,10 @@ begin
       if IsStringABIType(SupportedFuncs[i].ReturnType) then
       begin
         Lines.Add('fn describe_' + T + '(v: ' + T + ') -> String { v }');
+      end
+      else if ABI_Type_Is_LF_Binary_Data(SupportedFuncs[i].ReturnType) then
+      begin
+        Lines.Add('fn describe_blob(v: Vec<u8>) -> String { format!("<{} bytes>", v.len()) }');
       end
       else
       begin
