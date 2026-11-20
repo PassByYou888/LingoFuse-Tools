@@ -8,7 +8,7 @@
 > - **原 v6.0 附录 E「诚实的不确定清单」的 20 条全部核对完毕**，结论直接并入正文相应章节；v7.0 **不再保留任何"不确定"标记**。
 > - **新增 3 条实测发现的陷阱**（`LF-LOCAL-001`、`LF-SEQ-003`、`LF-ROUTE-012`），并修正 v6.0 的两处描述偏差。
 > - **全部 API 机理深度保留**，所有源码级引用、示例代码、Mermaid 图、选项详解、状态系统、内存管理均**完整保留并扩充**。
-> - **踩坑知识库扩充至 95 条 ID**。
+> - **踩坑知识库扩充至 97 条 ID**。
 >
 > **证据等级约定**：
 > - 🟢 **已核实源码** — 在 `lingofuse_import.pas`、`lingofuse_helper.pas`、`Z.LingoFuse_Export.pas`、`Z.LingoFuse_Core.pas`、`Z.Net.C4.LingoFuse.pas`、`LingoFuse.lpr`、`Z.LingoFuse.md`、`LingoFuse.h`、`LingoFuse.hpp`、`LingoFuse.c`、`test_lingofuse*.c*` 中有直接依据
@@ -109,7 +109,7 @@ flowchart TD
     style L0 fill:#ffe6e6,stroke:#a00
 ```
 
-### 0.5 20 条硬规则
+### 0.5 22 条硬规则
 
 1. **回调必须 `cdecl`**（或 `of object` / `is nested` 对应变体）。
 2. **托管语言回调必须保持强引用**（否则 GC 回收后崩溃）。
@@ -3047,7 +3047,7 @@ flowchart TB
 
 - **症状**：名字缺少隧道地址和 RemoteID；服务端刷屏 `no found app`；客户端收不到消息。
 - **根因**：需要拼接隧道信息，`LF_PrepareDone` 之前不存在。
-- **修复**：见 §3.2.5 时序。
+- **修复**：见 §5.2.3（`LF_Generate_AppName`）与 §3.1 初始化顺序。
 - **相关坑**：`LF-XLANG-001`、`LF-NET-003`
 
 **LF-APP-004：`LF_Generate_AppName` / `LF_Get_AppName` 返回指针 5 秒失效**（🟢）
@@ -3444,7 +3444,7 @@ flowchart TB
 | `LF-ROUTE` | **12** | 路由与寻址（v7.0 新增 LF-ROUTE-012） |
 | `LF-ASYNC` | 8 | 异步调用与 Handle 所有权 |
 | **`LF-LOCAL`** | **1** | **本地调用（v7.0 新增）** |
-| **合计** | **95** | （v6.0 为 92；v7.0 新增 3 条） |
+| **合计** | **97** | （v6.0 为 94；v7.0 新增 3 条） |
 
 ### B.2 维护约定
 
@@ -3595,4 +3595,4 @@ flowchart TB
   - **所有 Mermaid 图完整保留**：三层结构、生命周期状态机、数据句柄状态机、三套寻址概览、路由不对称、异步 Handle 时序、跨语言 P2PName 时序、路由优化两级图等。
   - **所有代码示例完整保留**：初始化顺序、whoami 模式、本地调用、UID 定向、P2PName 分组、网络事件、选项设置等。
   - **所有选项深度展开**：16 个选项的完整内部机理、生效时机、别名、推荐值。
-  - **完整踩坑知识库**：95 条 ID，每条含症状、根因、修复、相关坑。
+  - **完整踩坑知识库**：97 条 ID，每条含症状、根因、修复、相关坑。
