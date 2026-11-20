@@ -1,3 +1,5 @@
+> English version: [readme_en.md](readme_en.md)
+
 # LingoFuse-Tools
 
 > **一份 Pascal 单元或一个 C 头文件，铺开整条跨语言接口线。**
