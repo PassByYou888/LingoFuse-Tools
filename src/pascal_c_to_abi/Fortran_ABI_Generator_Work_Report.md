@@ -1,3 +1,5 @@
+> English version: [Fortran_ABI_Generator_Work_Report_en.md](Fortran_ABI_Generator_Work_Report_en.md)
+
 # Fortran ABI 生成器工作总结报告
 
 > **文档定位**：记录本次为 `code_decl_to_abi` 工具链新增 Fortran 语言支持的完整工作过程、架构决策、交付物、调试修复记录与未覆盖范围。
