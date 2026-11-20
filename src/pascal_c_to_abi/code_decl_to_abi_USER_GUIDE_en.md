@@ -161,7 +161,7 @@ Both tools share the same input format, intermediate model and type system; they
 
 ### 3.1 Current status
 
-The tool currently ships **17 target languages**; each has a service side, a caller side, test programs and a set of `setup_*_tests.ps1` environment initialization scripts.
+The tool currently ships **17 target languages**, each with a service side, a caller side and test programs; 13 of them additionally ship `setup_*_tests.ps1` environment initialization scripts, while Pascal / Python / C# rely on their test unit or module entry point and C++ relies on `CMakeLists.txt` for the build.
 
 | # | Target language | `--lang` ID | Service | Caller | Test programs | Setup script | Ecosystem build files |
 |---|----------|------------|:-------:|:------:|:---------:|:----------:|--------------|
