@@ -26,7 +26,7 @@
 >
 > A single `Generate` call now produces the code for **every target language** in one shot, plus the CMake build scripts and the C++ test driver.
 >
-> **The extra content in this Chinese expanded edition** — on top of the English original v3: the complete language support matrix (covering all 20+ target languages registered in the `.lpr`), the artifact list and example file names for each target language, a behavior description for each generator unit, the bridge program's lifecycle and the three process layouts in detail, more troubleshooting entries, more complete MCP tool call examples, minimal and complete embedding examples of the programmatic interface, a quick reference for error codes and exception types, a glossary, **build and deployment in practice**, **a complete walkthrough of a typical workflow**, and **a cross-reference of interface-contract sources**. This edition is **substantially larger** than the English original.
+> **The extra content in this Chinese expanded edition** — on top of the English original v3: the complete language support matrix (covering all 20 target languages registered in the `.lpr`), the artifact list and example file names for each target language, a behavior description for each generator unit, the bridge program's lifecycle and the three process layouts in detail, more troubleshooting entries, more complete MCP tool call examples, minimal and complete embedding examples of the programmatic interface, a quick reference for error codes and exception types, a glossary, **build and deployment in practice**, **a complete walkthrough of a typical workflow**, and **a cross-reference of interface-contract sources**. This edition is **substantially larger** than the English original.
 
 ---
 
@@ -84,6 +84,7 @@
 - [Appendix F — Cross-reference of interface-contract sources](#appendix-f--cross-reference-of-interface-contract-sources)
 - [Appendix G — Quick reference for artifact file suffixes by target language](#appendix-g--quick-reference-for-artifact-file-suffixes-by-target-language)
 - [Appendix H — Glossary](#appendix-h--glossary)
+- [Appendix I — One-sentence summary of each usage mode](#appendix-i--one-sentence-summary-of-each-usage-mode)
 
 ---
 
@@ -124,7 +125,7 @@ You give it one Pascal unit (`.pas` / `.pp` / `.p`) or one C header (`.h` / `.hp
 
 ### 1.3 Which target languages are supported
 
-The target languages actually registered by this toolchain (per the `uses` list in the `.lpr` file) cover the following 20+:
+The target languages actually registered by this toolchain (per the `uses` list in the `.lpr` file) cover the following 20:
 
 | # | Target language | Service | Caller | Test programs | Build scripts | Notes |
 |:-:|----------|:------:|:------:|:--------:|:--------:|------|
