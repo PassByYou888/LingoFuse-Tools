@@ -1,3 +1,5 @@
+> English version: [Why_Pascal_For_Code_Generators_en.md](Why_Pascal_For_Code_Generators_en.md)
+
 # 为什么用 Pascal 开发代码生成器
 
 > **文档定位**：说明 `code_decl_to_abi` 等 LingoFuse 工具链项目选择 Pascal（Free Pascal / Delphi）作为实现语言的真实原因。面向对工具链选型有疑问的工程师、维护者与决策者。
