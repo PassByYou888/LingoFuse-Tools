@@ -1,3 +1,5 @@
+> English version: [code_decl_to_abi_USER_GUIDE_en.md](code_decl_to_abi_USER_GUIDE_en.md)
+
 # code_decl_to_abi — User Guide
 
 > **Purpose**: `code_decl_to_abi` 的端到端用户指南。覆盖完整工作流，按实际操作顺序编排：
