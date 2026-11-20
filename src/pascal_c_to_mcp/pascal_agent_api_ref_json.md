@@ -1,3 +1,5 @@
+> English version: [pascal_agent_api_ref_json_en.md](pascal_agent_api_ref_json_en.md)
+
 以下是一个**完整且独立**的 JSON 示范，它同时涵盖了 **`agent_main` 返回的完整工具列表结构** 和 **`register_agent` 注册时使用的单个工具结构**。我将两者结合在一个完整示例中，并逐字段给出详细说明。
 
 ---
