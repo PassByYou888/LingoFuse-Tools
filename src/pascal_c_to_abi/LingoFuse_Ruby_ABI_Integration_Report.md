@@ -623,4 +623,4 @@ ruby -I "D:\CoreLibrary\LingoFuse\ruby\lib" -I "." ComplexTestUnit_abi_call_test
 | **遗留问题** | 🟡 `p2p_registration.rb` 缺 `NativeBridge.start`（可绕过） |
 | **建议后续** | 验证 Ruby ↔ Pascal / C++ / Rust 的直接互通 |
 
-本次集成工作完成了从 Pascal / C 源码到 Ruby service / call 的完整代码生成链路，并通过了跨语言互通的实测验证（Pascal → Ruby）。生成的代码与现有的 C++ / Rust / Python / C# / Java / Node.js / TypeScript / Erlang / Julia / Zig / Swift 生成器保持完全一致的 wire protocol，具备 **18+ 种语言互调** 的能力。
+本次集成工作完成了从 Pascal / C 源码到 Ruby service / call 的完整代码生成链路，并通过了跨语言互通的实测验证（Pascal → Ruby）。生成的代码与现有的 C++ / Rust / Python / C# / Java / Node.js / TypeScript / Erlang / Julia / Zig / Swift 生成器保持完全一致的 wire protocol，具备 **14 种语言互调** 的能力。
