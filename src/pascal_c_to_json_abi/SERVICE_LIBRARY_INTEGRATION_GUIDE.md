@@ -26,7 +26,7 @@
 >
 > **关于语言支持的三个重要事实**：
 >
-> 1. **Service 侧必须用 LingoFuse 原生库**。所有 16+ 种支持 Service 的语言（Pascal / Python / C++ / C# / Node.js / TypeScript / Rust / Go / Java / Dart / Swift / Ruby / Zig / Erlang / Fortran / Julia / R）都依赖 LingoFuse 原生库。
+> 1. **Service 侧必须用 LingoFuse 原生库**。所有 17 种支持 Service 的语言（Pascal / Python / C++ / C# / Node.js / TypeScript / Rust / Go / Java / Dart / Swift / Ruby / Zig / Erlang / Fortran / Julia / R）都依赖 LingoFuse 原生库。
 > 2. **三种语言没有 Service 侧**：JavaScript（浏览器）、PHP、Delphi。这三种语言只能做 Call。
 > 3. **平台支持受 LingoFuse 原生库限制**：Windows / Linux / macOS（桌面 / 服务器）。**不支持 iOS / Android / WASM / 嵌入式**——即使语言本身支持这些平台。
 
@@ -211,7 +211,7 @@ ipc:<UnitName>_http_json
 
 ## 3. Service 的三件套初始化
 
-所有 16+ 种语言的 Service 侧都遵循同一个初始化模式：
+所有 17 种语言的 Service 侧都遵循同一个初始化模式：
 
 ```
 第 1 步：prepareService(endpoint, endpoint)
