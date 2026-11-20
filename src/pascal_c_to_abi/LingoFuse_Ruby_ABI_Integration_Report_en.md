@@ -623,4 +623,4 @@ ruby -I "D:\CoreLibrary\LingoFuse\ruby\lib" -I "." ComplexTestUnit_abi_call_test
 | **Remaining issues** | 🟡 `p2p_registration.rb` lacks `NativeBridge.start` (can be worked around) |
 | **Suggested follow-up** | Verify direct interoperability of Ruby ↔ Pascal / C++ / Rust |
 
-This integration completes the full code generation chain from Pascal / C source to Ruby service / call, and has passed measured cross-language interoperability verification (Pascal → Ruby). The generated code keeps a wire protocol fully consistent with the existing C++ / Rust / Python / C# / Java / Node.js / TypeScript / Erlang / Julia / Zig / Swift generators, giving it the capability of **18+ languages calling each other**.
+This integration completes the full code generation chain from Pascal / C source to Ruby service / call, and has passed measured cross-language interoperability verification (Pascal → Ruby). The generated code keeps a wire protocol fully consistent with the existing C++ / Rust / Python / C# / Java / Node.js / TypeScript / Erlang / Julia / Zig / Swift generators, giving it the capability of **14 languages calling each other**.
