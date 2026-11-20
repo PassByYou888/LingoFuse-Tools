@@ -1,3 +1,5 @@
+> English version: [Dart_ABI_Generators_Fix_Report_en.md](Dart_ABI_Generators_Fix_Report_en.md)
+
 # Dart ABI Generators Fix Report
 
 > **文档定位**：记录本轮对 `code_decl_to_abi` 工具链中 Dart 语言生成器的完整修正工作。
