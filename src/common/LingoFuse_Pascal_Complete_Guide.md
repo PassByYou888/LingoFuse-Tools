@@ -1,3 +1,5 @@
+> English version: [LingoFuse_Pascal_Complete_Guide_en.md](LingoFuse_Pascal_Complete_Guide_en.md)
+
 # LingoFuse Pascal 完整指南（v7.0 · 全确定完整版）
 
 > **定位**：面向 AI 与人类开发者的**权威参考**，同时是**学习指南**、**API 详细参考**、**路由机制详解**、**Handle 所有权模型**、**P2P 分布式负载概念**、**跨语言集成指南**和**踩坑知识库**。
