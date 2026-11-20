@@ -26,7 +26,7 @@
 >
 > **Three important facts about language support**:
 >
-> 1. **The Service side must use the LingoFuse native library.** All 16+ languages that support the Service side (Pascal / Python / C++ / C# / Node.js / TypeScript / Rust / Go / Java / Dart / Swift / Ruby / Zig / Erlang / Fortran / Julia / R) depend on the LingoFuse native library.
+> 1. **The Service side must use the LingoFuse native library.** All 17 languages that support the Service side (Pascal / Python / C++ / C# / Node.js / TypeScript / Rust / Go / Java / Dart / Swift / Ruby / Zig / Erlang / Fortran / Julia / R) depend on the LingoFuse native library.
 > 2. **Three languages have no service side**: JavaScript (browser), PHP and Delphi. Those three can only be Call.
 > 3. **Platform support is limited by the LingoFuse native library**: Windows / Linux / macOS (desktop / server). **iOS / Android / WASM / embedded are not supported** — even if the language itself supports those platforms.
 
@@ -213,7 +213,7 @@ ipc:<UnitName>_http_json
 
 ## 3. The Service's three-piece initialization
 
-All 16+ languages' service sides follow the same initialization pattern:
+All 17 languages' service sides follow the same initialization pattern:
 
 ```
 Step 1: prepareService(endpoint, endpoint)
