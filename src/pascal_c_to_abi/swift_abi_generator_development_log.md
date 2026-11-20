@@ -1,3 +1,5 @@
+> English version: [swift_abi_generator_development_log_en.md](swift_abi_generator_development_log_en.md)
+
 # Swift ABI 代码生成器开发日志
 
 > **文档定位**：本文档记录 `code_decl_to_abi` 工具链新增 Swift 语言后端的完整开发过程，包括设计决策、交付清单、逐轮 bug 修复记录、验证结果。面向后续维护者与 AI 助手。
