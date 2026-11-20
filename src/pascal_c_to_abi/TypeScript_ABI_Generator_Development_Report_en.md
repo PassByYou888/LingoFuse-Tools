@@ -13,7 +13,7 @@
 
 ### 1.1 Background
 
-The `code_decl_to_abi` tool chain already provided complete ABI generators for 4 languages:
+The `code_decl_to_abi` tool chain already provided complete ABI generators for 3 languages:
 
 | Language | Service | Call | Test | Build script |
 |------|:-------:|:----:|:----:|:-------:|
