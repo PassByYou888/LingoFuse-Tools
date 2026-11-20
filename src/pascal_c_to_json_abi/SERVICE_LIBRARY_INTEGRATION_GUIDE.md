@@ -1,3 +1,5 @@
+> English version: [SERVICE_LIBRARY_INTEGRATION_GUIDE_en.md](SERVICE_LIBRARY_INTEGRATION_GUIDE_en.md)
+
 # SERVICE 库接入方法指南
 
 > 本文档给出 **每种目标语言** 对 **Service 库（服务侧）** 的接入方法。
