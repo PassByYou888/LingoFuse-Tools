@@ -1,3 +1,5 @@
+> English version: [code_decl_to_json_abi_USER_GUIDE_en.md](code_decl_to_json_abi_USER_GUIDE_en.md)
+
 # code_decl_to_json_abi 用户指南（v3·中文扩展版，无 Markdown 产物）
 
 > **文档定位** — 本文档是 `code_decl_to_json_abi` 工具链的**面向用户的操作手册**。它覆盖：GUI、CLI、MCP 三前端操作，程序化接口，全部目标语言的支持矩阵与产物清单，桥接程序的全局前提，接口契约的获取方式，构建与部署实战，常见问题与故障排查。
