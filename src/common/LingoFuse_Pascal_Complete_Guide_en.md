@@ -8,7 +8,7 @@
 > - **All 20 items of the former v6.0 Appendix E "honest uncertainty list" have been verified**, and the conclusions are merged directly into the relevant chapters; v7.0 **keeps no "uncertain" markers at all**.
 > - **3 newly measured pitfalls were added** (`LF-LOCAL-001`, `LF-SEQ-003`, `LF-ROUTE-012`), and two descriptive inaccuracies in v6.0 were corrected.
 > - **All API mechanics are retained in depth**; every source-level citation, example code fragment, Mermaid diagram, option explanation, state system and memory-management detail is **fully retained and expanded**.
-> - **The pitfall knowledge base was expanded to 95 IDs**.
+> - **The pitfall knowledge base was expanded to 97 IDs**.
 >
 > **Evidence level convention**:
 > - 🟢 **source-verified** — directly supported by `lingofuse_import.pas`, `lingofuse_helper.pas`, `Z.LingoFuse_Export.pas`, `Z.LingoFuse_Core.pas`, `Z.Net.C4.LingoFuse.pas`, `LingoFuse.lpr`, `Z.LingoFuse.md`, `LingoFuse.h`, `LingoFuse.hpp`, `LingoFuse.c`, `test_lingofuse*.c*`
@@ -109,7 +109,7 @@ flowchart TD
     style L0 fill:#ffe6e6,stroke:#a00
 ```
 
-### 0.5 The 20 hard rules
+### 0.5 The 22 hard rules
 
 1. **Callbacks must be `cdecl`** (or the corresponding `of object` / `is nested` variants).
 2. **Callbacks in managed languages must be kept strongly referenced** (otherwise the GC collects them and you crash).
@@ -3047,7 +3047,7 @@ flowchart TB
 
 - **Symptom**: the name lacks the tunnel address and RemoteID; the server spams `no found app`; the client receives no messages.
 - **Root cause**: it needs the tunnel information concatenated, which does not exist before `LF_PrepareDone`.
-- **Fix**: see the sequence in §3.2.5.
+- **Fix**: see §5.2.3 (`LF_Generate_AppName`) and the initialization order in §3.1.
 - **Related pitfalls**: `LF-XLANG-001`, `LF-NET-003`
 
 **LF-APP-004: the pointer returned by `LF_Generate_AppName` / `LF_Get_AppName` becomes invalid after 5 seconds** (🟢)
@@ -3444,7 +3444,7 @@ flowchart TB
 | `LF-ROUTE` | **12** | routing and addressing (LF-ROUTE-012 added in v7.0) |
 | `LF-ASYNC` | 8 | async calls and handle ownership |
 | **`LF-LOCAL`** | **1** | **local calls (added in v7.0)** |
-| **Total** | **95** | (92 in v6.0; 3 added in v7.0) |
+| **Total** | **97** | (94 in v6.0; 3 added in v7.0) |
 
 ### B.2 Maintenance conventions
 
@@ -3595,4 +3595,4 @@ flowchart TB
   - **every Mermaid diagram is fully retained**: the three-layer structure, lifecycle state machine, data handle state machine, the three addressing overview, routing asymmetry, async handle timing, cross-language P2PName timing, the two-level route-optimization diagram etc.
   - **every code example is fully retained**: initialization order, whoami pattern, local calls, UID targeting, P2PName grouping, network events, option settings etc.
   - **every option is expanded in depth**: the full internal mechanics, effective time, aliases and recommended values of 16 options.
-  - **a complete pitfall knowledge base**: 95 IDs, each with symptoms, root cause, fix and related pitfalls.
+  - **a complete pitfall knowledge base**: 97 IDs, each with symptoms, root cause, fix and related pitfalls.
