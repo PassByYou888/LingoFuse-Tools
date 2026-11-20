@@ -1,3 +1,5 @@
+> English version: [LingoFuse_JS_Async_Generator_Fix_Knowledge_Base_en.md](LingoFuse_JS_Async_Generator_Fix_Knowledge_Base_en.md)
+
 # LingoFuse JavaScript Async Generator Fix — 完整知识库
 
 **版本**: 1.0
