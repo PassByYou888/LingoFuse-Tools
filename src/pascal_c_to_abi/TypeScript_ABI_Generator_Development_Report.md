@@ -1,3 +1,5 @@
+> English version: [TypeScript_ABI_Generator_Development_Report_en.md](TypeScript_ABI_Generator_Development_Report_en.md)
+
 # TypeScript ABI Generator Development Report
 
 **版本**：1.0
