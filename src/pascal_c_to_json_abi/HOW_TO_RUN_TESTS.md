@@ -1,3 +1,5 @@
+> English version: [HOW_TO_RUN_TESTS_en.md](HOW_TO_RUN_TESTS_en.md)
+
 # 各语言测试方法指南
 
 > 本文档给出 **每种目标语言** 的测试运行方法。
