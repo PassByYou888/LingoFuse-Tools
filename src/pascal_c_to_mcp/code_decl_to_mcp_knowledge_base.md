@@ -41,9 +41,9 @@
 - [17. Twenty-Five Self-Test Questions](#17-twenty-five-self-test-questions)
 
 **Appendices**
-- [A. Precise Symbol Index](#a-precise-symbol-index)
-- [B. Constants and Defaults Master Table](#b-constants-and-defaults-master-table)
-- [C. Honest Uncertainty List](#c-honest-uncertainty-list)
+- [A. Precise Symbol Index](#appendix-a--precise-symbol-index)
+- [B. Constants and Defaults Master Table](#appendix-b--constants-and-defaults-master-table)
+- [C. Honest Uncertainty List](#appendix-c--honest-uncertainty-list)
 
 ---
 
