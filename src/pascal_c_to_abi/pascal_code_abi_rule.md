@@ -1,3 +1,5 @@
+> English version: [pascal_code_abi_rule_en.md](pascal_code_abi_rule_en.md)
+
 # Pascal 声明编写规则（ABI 工具链）
 
 **定位**：这是一份**编写指南**，不是源码解读。按本文写，声明就能被正确提取并生成；不按本文写，声明会被**静默跳过**（无错误、无警告，只在报告里留一行原因）。
