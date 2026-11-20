@@ -1,3 +1,5 @@
+> English version: [LingoFuse_Ruby_ABI_Integration_Report_en.md](LingoFuse_Ruby_ABI_Integration_Report_en.md)
+
 # LingoFuse Ruby ABI 集成工作总结
 
 > **文档定位**：记录本次为 `code_decl_to_abi` 工具链新增 Ruby 语言 ABI 生成支持的全过程，包括交付物、基础库修复、关键设计决策、测试验证结果以及遗留问题。
