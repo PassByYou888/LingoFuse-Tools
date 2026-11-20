@@ -1,3 +1,5 @@
+> English version: [code_decl_to_abi_TESTING_GUIDE_en.md](code_decl_to_abi_TESTING_GUIDE_en.md)
+
 # code_decl_to_abi — 各语言测试方法指南
 
 > **文档定位**: 本文件说明 `code_decl_to_abi` 生成的测试程序在 17 种目标语言中如何准备环境、启动、运行与验证。
