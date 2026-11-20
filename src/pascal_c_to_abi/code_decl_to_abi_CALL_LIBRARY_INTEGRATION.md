@@ -1,3 +1,5 @@
+> English version: [code_decl_to_abi_CALL_LIBRARY_INTEGRATION_en.md](code_decl_to_abi_CALL_LIBRARY_INTEGRATION_en.md)
+
 # code_decl_to_abi — 各语言 Call 库接入指南
 
 > **文档定位**: 详细说明 `code_decl_to_abi` 生成的 **Call 库**（调用侧）在 17 种目标语言中的接入方式，涵盖每个库支持的调用变体、异步能力、开发平台要求、操作系统支持、依赖包、安装方式、最小接入代码与关键注意事项。
