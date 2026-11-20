@@ -161,7 +161,7 @@ JSON 在发送端需要 `IntToStr`/`FloatToStr`/转义/拼接，在接收端需�
 
 ### 3.1 当前状态
 
-工具当前随附 **17 种目标语言**，每种均含 service 侧、caller 侧、测试程序与一套 `setup_*_tests.ps1` 环境初始化脚本。
+工具当前随附 **17 种目标语言**，均含 service 侧、caller 侧与测试程序；其中 13 种另配 `setup_*_tests.ps1` 环境初始化脚本，Pascal / Python / C# 由 test unit 或模块自带入口，C++ 由 `CMakeLists.txt` 承担构建。
 
 | # | 目标语言 | `--lang` ID | Service | Caller | Test 程序 | Setup 脚本 | 生态构建文件 |
 |---|----------|------------|:-------:|:------:|:---------:|:----------:|--------------|
