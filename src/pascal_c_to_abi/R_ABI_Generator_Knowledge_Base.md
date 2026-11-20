@@ -1,3 +1,5 @@
+> English version: [R_ABI_Generator_Knowledge_Base_en.md](R_ABI_Generator_Knowledge_Base_en.md)
+
 # LingoFuse R ABI 代码生成器完整知识库
 
 > **定位**：面向 AI 与人类维护者的权威参考。读完本文档，可以完整掌握 LingoFuse 的 R 语言 ABI 代码生成器的设计、实现、踩坑、验证与边界。
