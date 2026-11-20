@@ -1,3 +1,5 @@
+> English version: [code_decl_to_abi_SERVICE_LIBRARY_INTEGRATION_en.md](code_decl_to_abi_SERVICE_LIBRARY_INTEGRATION_en.md)
+
 # code_decl_to_abi — 各语言 Service 库接入指南
 
 > **文档定位**: 详细说明 `code_decl_to_abi` 生成的 **Service 库**（服务侧）在 17 种目标语言中的接入方式，涵盖 library 的职责、生命周期、回调线程模型、每个语言的 API 表面、开发平台要求、操作系统支持、最小接入代码、以及与 Call 库的协作注意事项。
