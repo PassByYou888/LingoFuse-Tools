@@ -50,7 +50,7 @@ All three tables below **rely solely on the generator files in the repository's 
 |---|:---:|:---:|:---:|:---:|
 | Pascal | ✅ | ✅ | ✅ | — |
 | Python | ✅ | ✅ | ✅ | — |
-| C++ | ✅ | ✅ | — | ✅ (CMake) |
+| C++ | ✅ | ✅ | ✅ | — (handled by `CMakeLists.txt`) |
 | C# | ✅ | ✅ | ✅ | — |
 | Rust | ✅ | ✅ | ✅ | ✅ |
 | Go | ✅ | ✅ | ✅ | ✅ |
